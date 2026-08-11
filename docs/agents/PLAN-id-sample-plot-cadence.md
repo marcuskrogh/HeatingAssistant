@@ -71,7 +71,7 @@
 - Task: SWD-318
 - Sub-tasks: —
 - Branch: cursor/swd-318-id-sample-plot-cadence-2dd4
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/603
 - Classification: bug
 - Workflow: fix-fast
 
