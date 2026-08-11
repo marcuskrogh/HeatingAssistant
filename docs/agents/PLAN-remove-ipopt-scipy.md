@@ -64,9 +64,9 @@
 - Task: SWD-315
 - Sub-tasks: —
 - Branch: `cursor/swd-315-remove-ipopt-scipy-a072`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/599
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-315` — Build SciPy-only estimation per PLAN.md
+`/review-fix SWD-315` — focused review after implement verify

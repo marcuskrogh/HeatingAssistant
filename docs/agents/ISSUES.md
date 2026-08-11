@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | In Progress | — | docs/agents/PLAN-remove-ipopt-scipy.md | `/implement SWD-315` |
+| SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | In Review | — | docs/agents/PLAN-remove-ipopt-scipy.md | `/review-fix SWD-315` |
 | SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
 | SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-313 | Sub-task | Consumer docs update/delete | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
@@ -69,6 +69,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — `/implement` SWD-315: SciPy-only estimation; PR https://github.com/marcuskrogh/HeatingAssistant/pull/599; Next `/review-fix SWD-315`.
 - 2026-08-11 — `/define` SWD-315: remove IPOPT from parameter estimation (SciPy L-BFGS-B only); PLAN `docs/agents/PLAN-remove-ipopt-scipy.md`; branch `cursor/swd-315-remove-ipopt-scipy-a072`; delta-fast; Next `/implement SWD-315`.
 - 2026-08-11 — shipped SWD-311 via PR #598 (`ebb8aae`): App-first README + docs cleanup; HACS removed; review-fix CLEAN.
 
