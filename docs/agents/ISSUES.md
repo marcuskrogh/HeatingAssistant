@@ -69,6 +69,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — `/define` SWD-320: resolve_history(horizon) merges id_history JSONL (Option A); PLAN `docs/agents/PLAN-resolve-history-horizon-jsonl.md`; bug/fix-fast; branch `cursor/swd-320-resolve-history-horizon-jsonl-2dd4`; Next `/implement SWD-320`.
+- 2026-08-11 — `/research` SWD-319: load-path defect + write asymmetry code-proven; artifact `docs/agents/RESEARCH-estimation-history-hole.md`; Next `/define SWD-320`.
+- 2026-08-11 — `/explore` SWD-316: estimation history hole while plots + control OK; route SWD-319/320/318/317.
 - 2026-08-11 — shipped SWD-315 via PR #599 (`0397afa`): SciPy-only parameter estimation (remove IPOPT/cyipopt path); review-fix CLEAN.
 - 2026-08-11 — SWD-315 review-fix CLEAN (focused): SciPy-only estimation; deferred MPC legacy IPOPT labels in slow perf harness; Next `/ship SWD-315`.
 - 2026-08-11 — `/implement` SWD-315: SciPy-only estimation; PR https://github.com/marcuskrogh/HeatingAssistant/pull/599; Next `/review-fix SWD-315`.
