@@ -69,9 +69,9 @@
 - Task: SWD-311
 - Sub-tasks: SWD-312, SWD-313, SWD-314
 - Branch: `cursor/swd-311-app-first-docs-75fa`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/598
 - Classification: refine
 - Workflow: structure-safe
 
 ## Next
-`/ship SWD-311` — review-fix CLEAN; merge and closeout
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598

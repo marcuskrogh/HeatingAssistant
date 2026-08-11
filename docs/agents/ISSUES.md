@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Review | — | docs/agents/PLAN-app-first-docs.md | `/ship SWD-311` |
+| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Review | — | docs/agents/PLAN-app-first-docs.md | Done — merging PR #598 |
 | SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-313 | Sub-task | Consumer docs update/delete | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-314 | Sub-task | Maintainer docs + cleanup + remove HACS | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
@@ -68,6 +68,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — SWD-311 review-fix CLEAN (focused): THEORY App paths, App README `../docs/` links, ISSUES archived artifacts; Next `/ship SWD-311`.
 - 2026-08-11 — `/ship` SWD-311: App-first README + docs cleanup; remove HACS; purge leftover roadmaps; branch `cursor/swd-311-app-first-docs-75fa`.
 - 2026-08-11 — shipped SWD-307 via PR #597 (`022c9e8`): calendar versioning `YYYY.MM.PATCH`; v2026.08.0; CI green. Rebuild App on HAOS to pick up the new version stamp.
 - 2026-08-11 — SWD-307 review-fix CLEAN on PR #597; calendar versioning `YYYY.MM.PATCH` / `2026.08.0`; shipping closeout.
