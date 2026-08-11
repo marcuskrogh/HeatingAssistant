@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -82,18 +83,95 @@ def yaml_scalar(text: str, key: str) -> str:
     return match.group(1).strip()
 
 
-config_version = yaml_scalar(config_text, "version")
+CALVER_RE = re.compile(r"^(\d{4})\.(\d{2})\.(0|[1-9]\d*)$")
+
+
+def require_calver(version: str, label: str) -> str:
+    match = CALVER_RE.fullmatch(version)
+    if not match:
+        raise SystemExit(
+            f"{label} must be YYYY.MM.PATCH (zero-padded month, unpadded patch); "
+            f"got {version!r}"
+        )
+    month = int(match.group(2))
+    if month < 1 or month > 12:
+        raise SystemExit(f"{label} month must be 01–12; got {version!r}")
+    return version
+
+
+config_version = require_calver(
+    yaml_scalar(config_text, "version"),
+    "heating_assistant/config.yaml version",
+)
 if yaml_scalar(config_text, "slug") != "heatingassistant":
     raise SystemExit("heating_assistant/config.yaml slug must be heatingassistant")
+
+# Keep source-of-truth package + thin integration versions aligned before copy.
+src_const_path = root / "custom_components" / "heating_assistant" / "const.py"
+src_manifest_path = root / "custom_components" / "heating_assistant" / "manifest.json"
+src_package_init = root / "heatingassistant" / "__init__.py"
+
+src_const = src_const_path.read_text(encoding="utf-8")
+src_const = re.sub(
+    r'^VERSION = ".*"$',
+    f'VERSION = "{config_version}"',
+    src_const,
+    flags=re.MULTILINE,
+)
+src_const_path.write_text(src_const, encoding="utf-8")
+
+src_manifest = json.loads(src_manifest_path.read_text(encoding="utf-8"))
+src_manifest["version"] = config_version
+src_manifest_path.write_text(
+    json.dumps(src_manifest, indent=2, ensure_ascii=True) + "\n",
+    encoding="utf-8",
+)
+
+pkg_init = src_package_init.read_text(encoding="utf-8")
+pkg_init = re.sub(
+    r'^__version__ = ".*"$',
+    f'__version__ = "{config_version}"',
+    pkg_init,
+    flags=re.MULTILINE,
+)
+src_package_init.write_text(pkg_init, encoding="utf-8")
+
+# Re-copy after patching sources so App context picks up aligned versions.
+dst_package = app_dir / "heatingassistant"
+dst_integration = app_dir / "custom_components" / "heating_assistant"
+shutil.rmtree(dst_package, ignore_errors=True)
+shutil.rmtree(dst_integration, ignore_errors=True)
+dst_integration.mkdir(parents=True, exist_ok=True)
+shutil.copytree(root / "heatingassistant", dst_package)
+for name in (
+    "manifest.json",
+    "__init__.py",
+    "const.py",
+    "mqtt_topics.py",
+    "forecast_publish.py",
+    "config_flow.py",
+    "version_sync.py",
+    "update.py",
+    "strings.json",
+):
+    shutil.copy2(
+        root / "custom_components" / "heating_assistant" / name,
+        dst_integration / name,
+    )
+shutil.copy2(root / "pyproject.toml", app_dir / "pyproject.toml")
+shutil.copy2(root / "README.md", app_dir / "README.md")
 
 dockerfile = dockerfile_path.read_text(encoding="utf-8")
 match = re.search(r"^ARG BUILD_VERSION=([^\s]+)$", dockerfile, flags=re.MULTILINE)
 if not match:
     raise SystemExit("heating_assistant/Dockerfile missing ARG BUILD_VERSION")
-docker_version = match.group(1).strip('"')
+docker_version = require_calver(
+    match.group(1).strip('"'),
+    "heating_assistant/Dockerfile BUILD_VERSION",
+)
 
 project = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"]
-project_version = str(project["version"])
+project_version = require_calver(str(project["version"]), "pyproject.toml project.version")
 project_name = str(project["name"])
 if project_name != "heatingassistant":
     raise SystemExit("pyproject.toml project.name must be heatingassistant")
@@ -117,6 +195,18 @@ for forbidden in ("controller", "coordinator", "estimation", "sensor", "services
     if (manifest_path.parent / forbidden).exists():
         raise SystemExit(f"App-bundled thin integration contains forbidden fat directory: {forbidden}")
 
+pkg_version_match = re.search(
+    r'^__version__ = "([^"]+)"$',
+    (app_dir / "heatingassistant" / "__init__.py").read_text(encoding="utf-8"),
+    flags=re.MULTILINE,
+)
+if not pkg_version_match:
+    raise SystemExit("heatingassistant/__init__.py missing __version__")
+package_version = require_calver(
+    pkg_version_match.group(1),
+    "heatingassistant.__version__",
+)
+
 versions = {
     "heating_assistant/config.yaml": config_version,
     "heating_assistant/Dockerfile BUILD_VERSION": docker_version,
@@ -124,6 +214,7 @@ versions = {
     "heating_assistant/custom_components/heating_assistant/manifest.json": manifest[
         "version"
     ],
+    "heatingassistant.__version__": package_version,
 }
 if len(set(versions.values())) != 1:
     details = "\n".join(f"- {path}: {version}" for path, version in versions.items())

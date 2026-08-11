@@ -119,6 +119,19 @@ coexist without a port clash. On start HeatingAssistant syncs its bundled
 share; restart Home Assistant Core after the sync notification so Core loads the
 integration copy.
 
+#### Versioning
+
+HeatingAssistant uses calendar versions **`YYYY.MM.PATCH`** (Home Assistant–style,
+with a zero-padded month and an unpadded patch), for example `2026.08.0`.
+
+- The first release in a new calendar month starts at patch **`0`**.
+- Later releases in the same month increment the patch (`2026.08.1`, …).
+- Keep the shared lock in sync: set `heating_assistant/config.yaml` `version`,
+  `heating_assistant/Dockerfile` `BUILD_VERSION`, and root `pyproject.toml`
+  `project.version` to the same string, then run
+  `scripts/sync-ha-app-package.sh` (it aligns integration/`__version__` strings
+  and rejects non-calver values).
+
 ### HACS (recommended)
 
 This integration is not yet in the default HACS store, so add it as a custom
