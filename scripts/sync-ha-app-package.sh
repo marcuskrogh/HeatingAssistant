@@ -42,6 +42,8 @@ for file in "${THIN_FILES[@]}"; do
 done
 cp -a "${ROOT}/pyproject.toml" "${APP_DIR}/pyproject.toml"
 cp -a "${ROOT}/README.md" "${APP_DIR}/README.md"
+# App subtree docs live at ../docs relative to heating_assistant/README.md
+sed -i 's|](docs/|](../docs/|g; s|](LICENSE)|](../LICENSE)|g' "${APP_DIR}/README.md"
 
 python3 - "${ROOT}" <<'PY'
 from __future__ import annotations
@@ -160,6 +162,9 @@ for name in (
     )
 shutil.copy2(root / "pyproject.toml", app_dir / "pyproject.toml")
 shutil.copy2(root / "README.md", app_dir / "README.md")
+readme_app = (app_dir / "README.md").read_text(encoding="utf-8")
+readme_app = readme_app.replace("](docs/", "](../docs/").replace("](LICENSE)", "](../LICENSE)")
+(app_dir / "README.md").write_text(readme_app, encoding="utf-8")
 
 dockerfile = dockerfile_path.read_text(encoding="utf-8")
 match = re.search(r"^ARG BUILD_VERSION=([^\s]+)$", dockerfile, flags=re.MULTILINE)

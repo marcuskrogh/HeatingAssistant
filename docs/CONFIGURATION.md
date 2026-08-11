@@ -26,7 +26,7 @@ Changes in the panel take effect without restarting Home Assistant Core.
 | Outdoor temperature sensor | Recommended HA `sensor.*` (°C) |
 | Weather entity | Optional; improves outdoor forecast over the horizon |
 | Electricity price sensor | Optional; used for price-aware plots / planning inputs |
-| Site latitude / longitude | Used by the solar model (App defaults until set) |
+| Site latitude / longitude | Used by the solar model (defaults to `0.0` / `0.0` until set) |
 | Control interval | Default **900 s** (15 min) |
 
 ## Rooms

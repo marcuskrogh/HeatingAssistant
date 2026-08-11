@@ -4,65 +4,65 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Progress | — | docs/agents/PLAN-app-first-docs.md | `/review-fix SWD-311` |
-| SWD-312 | Sub-task | Consumer README rewrite + App sync | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
-| SWD-313 | Sub-task | Consumer docs update/delete | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
-| SWD-314 | Sub-task | Maintainer docs + cleanup + remove HACS | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Review | — | docs/agents/PLAN-app-first-docs.md | `/ship SWD-311` |
+| SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-313 | Sub-task | Consumer docs update/delete | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-314 | Sub-task | Maintainer docs + cleanup + remove HACS | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-307 | Task | [Tweak] Calendar versioning YYYY.MM.PATCH (HA-style) | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/597 |
-| SWD-308 | Sub-task | Cut over live versions to 2026.08.0 | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
-| SWD-310 | Sub-task | Encode YYYY.MM.PATCH in sync lock + docs | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
-| SWD-309 | Sub-task | Tests for calver lock and assertions | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
-| SWD-300 | Task | [Feature] System Status page, health indicator, and Parameter Estimation rename | Done | — | docs/agents/PLAN-system-status.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/595 |
-| SWD-304 | Sub-task | Backend quality enum + status payload | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
-| SWD-302 | Sub-task | System Status page + health indicator + remove pill | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
-| SWD-303 | Sub-task | Overview system strip + controller KPIs split | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
-| SWD-301 | Sub-task | Hard-cut Parameter Estimation rename | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
-| SWD-305 | Sub-task | Tests + version bump + package sync | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
-| SWD-299 | Bug | [Bug] Identification KPIs (model fit / R² / RMSE / Estimated) not populating Overview or System Identification index | Done | — | docs/agents/PLAN-identification-kpis.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/593 |
-| SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | Done | — | docs/agents/PLAN-window-heater-override.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/592 |
-| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
-| SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
-| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | docs/agents/PLAN-sysid-services.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
-| SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-292 | Sub-task | Restore engine sysid modules deleted in SWD-262 | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-294 | Sub-task | Wire P0 compute services + publish sysid/open-loop sensors | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-290 | Sub-task | Wire Apply/persist + parameter_history on controller_config | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-295 | Sub-task | Wire DatasetStore create/delete under App data_dir | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-291 | Sub-task | Regression tests + version 2.0.27 + App package sync | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
-| SWD-288 | Bug | [Bug] Climate card setpoints reset to default — overview and room view cannot change target or comfort band | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/584 |
-| SWD-286 | Bug | [Bug] Room temperature plot ignores schedule comfort_offset — constraints stay at room default | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
-| SWD-287 | Bug | [Bug] Expanded schedule on Schedules detail collapses on its own during reconfiguration | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
-| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
-| SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/578 |
-| SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
-| SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |
-| SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/572 |
-| SWD-280 | Task | [Iterate] Climate heat-pump actuation missing after thin bridge — planned cooling never reaches HA entity | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/570 |
-| SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/568 |
-| SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |
-| SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/566 |
-| SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
-| SWD-275 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/564 |
-| SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/563 |
-| SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560 |
-| SWD-271 | Task | [Iterate] Streamline config UX — searchable HA entity picker + Environment recommendations | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559 |
-| SWD-270 | Task | [Iterate] Ingress shows MQTT disconnected — App missing Supervisor Mosquitto credentials | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558 |
-| SWD-269 | Task | [Iterate] Ingress features empty / Controller Tuning 502 after MQTT non-blocking start | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/557 |
-| SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/554 |
-| SWD-267 | Task | [Iterate] Ingress entity picker only shows App sensors — cannot wire HA room temperatures | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/551 |
-| SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/550 |
-| SWD-265 | Task | [Iterate] Ingress UI stuck on Loading App API | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/549 |
-| SWD-264 | Task | [Iterate] Ingress UI 404 — static assets missing from pip install | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/548 |
-| SWD-263 | Task | [Iterate] App rejects --options-path and crash-loops on start | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/547 |
-| SWD-262 | Task | [Iterate] Finish HAOS App: Ingress parity, thin-only tree, port clash | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/546 |
-| SWD-255 | Task | HAOS App + thin MQTT integration (compute isolation) | Done | — | docs/agents/PLAN-haos-app-mqtt.md | Done |
-| SWD-258 | Sub-task | App packaging skeleton (sync + version lock) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-259 | Sub-task | Thin MQTT integration (entity↔tag bridge) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-260 | Sub-task | MQTT contract (topics, bindings, status) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-261 | Sub-task | Move compute into App (parity + persistence) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-257 | Sub-task | Port dashboard to App Ingress | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-256 | Sub-task | E2E hardening (load isolation + regressions) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
-| SWD-254 | Bug | [Bug] Remove dual-mode nonlinear MPC (revert to pre-SWD-240) — HA hang | Done | — | docs/agents/BUG-swd-254-remove-nonlinear-mpc.md | Done |
+| SWD-308 | Sub-task | Cut over live versions to 2026.08.0 | Done | SWD-307 | (archived) | — |
+| SWD-310 | Sub-task | Encode YYYY.MM.PATCH in sync lock + docs | Done | SWD-307 | (archived) | — |
+| SWD-309 | Sub-task | Tests for calver lock and assertions | Done | SWD-307 | (archived) | — |
+| SWD-300 | Task | [Feature] System Status page, health indicator, and Parameter Estimation rename | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/595 |
+| SWD-304 | Sub-task | Backend quality enum + status payload | Done | SWD-300 | (archived) | — |
+| SWD-302 | Sub-task | System Status page + health indicator + remove pill | Done | SWD-300 | (archived) | — |
+| SWD-303 | Sub-task | Overview system strip + controller KPIs split | Done | SWD-300 | (archived) | — |
+| SWD-301 | Sub-task | Hard-cut Parameter Estimation rename | Done | SWD-300 | (archived) | — |
+| SWD-305 | Sub-task | Tests + version bump + package sync | Done | SWD-300 | (archived) | — |
+| SWD-299 | Bug | [Bug] Identification KPIs (model fit / R² / RMSE / Estimated) not populating Overview or System Identification index | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/593 |
+| SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/592 |
+| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
+| SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
+| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
+| SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | Done | SWD-289 | (archived) | — |
+| SWD-292 | Sub-task | Restore engine sysid modules deleted in SWD-262 | Done | SWD-289 | (archived) | — |
+| SWD-294 | Sub-task | Wire P0 compute services + publish sysid/open-loop sensors | Done | SWD-289 | (archived) | — |
+| SWD-290 | Sub-task | Wire Apply/persist + parameter_history on controller_config | Done | SWD-289 | (archived) | — |
+| SWD-295 | Sub-task | Wire DatasetStore create/delete under App data_dir | Done | SWD-289 | (archived) | — |
+| SWD-291 | Sub-task | Regression tests + version 2.0.27 + App package sync | Done | SWD-289 | (archived) | — |
+| SWD-288 | Bug | [Bug] Climate card setpoints reset to default — overview and room view cannot change target or comfort band | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/584 |
+| SWD-286 | Bug | [Bug] Room temperature plot ignores schedule comfort_offset — constraints stay at room default | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
+| SWD-287 | Bug | [Bug] Expanded schedule on Schedules detail collapses on its own during reconfiguration | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
+| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
+| SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/578 |
+| SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
+| SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |
+| SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/572 |
+| SWD-280 | Task | [Iterate] Climate heat-pump actuation missing after thin bridge — planned cooling never reaches HA entity | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/570 |
+| SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/568 |
+| SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |
+| SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/566 |
+| SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
+| SWD-275 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/564 |
+| SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/563 |
+| SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560 |
+| SWD-271 | Task | [Iterate] Streamline config UX — searchable HA entity picker + Environment recommendations | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559 |
+| SWD-270 | Task | [Iterate] Ingress shows MQTT disconnected — App missing Supervisor Mosquitto credentials | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558 |
+| SWD-269 | Task | [Iterate] Ingress features empty / Controller Tuning 502 after MQTT non-blocking start | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/557 |
+| SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/554 |
+| SWD-267 | Task | [Iterate] Ingress entity picker only shows App sensors — cannot wire HA room temperatures | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/551 |
+| SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/550 |
+| SWD-265 | Task | [Iterate] Ingress UI stuck on Loading App API | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/549 |
+| SWD-264 | Task | [Iterate] Ingress UI 404 — static assets missing from pip install | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/548 |
+| SWD-263 | Task | [Iterate] App rejects --options-path and crash-loops on start | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/547 |
+| SWD-262 | Task | [Iterate] Finish HAOS App: Ingress parity, thin-only tree, port clash | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/546 |
+| SWD-255 | Task | HAOS App + thin MQTT integration (compute isolation) | Done | — | (archived) | Done |
+| SWD-258 | Sub-task | App packaging skeleton (sync + version lock) | Done | SWD-255 | (archived) | — |
+| SWD-259 | Sub-task | Thin MQTT integration (entity↔tag bridge) | Done | SWD-255 | (archived) | — |
+| SWD-260 | Sub-task | MQTT contract (topics, bindings, status) | Done | SWD-255 | (archived) | — |
+| SWD-261 | Sub-task | Move compute into App (parity + persistence) | Done | SWD-255 | (archived) | — |
+| SWD-257 | Sub-task | Port dashboard to App Ingress | Done | SWD-255 | (archived) | — |
+| SWD-256 | Sub-task | E2E hardening (load isolation + regressions) | Done | SWD-255 | (archived) | — |
+| SWD-254 | Bug | [Bug] Remove dual-mode nonlinear MPC (revert to pre-SWD-240) — HA hang | Done | — | (archived) | Done |
 | SWD-238 | Story | Dual-mode MPC (linear / non-linear) | To Do | — | — | Dual-mode removed from main by SWD-254; optional Story closeout |
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 

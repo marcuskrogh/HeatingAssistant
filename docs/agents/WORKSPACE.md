@@ -29,10 +29,10 @@ Agreed agent workspace setup for this repository.
 | Continuity mirror | docs/agents/ISSUES.md |
 | Roadmap | docs/ROADMAP.md |
 | Plan | docs/agents/PLAN-<slug>.md |
-| Bug | docs/BUG.md |
-| Iterate | docs/ITERATE.md |
-| Model | docs/MODEL.md |
-| Research | docs/RESEARCH.md |
+| Bug | docs/agents/BUG.md (when present) |
+| Iterate | docs/agents/ITERATE.md (when present) |
+| Model | docs/MODEL.md (when present) |
+| Research | docs/RESEARCH.md (when present) |
 
 ## Delivery
 

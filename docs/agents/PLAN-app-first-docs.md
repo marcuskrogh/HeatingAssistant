@@ -74,4 +74,4 @@
 - Workflow: structure-safe
 
 ## Next
-`/review-fix SWD-311` — Review and auto-fix per Workflow binding
+`/ship SWD-311` — review-fix CLEAN; merge and closeout

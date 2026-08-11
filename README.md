@@ -94,7 +94,8 @@ Give the controller one control cycle (default **15 minutes**) to plan and actua
 
 **Solar gain looks wrong**
 - Check window area and orientation (compass direction the window faces).
-- Site latitude/longitude default in the App; set them in App configuration when accurate solar modelling matters.
+- Site latitude/longitude default to `0.0` in the App until set in Configuration;
+  set them when accurate solar modelling matters.
 
 ## Contributing
 

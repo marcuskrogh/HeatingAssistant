@@ -76,10 +76,10 @@ Give the controller one control cycle (default **15 minutes**) to plan and actua
 
 | Document | Contents |
 |----------|----------|
-| [Configuration](docs/CONFIGURATION.md) | Panel settings reference |
-| [Tuning](docs/TUNING.md) | Parameter estimation and MPC tuning |
-| [Theory](docs/THEORY.md) | Thermal model, solar, MPC, estimator |
-| [Development](docs/DEVELOPMENT.md) | Architecture, versioning, tests |
+| [Configuration](../docs/CONFIGURATION.md) | Panel settings reference |
+| [Tuning](../docs/TUNING.md) | Parameter estimation and MPC tuning |
+| [Theory](../docs/THEORY.md) | Thermal model, solar, MPC, estimator |
+| [Development](../docs/DEVELOPMENT.md) | Architecture, versioning, tests |
 
 ## Troubleshooting
 
@@ -94,14 +94,15 @@ Give the controller one control cycle (default **15 minutes**) to plan and actua
 
 **Solar gain looks wrong**
 - Check window area and orientation (compass direction the window faces).
-- Site latitude/longitude default in the App; set them in App configuration when accurate solar modelling matters.
+- Site latitude/longitude default to `0.0` in the App until set in Configuration;
+  set them when accurate solar modelling matters.
 
 ## Contributing
 
 Pull requests are welcome on
 [GitHub](https://github.com/marcuskrogh/HeatingAssistant). See
-[Development](docs/DEVELOPMENT.md) for layout, tests, and packaging.
+[Development](../docs/DEVELOPMENT.md) for layout, tests, and packaging.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../LICENSE).
