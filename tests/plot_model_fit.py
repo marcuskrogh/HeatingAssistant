@@ -234,7 +234,7 @@ from heatingassistant.engine.history_window import (
     history_time_range,
 )
 
-# ── Apex Charts colour palette (matches MODEL_FIT_GUIDE.md) ─────────────────
+# ── Apex Charts colour palette (panel chart colours) ─────────────────────────
 C_MEASURED    = "#2196F3"   # blue
 C_PREDICTED   = "#FF9800"   # orange
 C_SETPOINT    = "#4CAF50"   # green

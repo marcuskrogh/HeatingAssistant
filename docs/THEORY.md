@@ -5,11 +5,10 @@
 > model-predictive controller (MPC) with its continuous-discrete extended
 > Kalman filter (CD-EKF) state estimator.
 
-This document is for readers who want to understand *why* the integration
-behaves the way it does. For installation and day-to-day use, start with the
+This document is for readers who want to understand *why* the App behaves the
+way it does. For installation and day-to-day use, start with the
 [main README](../README.md). For estimating the parameters these models need,
-and for tuning the controller, see the [Parameter Estimation & Tuning
-guide](TUNING.md).
+and for tuning the controller, see the [Tuning guide](TUNING.md).
 
 **Contents**
 
@@ -103,7 +102,7 @@ with Jacobian $\mathbf{I} - h\,\partial \mathbf{f}/\partial \mathbf{x}$.  For th
 
 **Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This matters concretely for the 2R2C model: the per-room fast/slow eigenvalue spread of $10^2$–$10^4$ would make explicit Euler conditionally stable at best, while the implicit scheme integrates it at the full 15-minute step.
 
-The CD-EKF propagates both the mean state and the error covariance matrix using the same scheme.  In the implementation, the EKF reuses `mbc`'s native `scheme="implicit-euler"` mode (Newton iteration on the mean ODE; covariance propagated by the one-step sensitivity matrix $\Phi = (I - h\,A_{n+1})^{-1}$).  The `HouseModel.step()` / `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`custom_components/heating_assistant/integrator.py`) so the integration scheme is uniform across the codebase.
+The CD-EKF propagates both the mean state and the error covariance matrix using the same scheme.  In the implementation, the EKF reuses `mbc`'s native `scheme="implicit-euler"` mode (Newton iteration on the mean ODE; covariance propagated by the one-step sensitivity matrix $\Phi = (I - h\,A_{n+1})^{-1}$).  The `HouseModel.step()` / `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`heatingassistant/engine/integrator.py`) so the integration scheme is uniform across the codebase.
 
 For typical residential buildings (large thermal masses, slow dynamics) a control time step `update_interval ≤ 900 s` (15 minutes) gives accurate results with the default 10 integration sub-steps.  The default `update_interval = 900 s` is a good balance between prediction accuracy and computational load.
 
@@ -337,24 +336,27 @@ The signed cooling power is exposed as a negative value on the per-room **Heatin
 
 ### 4.1 Overview
 
-The controller (`controller.py`) implements a **nonlinear model predictive control (NMPC)** architecture built on the `mbc` (model-based control) package:
+The controller (`heatingassistant/engine/controller/`) implements a **linearised
+model-predictive control (MPC)** architecture built on the `mbc` (model-based
+control) package:
 
 | Component | Class (from `mbc`) | Role |
 |-----------|-------|------|
 | **System model** | `ContinuousDiscreteModel` (ABC) | Defines the continuous-discrete SDE: `dx = f(x,u,d,p,t)dt + σdw`, `ym = hm(x,...)`. |
-| **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using implicit-Euler sub-stepping. |
-| **Optimal control** | `CDLinearizedMPCController` | Linearizes the nonlinear SDE around the current operating point, discretizes via ZOH, and solves the resulting batch convex QP via OSQP/HiGHS. |
+| **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the drift and linearised Riccati ODE between measurement steps using implicit-Euler sub-stepping. |
+| **Optimal control** | `CDLinearizedMPCController` | Linearizes around the current operating point, discretizes via ZOH, and solves the resulting batch convex QP via OSQP/HiGHS. |
 
-The house-heating application provides two classes in `controller.py`:
+The house-heating application provides these classes in
+`heatingassistant/engine/controller/`:
 
 | Class | Role |
 |-------|------|
-| `HouseThermalSDE` | Concrete `ContinuousDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  The nonlinearity arises from the heat-pump COP varying with outdoor temperature through `G_u(T_out)`. |
-| `HeatingMPCController` | Application facade.  Builds `HouseThermalSDE`, `ContinuousDiscreteEKF`, and `CDLinearizedMPCController`; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
+| `HouseThermalSDE` | Concrete `ContinuousDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  Nonlinearity in the plant (e.g. heat-pump COP vs outdoor temperature) is handled by linearisation at the operating point. |
+| `HeatingMPCController` / `HeatingLinearisedMPC` | Application facade.  Builds the SDE, CD-EKF, and linearised MPC; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the App runtime. |
 
-At each control step the `HeatingMPCController`:
+At each control step the controller:
 
-1. Reads room temperatures from HA sensors (measurement vector **y**).
+1. Reads room temperatures from HA sensors via the MQTT bridge (measurement vector **y**).
 2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
 3. Runs the CD-EKF to obtain the state estimate **x̂**.
 4. Solves the QP to find the optimal continuous input sequence **U***.
@@ -419,7 +421,7 @@ The input cost $\mathbf{R}$ softly discourages running heaters when the room is 
 
 The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
 
-**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval `update_interval` for which the source is active.  The coordinator maps this fraction to on/off commands.
+**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval `update_interval` for which the source is active.  The App runtime maps this fraction to on/off commands on the bridged HA entity.
 
 ### 4.4 Disturbance forecasts
 
