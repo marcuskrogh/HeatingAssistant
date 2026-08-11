@@ -7,7 +7,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/implement SWD-318` |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
 | SWD-320 | Task | [Bug] resolve_history(horizon) merges id_history JSONL | Done | SWD-316 | docs/agents/PLAN-resolve-history-horizon-jsonl.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/602 |
-| SWD-318 | Task | [Bug] Align ID sample write with plot cadence | To Do | SWD-316 | docs/agents/PLAN-id-sample-plot-cadence.md | `/implement SWD-318` |
+| SWD-318 | Task | [Bug] Align ID sample write with plot cadence | To Do | SWD-316 | docs/agents/PLAN-id-sample-plot-cadence.md | `/implement SWD-318` — https://github.com/marcuskrogh/HeatingAssistant/pull/603 |
 | SWD-317 | Task | [Define] Surface ID history health on System Status | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-317` (blocked by SWD-318) |
 | SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | Done | — | docs/agents/PLAN-remove-ipopt-scipy.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/599 (`0397afa`) |
 | SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
