@@ -67,7 +67,7 @@
 - Task: SWD-320
 - Sub-tasks: —
 - Branch: cursor/swd-320-resolve-history-horizon-jsonl-2dd4
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/602
 - Classification: bug
 - Workflow: fix-fast
 
