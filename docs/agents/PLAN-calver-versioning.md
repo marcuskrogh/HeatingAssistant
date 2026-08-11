@@ -67,9 +67,9 @@
 - Task: SWD-307
 - Sub-tasks: SWD-308 (cutover), SWD-310 (tooling+docs), SWD-309 (tests)
 - Branch: `cursor/swd-307-calver-versioning-d25e` (WORKSPACE map: `swd-307-calver-versioning`)
-- PR: (pending create)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/597
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-307` — Focused review → CLEAN, then ship closeout
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/597
