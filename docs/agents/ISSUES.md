@@ -4,10 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/implement SWD-318` |
+| SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/review-fix SWD-318` |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
 | SWD-320 | Task | [Bug] resolve_history(horizon) merges id_history JSONL | Done | SWD-316 | docs/agents/PLAN-resolve-history-horizon-jsonl.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/602 |
-| SWD-318 | Task | [Bug] Align ID sample write with plot cadence | To Do | SWD-316 | docs/agents/PLAN-id-sample-plot-cadence.md | `/implement SWD-318` — https://github.com/marcuskrogh/HeatingAssistant/pull/603 |
+| SWD-318 | Task | [Bug] Align ID sample write with plot cadence | In Review | SWD-316 | docs/agents/PLAN-id-sample-plot-cadence.md | `/review-fix SWD-318` — https://github.com/marcuskrogh/HeatingAssistant/pull/603 |
 | SWD-317 | Task | [Define] Surface ID history health on System Status | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-317` (blocked by SWD-318) |
 | SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | Done | — | docs/agents/PLAN-remove-ipopt-scipy.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/599 (`0397afa`) |
 | SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
@@ -74,6 +74,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — `/implement` SWD-318: ID samples on ticker + `update_tag` + durable-first; tests `tests/test_swd318_id_sample_plot_cadence.py`; PR #603; In Review; Next `/review-fix SWD-318`.
 - 2026-08-11 — `/define` SWD-318: align ID sample write with plot cadence (Option B + durable-first); PLAN `docs/agents/PLAN-id-sample-plot-cadence.md`; bug/fix-fast; branch `cursor/swd-318-id-sample-plot-cadence-2dd4`; Next `/implement SWD-318`.
 - 2026-08-11 — shipped SWD-320 via PR #602: resolve_history(horizon) merges id_history JSONL (Option A); review-fix CLEAN; Next `/define SWD-318`.
 - 2026-08-11 — `/define` SWD-320: resolve_history(horizon) merges id_history JSONL (Option A); PLAN `docs/agents/PLAN-resolve-history-horizon-jsonl.md`; bug/fix-fast; branch `cursor/swd-320-resolve-history-horizon-jsonl-2dd4`; Next `/implement SWD-320`.
