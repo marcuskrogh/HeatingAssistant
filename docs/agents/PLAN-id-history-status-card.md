@@ -79,7 +79,7 @@
 - Task: SWD-317
 - Sub-tasks: —
 - Branch: cursor/swd-317-id-history-status-card-2dd4
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/605
 - Classification: tweak
 - Workflow: delta-fast
 
