@@ -43,8 +43,8 @@
 
 ## Tracker
 - Key: SWD-321
-- Branch: cursor/swd-321-disturbances-history-points-53c4
-- PR: (pending)
+- Branch: `cursor/swd-321-disturbances-history-points-53c4`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/607
 
 ## Next
-`/implement SWD-321` — Apply Measured-style points (in flight)
+`/review-fix SWD-321` — Focused review → fix-forward → CLEAN
