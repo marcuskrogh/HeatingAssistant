@@ -19,6 +19,7 @@ from typing import Any
 from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inputs
 from heatingassistant.app.system_health import evaluate_system_health
+from heatingassistant.app.id_history_health import evaluate_id_history_health
 from heatingassistant.app.actuation import (
     climate_write_payload,
     coerce_climate_attrs,
@@ -163,6 +164,9 @@ class HeatingRuntime:
             maxlen=const.HISTORY_BUFFER_SIZE
         )
         self._id_history_last_ts: float = 0.0
+        self._id_history_disk_last_ts: float = 0.0
+        self._id_history_append_failure_streak: int = 0
+        self._id_history_last_append_ok: bool | None = None
         self._last_control_ts: float | None = self._coerce_number(self.state.get("last_control_ts"))
         self._last_control_duration_s: float = float(
             self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
@@ -661,6 +665,7 @@ class HeatingRuntime:
                     _logger.exception(
                         "Failed to persist identification history record"
                     )
+                    self._note_identification_append_failure()
                 else:
                     self._commit_identification_sample(id_record)
                     try:
@@ -1318,6 +1323,7 @@ class HeatingRuntime:
                 "uptime_s": health.get("uptime_s"),
                 "entity_catalog_count": health.get("entity_catalog_count"),
                 "bindings_count": health.get("bindings_count"),
+                "id_history": self.id_history_health(now_ts),
                 "has_heat_pump": any(
                     str(source.get("type", "")).lower() == "heat_pump"
                     for source in self._heat_sources()
@@ -1635,6 +1641,21 @@ class HeatingRuntime:
             last_control_duration_s=self._last_control_duration_s,
             last_control_ts=self._last_control_ts,
             update_interval_s=update_interval,
+        )
+
+    def id_history_health(self, now_ts: float | None = None) -> dict[str, Any]:
+        """Card-only ID history health (does not affect overall system_health)."""
+
+        update_interval = float(
+            self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+        )
+        return evaluate_id_history_health(
+            now_ts=float(now_ts if now_ts is not None else time.time()),
+            update_interval_s=update_interval,
+            buffer_last_ts=float(self._id_history_last_ts or 0.0),
+            disk_last_ts=float(self._id_history_disk_last_ts or 0.0),
+            append_failure_streak=int(self._id_history_append_failure_streak),
+            last_append_ok=self._id_history_last_append_ok,
         )
 
     def _mqtt_connected(self) -> bool:
@@ -2858,6 +2879,9 @@ class HeatingRuntime:
                     self._id_history_last_ts = float(self._history_buffer[-1].get("timestamp") or 0.0)
                 except (TypeError, ValueError, IndexError):
                     self._id_history_last_ts = 0.0
+                self._id_history_disk_last_ts = float(self._id_history_last_ts)
+                self._id_history_last_append_ok = True
+                self._id_history_append_failure_streak = 0
                 _logger.info(
                     "Restored %d identification history steps from JSONL store",
                     len(self._history_buffer),
@@ -3026,6 +3050,17 @@ class HeatingRuntime:
         payload["timestamp"] = now_ts
         self._history_buffer.append(payload)
         self._id_history_last_ts = now_ts
+        self._id_history_disk_last_ts = now_ts
+        self._id_history_append_failure_streak = 0
+        self._id_history_last_append_ok = True
+
+    def _note_identification_append_failure(self) -> None:
+        """Record a durable ID append failure for System Status (SWD-317)."""
+
+        self._id_history_append_failure_streak = int(
+            self._id_history_append_failure_streak
+        ) + 1
+        self._id_history_last_append_ok = False
 
     def _record_identification_sample(
         self, now: float | None = None, *, force: bool = False
@@ -3039,6 +3074,7 @@ class HeatingRuntime:
             self.id_history_store.append(record)
         except Exception:
             _logger.exception("Failed to persist identification history record")
+            self._note_identification_append_failure()
             return
         self._commit_identification_sample(record)
         try:
