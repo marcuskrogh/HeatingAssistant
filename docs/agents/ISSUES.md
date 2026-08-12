@@ -80,6 +80,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-08-13 — `/review-fix` SWD-322 CLEAN (focused): 0 blockers / 0 should-fix; APPROVE intent on PR #610 (`gh` review API 403); Next ship closeout.
 - 2026-08-13 — `/implement` SWD-322: revived PE window-exclusion regressions + App ID flag coverage; CONFIGURATION note; 18 passed; PR #610; In Review; Next `/review-fix SWD-322`.
 - 2026-08-13 — `/define` SWD-322: exclude override-active room samples from offline Parameter Estimation (per-room only; chart gaps only); PLAN `docs/agents/PLAN-pe-exclude-window-open.md`; tweak/delta-fast; Relates SWD-298; branch `cursor/swd-322-pe-exclude-window-open-f7b1`; Next `/implement SWD-322` (await PLAN approval).
+- 2026-08-12 — shipped SWD-321 via PR #607: DISTURBANCES outdoor/solar history Measured-style points; formal review-fix CLEAN (COMMENT reviews); Task Done.
 - 2026-08-12 — `/ship` SWD-321 closeout follow-up: CalVer bump **2026.08.1 → 2026.08.2** via https://github.com/marcuskrogh/HeatingAssistant/pull/609 (missing from #607 merge; mirror #606 file set); no CHANGELOG.md in repo.
 - 2026-08-12 — `/review-fix` SWD-321 CLEAN (focused): 0 blockers / 0 should-fix / 0 notes; APPROVE on PR #607; Next `/ship SWD-321`.
 - 2026-08-12 — `/implement` SWD-321: DISTURBANCES outdoor/solar history → Measured-style points; tests `tests/test_swd321_disturbance_history_points.py` (2 passed); PR https://github.com/marcuskrogh/HeatingAssistant/pull/607; In Review; Next `/review-fix SWD-321`.
