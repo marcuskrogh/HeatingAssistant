@@ -4,11 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/implement SWD-317` (await PLAN approval) |
+| SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
 | SWD-320 | Task | [Bug] resolve_history(horizon) merges id_history JSONL | Done | SWD-316 | docs/agents/PLAN-resolve-history-horizon-jsonl.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/602 |
 | SWD-318 | Task | [Bug] Align ID sample write with plot cadence | Done | SWD-316 | docs/agents/PLAN-id-sample-plot-cadence.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/603 (`58d71a7`) |
-| SWD-317 | Task | [Tweak] Surface ID history health on System Status | To Do | SWD-316 | docs/agents/PLAN-id-history-status-card.md | `/implement SWD-317` (await PLAN approval) — https://github.com/marcuskrogh/HeatingAssistant/pull/605 |
+| SWD-317 | Task | [Tweak] Surface ID history health on System Status | Done | SWD-316 | docs/agents/PLAN-id-history-status-card.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/605 |
 | SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | Done | — | docs/agents/PLAN-remove-ipopt-scipy.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/599 (`0397afa`) |
 | SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
 | SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
@@ -74,6 +74,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-12 — shipped SWD-317 via PR #605: ID history System Status card (warning=duration, error=3 append failures); review-fix CLEAN; Story SWD-316 Done (map complete). Rebuild HAOS App for System Status card.
 - 2026-08-12 — `/define` SWD-317: ID history System Status card only (not overall health); warning=2× interval duration, error=3 consecutive append failures; PLAN `docs/agents/PLAN-id-history-status-card.md`; tweak/delta-fast; branch `cursor/swd-317-id-history-status-card-2dd4`; Next `/implement SWD-317` (await PLAN approval).
 - 2026-08-11 — shipped SWD-318 via PR #603 (`58d71a7`): ID samples on ticker + `update_tag` + durable-first; review-fix CLEAN. Rebuild HAOS App to pick up writers. Next `/define SWD-317`.
 - 2026-08-11 — `/implement` SWD-318: ID samples on ticker + `update_tag` + durable-first; tests `tests/test_swd318_id_sample_plot_cadence.py`; PR #603; In Review; Next `/review-fix SWD-318`.

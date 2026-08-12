@@ -84,4 +84,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-317` — Build per PLAN.md workflow binding (same branch/PR)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/605
