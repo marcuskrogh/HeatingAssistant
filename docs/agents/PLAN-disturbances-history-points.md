@@ -47,4 +47,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/607
 
 ## Next
-`/review-fix SWD-321` — Focused review → fix-forward → CLEAN
+`/ship SWD-321` — Merge PR #607 and close Task (review-fix CLEAN)
