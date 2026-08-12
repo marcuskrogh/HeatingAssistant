@@ -27,6 +27,14 @@ function formatUptime(seconds) {
   return `${sec}s`;
 }
 
+function formatDuration(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return '—';
+  const s = Math.max(0, Number(seconds));
+  if (s < 60) return `${formatNumber(s, 0)} s`;
+  if (s < 3600) return `${formatNumber(s / 60, 1)} min`;
+  return `${formatNumber(s / 3600, 1)} h`;
+}
+
 function row(label, value, quality) {
   const qClass = quality ? ` system-status__value--${quality}` : '';
   return `
@@ -51,6 +59,7 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const bindings = entityAttr(s, systemEntity('system_summary'), 'bindings_count');
     const controlMode = entityAttr(s, systemEntity('system_summary'), 'control_mode');
     const fallback = entityAttr(s, systemEntity('system_summary'), 'fallback_reason');
+    const idHistory = entityAttr(s, systemEntity('system_summary'), 'id_history') || {};
     const mpcLoad = mpcLoadPercent(s);
     const lastDuration = entityValue(s, systemEntity('mpc_performance'));
     const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_run_ts');
@@ -92,6 +101,24 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
           ${row('Interval', dt == null ? '—' : `${formatNumber(Number(dt), 0)} s`)}
           ${row('Mean tracking err', meanErr == null ? '—' : formatNumber(Number(meanErr), 2))}
           ${row('Last run ts', lastRun == null ? '—' : String(lastRun))}
+        </section>
+        <section class="system-status__card">
+          <div class="system-status__card-title">ID HISTORY</div>
+          ${row(
+            'Last sample age',
+            formatDuration(idHistory.last_sample_age_s),
+            idHistory.last_sample_quality
+          )}
+          ${row(
+            'Last durable append',
+            idHistory.append_detail || '—',
+            idHistory.append_quality
+          )}
+          ${row(
+            'Buffer–disk lag',
+            formatDuration(idHistory.buffer_disk_lag_s),
+            idHistory.lag_quality
+          )}
         </section>
       </div>
     `;
