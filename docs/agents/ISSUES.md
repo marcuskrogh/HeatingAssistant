@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | In Review | — | docs/agents/PLAN-disturbances-history-points.md | `/ship SWD-321` — review-fix CLEAN — https://github.com/marcuskrogh/HeatingAssistant/pull/607 |
+| SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | Done | — | docs/agents/PLAN-disturbances-history-points.md | Done — feature #607; CalVer closeout bump 2026.08.2 (PR pending) |
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
 | SWD-320 | Task | [Bug] resolve_history(horizon) merges id_history JSONL | Done | SWD-316 | docs/agents/PLAN-resolve-history-horizon-jsonl.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/602 |
@@ -75,6 +75,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-12 — `/ship` SWD-321 closeout follow-up: CalVer bump **2026.08.1 → 2026.08.2** (missing from #607 merge; mirror #606 file set); no CHANGELOG.md in repo.
 - 2026-08-12 — `/review-fix` SWD-321 CLEAN (focused): 0 blockers / 0 should-fix / 0 notes; APPROVE on PR #607; Next `/ship SWD-321`.
 - 2026-08-12 — `/implement` SWD-321: DISTURBANCES outdoor/solar history → Measured-style points; tests `tests/test_swd321_disturbance_history_points.py` (2 passed); PR https://github.com/marcuskrogh/HeatingAssistant/pull/607; In Review; Next `/review-fix SWD-321`.
 - 2026-08-12 — shipped SWD-317 via PR #605: ID history System Status card (warning=duration, error=3 append failures); review-fix CLEAN; Story SWD-316 Done (map complete). Rebuild HAOS App for System Status card.
