@@ -21,7 +21,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 | 2 | Formulate PE treatment of hidden wall temperature and staged windows | model | — | Done | [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325) |
 | 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | Done | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
 | 4 | Synthesise household-like single-room traces and identify robust PE approaches | research | — | Done | [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328) |
-| 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | To Do (PLAN) | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
+| 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | In Review | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation, guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
@@ -53,4 +53,4 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 - Delivery branch: `cursor/swd-329-pe-robustness-747e`
 
 ## Next
-`/implement SWD-329` — offline robustness harness + on-demand factorial (same branch/PR).
+`/review-fix SWD-329` — review the robustness report and harness (same PR).

@@ -117,9 +117,9 @@
 - Task: [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329)
 - Sub-tasks: [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330)
 - Branch: `cursor/swd-329-pe-robustness-747e`
-- PR: (opened at persist)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/612
 - Classification: feature
 - Workflow: feature-standard
 
 ## Next
-`/implement SWD-329` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-329` — Review and auto-fix per Workflow binding
