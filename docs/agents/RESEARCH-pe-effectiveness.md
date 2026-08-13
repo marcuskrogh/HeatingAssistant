@@ -260,10 +260,11 @@ acceptance criteria.
 - Task: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324)
 - Story: [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
 - Artifact: `docs/agents/RESEARCH-pe-effectiveness.md`
-- Branch: `cursor/swd-323-pe-effectiveness-747e`
+- Branch: `cursor/swd-326-pe-effectiveness-747e` (delivery; research originally on `cursor/swd-323-pe-effectiveness-747e`)
+- Model: `docs/agents/MODEL-pe-hidden-tw.md`
 - PR: — (research never opens a PR)
 
 ## Next
 
-`/model SWD-325` — Formulate PE treatment of hidden wall temperature and staged
-windows (finding docs on the SWD-326 delivery branch; then `/define SWD-326`).
+`/define SWD-326` — Improve PE effectiveness and in-app guidance (research +
+model are supportive).

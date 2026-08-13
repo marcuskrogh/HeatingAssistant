@@ -4,10 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/model SWD-325` |
-| SWD-326 | Task | [Define] Improve PE effectiveness and in-app guidance | To Do | SWD-323 | (after SWD-325) | Blocked by SWD-325; then `/define SWD-326` |
-| SWD-325 | Task | [Model] Formulate PE treatment of hidden wall temperature and staged windows | To Do | SWD-323 | docs/agents/MODEL-pe-hidden-tw.md | `/model SWD-325` |
-| SWD-324 | Task | [Research] Diagnose current PE and survey applicable improvements | Done | SWD-323 | docs/agents/RESEARCH-pe-effectiveness.md | `/model SWD-325` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/define SWD-326` |
+| SWD-326 | Task | [Define] Improve PE effectiveness and in-app guidance | To Do | SWD-323 | (PLAN after `/define`) | `/define SWD-326` |
+| SWD-325 | Task | [Model] Formulate PE treatment of hidden wall temperature and staged windows | Done | SWD-323 | docs/agents/MODEL-pe-hidden-tw.md | `/define SWD-326` |
+| SWD-324 | Task | [Research] Diagnose current PE and survey applicable improvements | Done | SWD-323 | docs/agents/RESEARCH-pe-effectiveness.md | `/define SWD-326` |
 | SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | Done | — | docs/agents/PLAN-pe-exclude-window-open.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/610 (`ee41ee6`) |
 | SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | Done | — | docs/agents/PLAN-disturbances-history-points.md | Done — feature #607; CalVer closeout https://github.com/marcuskrogh/HeatingAssistant/pull/609 |
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
@@ -80,6 +80,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-13 — `/model` SWD-325: `docs/agents/MODEL-pe-hidden-tw.md` on `cursor/swd-326-pe-effectiveness-747e`; \(T_w(t_0)\) PE decision, 24 h box \(\pm 25\%\) width; SWD-325 Done. Next `/define SWD-326`.
 - 2026-08-13 — `/explore` SWD-323 rechart: SWD-325 model (hidden \(T_w\) / staged windows) blocks SWD-326 define (PE effectiveness + guidance, one delivery unit). Next `/model SWD-325`.
 - 2026-08-13 — `/research` SWD-324: PE effectiveness brief `docs/agents/RESEARCH-pe-effectiveness.md`; joint \(T_w\) unused leading-window; literature on hidden state, regimes, excitation, guidance. Next `/explore SWD-323`.
 - 2026-08-13 — `/explore` SWD-323: PE effectiveness + user guidance; route SWD-324 research (current state, why poor, what to apply); 2R2C + cheap indoor sensors only. Next `/research SWD-324`.
