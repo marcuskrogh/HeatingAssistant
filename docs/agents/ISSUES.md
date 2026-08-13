@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | In Review | — | docs/agents/PLAN-pe-exclude-window-open.md | `/review-fix SWD-322` — https://github.com/marcuskrogh/HeatingAssistant/pull/610 |
+| SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | Done | — | docs/agents/PLAN-pe-exclude-window-open.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/610 (`ee41ee6`) |
 | SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | Done | — | docs/agents/PLAN-disturbances-history-points.md | Done — feature #607; CalVer closeout https://github.com/marcuskrogh/HeatingAssistant/pull/609 |
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
@@ -76,6 +76,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-13 — shipped SWD-322 via PR #610 (`ee41ee6`): PE excludes override-active room samples; review-fix CLEAN; changelog skipped (none).
 - 2026-08-13 — `/review-fix` SWD-322 CLEAN (focused): 0 blockers / 0 should-fix; APPROVE intent on PR #610 (`gh` review API 403); Next ship closeout.
 - 2026-08-13 — `/implement` SWD-322: revived PE window-exclusion regressions + App ID flag coverage; CONFIGURATION note; 18 passed; PR #610; In Review; Next `/review-fix SWD-322`.
 - 2026-08-13 — `/define` SWD-322: exclude override-active room samples from offline Parameter Estimation (per-room only; chart gaps only); PLAN `docs/agents/PLAN-pe-exclude-window-open.md`; tweak/delta-fast; Relates SWD-298; branch `cursor/swd-322-pe-exclude-window-open-f7b1`; Next `/implement SWD-322` (await PLAN approval).

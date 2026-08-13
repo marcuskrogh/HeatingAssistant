@@ -109,4 +109,4 @@
 - Workflow: delta-fast
 
 ## Next
-Done — merge PR #610 and close SWD-322
+Done
