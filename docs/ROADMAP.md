@@ -1,63 +1,38 @@
-# Roadmap: Estimation history hole (plots + control OK)
+# Roadmap: Parameter estimation effectiveness and guidance
 
 ## Destination
-
-Parameter-estimation observation memory stays continuous whenever control and
-room temperatures are advancing; horizon load uses the same durable store.
+Parameter estimation is more effective for configured 2R2C rooms from air-node measurements only, and the product guides the user on what to do — and how — to arrive at a better model.
 
 ## Notes
-
-- Room view temperature plots stayed continuous during the incident.
-- Controller / MPC had no problem.
-- Research (SWD-319): load-path defect + write asymmetry code-proven.
-- SWD-320 shipped: horizon always merges JSONL (Option A).
-- SWD-318 define: Option B — ID samples on ticker + `update_tag` + control;
-  durable-first append. PLAN `docs/agents/PLAN-id-sample-plot-cadence.md`.
-- SWD-318 shipped via PR #603 (`58d71a7`).
-- SWD-317 define: System Status ID history **card only** (not overall health);
-  warning=duration (2× interval), error=3 consecutive append failures.
+- Sensors: standard indoor climate (e.g. IKEA TIMMERFLOTE); no extra wall-temperature sensors.
+- Keep the 2R2C structure; improve methods, data use, experiments, and in-app guidance.
+- Leading suspect, not settled cause: unmeasured wall-node \(T_w\) during fitting.
+- Regime examples (nights for non-solar parameters; sun + heater off for solar gain) are ideas to evaluate, not a committed design.
+- Effectiveness is the primary bar; guidance is how users reach it.
 
 ## Route
-
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
-| 1 | Discriminate: id_history JSONL missing rows vs horizon load ignoring disk | research | — | Done | [SWD-319](https://marcusknielsen.atlassian.net/browse/SWD-319) |
-| 2 | Fix `resolve_history(horizon_hours)` to merge id_history JSONL | define | — | Done | [SWD-320](https://marcusknielsen.atlassian.net/browse/SWD-320) |
-| 3 | Align ID sample write with plot cadence (durable-first append) | define | SWD-319 | Done | [SWD-318](https://marcusknielsen.atlassian.net/browse/SWD-318) |
-| 4 | Surface ID append / buffer–disk lag on System Status | define | SWD-320, SWD-318 | Done | [SWD-317](https://marcusknielsen.atlassian.net/browse/SWD-317) |
+| 1 | Diagnose current PE and survey applicable improvements | research | — | To Do | [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324) |
 
 ## Cleared so far
-
-- App process-down / total ticker death — ruled out by continuous room plots
-- Controller / MPC failure — ruled out by operator confirmation
-- Plot-history persistence (SWD-281 path) — working for this incident
-- [SWD-319 research](https://marcusknielsen.atlassian.net/browse/SWD-319) — load-path defect + write asymmetry code-proven
-- [SWD-320](https://marcusknielsen.atlassian.net/browse/SWD-320) shipped — horizon JSONL merge
-- [SWD-318](https://marcusknielsen.atlassian.net/browse/SWD-318) shipped — ID sample plot cadence + durable-first (PR #603)
-
-- [SWD-317](https://marcusknielsen.atlassian.net/browse/SWD-317) shipped — ID history System Status card (PR #605)
+- *(none on this map)*
 
 ## Not yet specified
-
-- Exact root cause of *today’s* window (JSONL missing vs horizon load-only) —
-  operator check in RESEARCH brief
+- Which method changes to make (wall-node / initial state, regime-batched parameters, experiment design, estimator implementation).
+- What in-app guidance looks like (actions, timing, when a model is good enough).
+- Whether a `/model` step is needed before buildable slices.
+- Passive data windows vs user-run identification experiments.
 
 ## Out of scope
-
-- Controller / MPC behaviour changes
-- CD-EKF math for long gaps
-- Plot-history persistence redesign
+- A different thermal model family than 2R2C.
+- Additional sensors beyond standard indoor temperature/humidity.
+- MPC / controller behaviour changes.
 
 ## Tracker
-
 - Provider: jira (`SWD`)
-- Story (map): [SWD-316](https://marcusknielsen.atlassian.net/browse/SWD-316)
-- Tasks: SWD-319, SWD-320, SWD-318, SWD-317
-- Research: docs/agents/RESEARCH-estimation-history-hole.md
-- Plan (SWD-320): docs/agents/PLAN-resolve-history-horizon-jsonl.md
-- Plan (SWD-318): docs/agents/PLAN-id-sample-plot-cadence.md
-- Plan (SWD-317): docs/agents/PLAN-id-history-status-card.md
+- Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
+- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324)
 
 ## Next
-
-Done — map SWD-316 complete (SWD-319/320/318/317).
+`/research SWD-324` — Diagnose current PE and survey applicable improvements: evidence on why fits are poor and what we might apply, before methods or guidance are scoped.
