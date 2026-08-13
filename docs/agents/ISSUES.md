@@ -4,8 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/define SWD-326` |
-| SWD-326 | Task | [Define] Improve PE effectiveness and in-app guidance | To Do | SWD-323 | (PLAN after `/define`) | `/define SWD-326` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/explore SWD-323` after SWD-326 report |
+| SWD-326 | Task | [Define] Offline PE combined vs separated/staged benchmark | In Review | SWD-323 | docs/agents/PLAN-pe-split-benchmark.md | `/review-fix SWD-326` |
+| SWD-327 | Sub-task | Offline PE split/staging benchmark harness + report | Done | SWD-326 | docs/agents/REPORT-pe-dataset-separation.md | — |
 | SWD-325 | Task | [Model] Formulate PE treatment of hidden wall temperature and staged windows | Done | SWD-323 | docs/agents/MODEL-pe-hidden-tw.md | `/define SWD-326` |
 | SWD-324 | Task | [Research] Diagnose current PE and survey applicable improvements | Done | SWD-323 | docs/agents/RESEARCH-pe-effectiveness.md | `/define SWD-326` |
 | SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | Done | — | docs/agents/PLAN-pe-exclude-window-open.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/610 (`ee41ee6`) |
@@ -80,6 +81,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-13 — `/define`+implement SWD-326: offline combined vs separated/staged PE bake-off; report `docs/agents/REPORT-pe-dataset-separation.md`; Sub-task SWD-327. Next `/review-fix SWD-326`.
 - 2026-08-13 — `/model` SWD-325: `docs/agents/MODEL-pe-hidden-tw.md` on `cursor/swd-326-pe-effectiveness-747e`; \(T_w(t_0)\) PE decision, 24 h box \(\pm 25\%\) width; SWD-325 Done. Next `/define SWD-326`.
 - 2026-08-13 — `/explore` SWD-323 rechart: SWD-325 model (hidden \(T_w\) / staged windows) blocks SWD-326 define (PE effectiveness + guidance, one delivery unit). Next `/model SWD-325`.
 - 2026-08-13 — `/research` SWD-324: PE effectiveness brief `docs/agents/RESEARCH-pe-effectiveness.md`; joint \(T_w\) unused leading-window; literature on hidden state, regimes, excitation, guidance. Next `/explore SWD-323`.
