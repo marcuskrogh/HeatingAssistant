@@ -16,13 +16,14 @@ Parameter estimation is more effective for configured 2R2C rooms from air-node m
 |-------|------|------|------------|--------|-------|
 | 1 | Diagnose current PE and survey applicable improvements | research | — | Done | [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324) |
 | 2 | Formulate PE treatment of hidden wall temperature and staged windows | model | — | Done | [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325) |
-| 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | To Do | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
+| 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | Done | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
 
 Product PE changes and in-app guidance wait until the SWD-326 report is evaluated.
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation, guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
 - [SWD-325 model](https://marcusknielsen.atlassian.net/browse/SWD-325) — \(T_{w}(t_{0})\) as PE decision; \(T_{w}(t)\) not; window merge/split; 24 h box \(\pm 25\%\) width. Artifact `docs/agents/MODEL-pe-hidden-tw.md`.
+- [SWD-326 define](https://marcusknielsen.atlassian.net/browse/SWD-326) — offline combined vs separated/staged bake-off; report does not pick a product winner. Artifact `docs/agents/REPORT-pe-dataset-separation.md`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/611.
 
 ## Not yet specified
 - Whether auto-separation / staged locking ships in PE (your call after the SWD-326 report).
@@ -47,4 +48,4 @@ Product PE changes and in-app guidance wait until the SWD-326 report is evaluate
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/611
 
 ## Next
-`/implement SWD-326` — Offline combined vs separated/staged PE benchmark (tests + report).
+`/explore SWD-323` — rechart product PE and guidance after you decide from `docs/agents/REPORT-pe-dataset-separation.md`.

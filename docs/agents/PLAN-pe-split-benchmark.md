@@ -90,4 +90,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/review-fix SWD-326` — focused review on the offline bake-off PR.
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/611
