@@ -13,10 +13,10 @@ Parameter estimation is more effective for configured 2R2C rooms from air-node m
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
-| 1 | Diagnose current PE and survey applicable improvements | research | — | To Do | [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324) |
+| 1 | Diagnose current PE and survey applicable improvements | research | — | Done | [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324) |
 
 ## Cleared so far
-- *(none on this map)*
+- [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\) (leading-window reconstruction unused by PE); literature supports hidden-state handling, regime/excitation, and operator guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
 
 ## Not yet specified
 - Which method changes to make (wall-node / initial state, regime-batched parameters, experiment design, estimator implementation).
@@ -33,6 +33,7 @@ Parameter estimation is more effective for configured 2R2C rooms from air-node m
 - Provider: jira (`SWD`)
 - Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
 - Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324)
+- Research: `docs/agents/RESEARCH-pe-effectiveness.md`
 
 ## Next
-`/research SWD-324` — Diagnose current PE and survey applicable improvements: evidence on why fits are poor and what we might apply, before methods or guidance are scoped.
+`/explore SWD-323` — Rechart from SWD-324 evidence: graduate method and guidance Tasks (likely including `/model` on hidden \(T_w\) / staged windows).
