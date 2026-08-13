@@ -4,6 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/explore SWD-323` after report decision |
+| SWD-326 | Task | [Define] Offline PE combined vs separated/staged benchmark | Done | SWD-323 | docs/agents/PLAN-pe-split-benchmark.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/611 |
+| SWD-327 | Sub-task | Offline PE split/staging benchmark harness + report | Done | SWD-326 | docs/agents/REPORT-pe-dataset-separation.md | — |
+| SWD-325 | Task | [Model] Formulate PE treatment of hidden wall temperature and staged windows | Done | SWD-323 | docs/agents/MODEL-pe-hidden-tw.md | `/define SWD-326` |
+| SWD-324 | Task | [Research] Diagnose current PE and survey applicable improvements | Done | SWD-323 | docs/agents/RESEARCH-pe-effectiveness.md | `/define SWD-326` |
 | SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | Done | — | docs/agents/PLAN-pe-exclude-window-open.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/610 (`ee41ee6`) |
 | SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | Done | — | docs/agents/PLAN-disturbances-history-points.md | Done — feature #607; CalVer closeout https://github.com/marcuskrogh/HeatingAssistant/pull/609 |
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
@@ -76,6 +81,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-13 — shipped SWD-326 via PR #611: offline combined vs separated/staged PE bake-off; review-fix CLEAN; changelog skipped (none). Story SWD-323 stays open.
+- 2026-08-13 — `/define`+implement SWD-326: offline combined vs separated/staged PE bake-off; report `docs/agents/REPORT-pe-dataset-separation.md`; Sub-task SWD-327. Next `/review-fix SWD-326`.
+- 2026-08-13 — `/model` SWD-325: `docs/agents/MODEL-pe-hidden-tw.md` on `cursor/swd-326-pe-effectiveness-747e`; \(T_w(t_0)\) PE decision, 24 h box \(\pm 25\%\) width; SWD-325 Done. Next `/define SWD-326`.
+- 2026-08-13 — `/explore` SWD-323 rechart: SWD-325 model (hidden \(T_w\) / staged windows) blocks SWD-326 define (PE effectiveness + guidance, one delivery unit). Next `/model SWD-325`.
+- 2026-08-13 — `/research` SWD-324: PE effectiveness brief `docs/agents/RESEARCH-pe-effectiveness.md`; joint \(T_w\) unused leading-window; literature on hidden state, regimes, excitation, guidance. Next `/explore SWD-323`.
+- 2026-08-13 — `/explore` SWD-323: PE effectiveness + user guidance; route SWD-324 research (current state, why poor, what to apply); 2R2C + cheap indoor sensors only. Next `/research SWD-324`.
 - 2026-08-13 — shipped SWD-322 via PR #610 (`ee41ee6`): PE excludes override-active room samples; review-fix CLEAN; changelog skipped (none).
 - 2026-08-13 — `/review-fix` SWD-322 CLEAN (focused): 0 blockers / 0 should-fix; APPROVE intent on PR #610 (`gh` review API 403); Next ship closeout.
 - 2026-08-13 — `/implement` SWD-322: revived PE window-exclusion regressions + App ID flag coverage; CONFIGURATION note; 18 passed; PR #610; In Review; Next `/review-fix SWD-322`.

@@ -52,9 +52,8 @@ jobs:
           path: .coverage.fast
           include-hidden-files: true
 
-  # Slow tier sharded across two runners. Shard "stability" is the single
-  # heaviest file; shard "rest" runs every other slow test via the marker,
-  # so newly added slow tests are always picked up without editing this file.
+  # Slow tier sharded across runners. Dedicated shards for the heaviest
+  # files; shard "rest" runs every other slow test via the marker.
   pytest-slow:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -65,8 +64,13 @@ jobs:
         include:
           - shard: stability
             pytest_args: tests/test_estimator_stability.py -m slow
+          - shard: pe-split
+            pytest_args: tests/test_swd326_pe_split_benchmark.py -m slow
           - shard: rest
-            pytest_args: tests/ -m slow --ignore=tests/test_estimator_stability.py
+            pytest_args: >-
+              tests/ -m slow
+              --ignore=tests/test_estimator_stability.py
+              --ignore=tests/test_swd326_pe_split_benchmark.py
 
     steps:
       - uses: actions/checkout@v4
