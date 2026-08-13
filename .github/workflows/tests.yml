@@ -39,7 +39,7 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.fast
         run: |
-          python3 -m pytest tests/ -m "not slow" \
+          python3 -m pytest tests/ -m "not slow and not ondemand" \
             --cov=heatingassistant \
             --cov-report= \
             --durations=20 \

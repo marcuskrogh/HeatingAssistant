@@ -16,13 +16,15 @@ pure-logic tests. If you add a coordinator-based test to a new top-level file,
 add that marker.
 
 The orthogonal `slow` marker tags multi-start estimation and benchmark tests
-(~17 tests, minutes of wall time); everything else runs in seconds.
+(~17 tests, minutes of wall time); everything else runs in seconds. The
+`ondemand` marker tags heavy analysis grids (not CI); run with
+`pytest -m ondemand`.
 
 ## Quick start
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/ -m "not slow"      # fast tier, ~20 s
+python3 -m pytest tests/ -m "not slow and not ondemand"      # fast tier, ~20 s
 ```
 
 `mbc` installs from the SHA pinned in `requirements.txt`. Do not install a
@@ -32,11 +34,14 @@ Home Assistant deploys.
 ## Useful commands
 
 ```bash
-# Fast default (excludes slow estimation/benchmark tests)
-python3 -m pytest tests/ -m "not slow"
+# Fast default (excludes slow estimation/benchmark tests and on-demand grids)
+python3 -m pytest tests/ -m "not slow and not ondemand"
 
 # Slow tier (multi-start estimation regressions and MPC benchmarks)
 python3 -m pytest tests/ -m slow
+
+# On-demand analysis grids (not CI; e.g. SWD-329 PE robustness factorial)
+python3 -m pytest tests/ -m ondemand
 
 # Faster benchmarks (3 MPC reps instead of 15)
 FAST_TESTS=1 python3 -m pytest tests/test_performance.py -m slow -v -s
@@ -47,7 +52,7 @@ python3 -m pytest tests/ -m integration
 python3 -m pytest tests/ -m system
 
 # With coverage (fast + slow combined, same as CI)
-python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=
+python3 -m pytest tests/ -m "not slow and not ondemand" --cov=custom_components/heating_assistant --cov-report=
 python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=term-missing
 
 # Panel harnesses (all of them, also run in CI)
@@ -94,7 +99,7 @@ to `main`** (plus manual `workflow_dispatch`):
 
 | Job | Purpose |
 |-----|---------|
-| `pytest-fast` | `pytest tests/ -m "not slow"` with a coverage fragment (~20 s of test time) |
+| `pytest-fast` | `pytest tests/ -m "not slow and not ondemand"` with a coverage fragment (~20 s of test time) |
 | `pytest-slow` (×2 shards) | Slow tier split across two runners: the heaviest file (`test_estimator_stability.py`) alone, and `-m slow --ignore=` for everything else — new slow tests are picked up automatically |
 | `coverage` | Combines all fragments, reports, checks `scripts/coverage_baseline.json` and package floors |
 | `panel-harness` | Runs every `tests/panel_*.harness.mjs` serially (~3 s; Node is preinstalled on runners) |
@@ -108,7 +113,7 @@ run) plus package-level floors in `scripts/coverage_package_floors.json`
 (2 pp tolerance). To regenerate after a deliberate change:
 
 ```bash
-python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=
+python3 -m pytest tests/ -m "not slow and not ondemand" --cov=custom_components/heating_assistant --cov-report=
 python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=
 coverage report -m | tee coverage_report.txt
 python3 scripts/update_coverage_baseline.py coverage_report.txt
