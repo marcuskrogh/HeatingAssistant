@@ -4,9 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/define SWD-329` |
-| SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/define SWD-329` |
-| SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | To Do | SWD-323 | docs/ROADMAP.md | `/define SWD-329` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/implement SWD-329` |
+| SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/implement SWD-329` |
+| SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | To Do | SWD-323 | docs/agents/PLAN-pe-robustness-household.md | `/implement SWD-329` |
+| SWD-330 | Sub-task | Offline PE robustness harness + on-demand factorial + report | To Do | SWD-329 | docs/agents/PLAN-pe-robustness-household.md | — |
 | SWD-326 | Task | [Define] Offline PE combined vs separated/staged benchmark | Done | SWD-323 | docs/agents/PLAN-pe-split-benchmark.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/611 (`9b1e380`) |
 | SWD-327 | Sub-task | Offline PE split/staging benchmark harness + report | Done | SWD-326 | docs/agents/REPORT-pe-dataset-separation.md | — |
 | SWD-325 | Task | [Model] Formulate PE treatment of hidden wall temperature and staged windows | Done | SWD-323 | docs/agents/MODEL-pe-hidden-tw.md | `/define SWD-326` |
@@ -83,6 +84,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-13 — `/define` SWD-329: offline PE robustness factorial (occupancy × openings; six procedures × open-loop/Kalman); occupancy + extra UA harness-only; PLAN `docs/agents/PLAN-pe-robustness-household.md`; Sub-task SWD-330; feature-standard. Next `/implement SWD-329`.
 - 2026-08-13 — `/research` SWD-328: household-like 2R2C extras (occupancy ≠ window); finding docs on `cursor/swd-329-pe-robustness-747e`; SWD-328 Done. Next `/define SWD-329`.
 - 2026-08-13 — `/explore` SWD-323 rechart: do not pick a product PE procedure; synthesise household-like single-room data (window/door, occupancy); research SWD-328 then analysis SWD-329. Next `/research SWD-328`.
 - 2026-08-13 — shipped SWD-326 via PR #611: offline combined vs separated/staged PE bake-off; review-fix CLEAN; changelog skipped (none). Story SWD-323 stays open.
