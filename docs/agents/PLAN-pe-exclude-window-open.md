@@ -74,28 +74,29 @@
 
 ## Acceptance criteria
 1. While a room’s heater override is active, new ID-history samples flag
-   `window_open[room] = true` for that room only.
+   `window_open[room] = true` for that room only. ✅
 2. Offline Parameter Estimation / identification fits that consume ID history
    do **not** score that room’s residuals for flagged samples (corrupted
    open-window temperatures must not change the fit objective vs an otherwise
-   identical closed-window series).
-3. Other rooms’ samples at the same timestamps remain eligible for the fit.
-4. Samples during `pending_open` (before shutoff) remain eligible.
+   identical closed-window series). ✅
+3. Other rooms’ samples at the same timestamps remain eligible for the fit. ✅
+4. Samples during `pending_open` (before shutoff) remain eligible. ✅
 5. Live control filtering still uses measurements; Q inflation while override
-   active unchanged.
+   active unchanged. ✅ (no live-path code change)
 6. PE / sysid charts simply omit excluded points for that room (gaps); no new
-   badges.
+   badges. ✅
 7. Focused regression tests cover mask carry-through + objective exclusion;
-   version bump + App sync only if runtime code changes.
+   version bump + App sync only if runtime code changes. ✅ (tests revived;
+   no runtime bump)
 
 ## Work packages
 1. Audit App flag → history_std → offline PE/sysid/diagnostics paths; close any
    hole that still applies override-active room measurements; revive/adapt
-   window data-quality tests; sync App package if needed.
+   window data-quality tests; sync App package if needed. ✅ (no hole in runtime
+   mask; regressions restored; App package sync N/A)
 
 ## Open items
-- None for definition (implement may discover a specific path still ignoring
-  the mask — fix under this Task).
+- None.
 
 ## Tracker
 - Provider: jira
@@ -108,4 +109,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-322` — Review and auto-fix per Workflow binding
+Done — merge PR #610 and close SWD-322
