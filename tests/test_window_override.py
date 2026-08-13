@@ -282,3 +282,35 @@ async def test_push_override_resumes_shadow_mpc(tmp_path: Path) -> None:
     await runtime.push_window_override()
     assert runtime.actuator_outputs["living_heater"] == pytest.approx(0.65)
     await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_id_sample_flags_window_open_only_when_override_active(
+    tmp_path: Path,
+) -> None:
+    """SWD-322: ID history flags the room only after heater shutoff triggers."""
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+    room = "Living Room"
+    runtime.room_temperatures[room] = 21.5
+
+    runtime._window_state[room] = "pending_open"
+    sample = runtime._take_identification_sample(force=True)
+    assert sample is not None
+    assert sample["window_open"][room] is False
+
+    runtime._window_state[room] = "open"
+    sample = runtime._take_identification_sample(force=True)
+    assert sample is not None
+    assert sample["window_open"][room] is True
+
+    runtime._window_state[room] = "pending_closed"
+    sample = runtime._take_identification_sample(force=True)
+    assert sample is not None
+    assert sample["window_open"][room] is True
+
+    runtime._window_state[room] = "closed"
+    sample = runtime._take_identification_sample(force=True)
+    assert sample is not None
+    assert sample["window_open"][room] is False
+    await runtime.stop()

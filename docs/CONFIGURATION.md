@@ -38,7 +38,7 @@ Changes in the panel take effect without restarting Home Assistant Core.
 | Thermal presets | Room size + construction / insulation seed mass and resistance |
 | Thermal mass / `r_external` | Optional numeric overrides |
 | Windows | Area + orientation (compass facing) for solar gain |
-| Window / door sensors | Optional; open-window override turns heating down after debounce |
+| Window / door sensors | Optional; open-window override turns heating down after debounce; those periods are also excluded from Parameter Estimation for that room |
 | Inter-room connections | Optional shared-wall heat exchange |
 
 Target temperature and comfort band are set on the room / Overview climate
