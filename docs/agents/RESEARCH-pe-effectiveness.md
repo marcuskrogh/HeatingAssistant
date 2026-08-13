@@ -265,6 +265,5 @@ acceptance criteria.
 
 ## Next
 
-`/explore SWD-323` — Rechart the map from this evidence: graduate method and
-guidance Tasks (likely including a `/model` on hidden \(T_w\) / staged
-windows) without treating night-batching or UX copy as already designed.
+`/model SWD-325` — Formulate PE treatment of hidden wall temperature and staged
+windows (finding docs on the SWD-326 delivery branch; then `/define SWD-326`).
