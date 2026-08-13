@@ -1,39 +1,47 @@
-"""SWD-262: fat HA integration removed.
+"""SWD-322: open-window samples are flagged and excluded from offline PE / ID fits.
 
-This test module exercised the removed in-process Home Assistant integration layer.
+Per-room ``window_open`` masks (set when heater override is active) must:
+* carry through history → standardised PE records
+* leave the open-loop objective unchanged when only flagged samples are corrupted
+* gap EKF / open-loop diagnostic charts and keep RMSE free of those samples
 """
-import pytest
 
-pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
+from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from heatingassistant.engine.controller import HouseThermalSDE
 from heatingassistant.engine.heat_sources import ElectricHeater
-from heatingassistant.engine.thermal_model import HouseModel, Room
+from heatingassistant.engine.model_diagnostics import compute_open_loop_predictions
+from heatingassistant.engine.parameter_estimator import KalmanMLEstimator, _ThetaLayout
 from heatingassistant.engine.sysid import run_sysid_ekf
-from custom_components.heating_assistant.model_diagnostics import (
-    compute_open_loop_predictions,
-)
-from heatingassistant.engine.parameter_estimator import (
-    KalmanMLEstimator,
-    _ThetaLayout,
-)
+from heatingassistant.engine.thermal_model import HouseModel, Room
 
 
-def _room():
-    return Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
+pytestmark = pytest.mark.unit
 
 
-def _heater(scale=1.0):
-    return ElectricHeater("h", "studio", 3000.0, power_scale=scale)
+def _room(name: str = "studio"):
+    return Room(name, 4e6, 0.05, temperature=20.0, setpoint=21.0)
 
 
-def _history(n=80, dt=900.0, u=0.6, open_range=None, corrupt_open=False):
+def _heater(room: str = "studio", scale: float = 1.0):
+    return ElectricHeater("h", room, 3000.0, power_scale=scale)
+
+
+def _history(
+    n: int = 80,
+    dt: float = 900.0,
+    u: float = 0.6,
+    open_range=None,
+    corrupt_open: bool = False,
+    room: str = "studio",
+):
     """Single-room history; optionally flag/corrupt an open-window block.
 
     ``open_range`` is a ``(start, stop)`` half-open step interval that is flagged
-    ``window_open: {"studio": True}``.  When ``corrupt_open`` is set those same
+    ``window_open: {room: True}``.  When ``corrupt_open`` is set those same
     samples get an absurd temperature so a test can prove they are excluded.
     """
     t0 = 1_000_000.0
@@ -43,20 +51,18 @@ def _history(n=80, dt=900.0, u=0.6, open_range=None, corrupt_open=False):
         temp = 20.0 + 0.02 * (i % 10)
         if is_open and corrupt_open:
             temp = -50.0  # physically impossible — must not influence the fit
-        history.append({
-            "y": [temp],
-            "u": [u],
-            "d_outdoor": 2.0,
-            "d_solar": {"studio": 0.0},
-            "timestamp": t0 + dt * i,
-            "window_open": {"studio": bool(is_open)},
-        })
+        history.append(
+            {
+                "y": [temp],
+                "u": [u],
+                "d_outdoor": 2.0,
+                "d_solar": {room: 0.0},
+                "timestamp": t0 + dt * i,
+                "window_open": {room: bool(is_open)},
+            }
+        )
     return history
 
-
-# ---------------------------------------------------------------------------
-# _convert_history_std carries the per-room mask in room order
-# ---------------------------------------------------------------------------
 
 def test_convert_history_std_carries_window_open_mask():
     est = KalmanMLEstimator([_room()], [_heater()], dt=900.0)
@@ -66,28 +72,41 @@ def test_convert_history_std_carries_window_open_mask():
     flags = [bool(rec["window_open"][0]) for rec in std]
     assert flags == [False, False, False, True, True, True, False, False, False, False]
     # Records without the key (legacy / seeded history) default to all-closed.
-    legacy = est._convert_history_std([
-        {"y": [20.0], "u": [0.0], "d_outdoor": 2.0, "d_solar": {}, "timestamp": 0.0}
-    ], use_ym=True)
+    legacy = est._convert_history_std(
+        [
+            {
+                "y": [20.0],
+                "u": [0.0],
+                "d_outdoor": 2.0,
+                "d_solar": {},
+                "timestamp": 0.0,
+            }
+        ],
+        use_ym=True,
+    )
     assert legacy[0]["window_open"].dtype == bool
     assert not legacy[0]["window_open"].any()
 
 
-# ---------------------------------------------------------------------------
-# Open-loop objective ignores corrupted samples flagged window-open
-# ---------------------------------------------------------------------------
-
 def _eval_objective(est, history):
     layout = _ThetaLayout(
-        n_rooms=1, identifiable_sources=[], identifiable_pairs=[],
+        n_rooms=1,
+        identifiable_sources=[],
+        identifiable_pairs=[],
     )
-    theta = np.concatenate([
-        est._log_mass_prior, est._log_r_prior, est._q_int_prior,
-        np.array([0.0]),  # t_wall_init
-    ])
+    theta = np.concatenate(
+        [
+            est._log_mass_prior,
+            est._log_r_prior,
+            est._q_int_prior,
+            np.array([0.0]),  # t_wall_init
+        ]
+    )
     std = est._convert_history_std(history, use_ym=True)
     return est._simulation_mse_and_grad(
-        theta, layout, std,
+        theta,
+        layout,
+        std,
         nominal_dt=est._dt,
         max_window_steps=est._max_window_steps,
         min_segment_steps=est._min_segment_steps,
@@ -95,10 +114,7 @@ def _eval_objective(est, history):
 
 
 def test_open_loop_objective_excludes_trailing_open_window():
-    """A corrupted open-window block at the END of the data (no scored step
-    follows it, so the pinned state cannot leak forward) leaves the open-loop
-    objective and its gradient bit-for-bit unchanged — the samples are excluded.
-    """
+    """Corrupted trailing open-window samples leave MSE/grad unchanged."""
     est = KalmanMLEstimator([_room()], [_heater()], dt=900.0)
     clean = _history(n=80, open_range=(60, 80), corrupt_open=False)
     corrupt = _history(n=80, open_range=(60, 80), corrupt_open=True)
@@ -111,13 +127,10 @@ def test_open_loop_objective_excludes_trailing_open_window():
 
 
 def test_open_loop_objective_uses_unflagged_corruption():
-    """Control: the very same corruption WITHOUT the window-open flag does move
-    the objective — proving the flag (not some other masking) is what excludes.
-    """
+    """Control: same corruption without the flag *does* move the objective."""
     est = KalmanMLEstimator([_room()], [_heater()], dt=900.0)
     clean = _history(n=80, open_range=(60, 80), corrupt_open=False)
 
-    # Corrupt the trailing block but label it closed (window_open False).
     unflagged = _history(n=80, open_range=(60, 80), corrupt_open=True)
     for rec in unflagged:
         rec["window_open"] = {"studio": False}
@@ -127,14 +140,79 @@ def test_open_loop_objective_uses_unflagged_corruption():
     assert not np.isclose(mse_clean, mse_unflagged, atol=1e-6)
 
 
-# ---------------------------------------------------------------------------
-# EKF reconstruction renders gaps and excludes them from the RMSE
-# ---------------------------------------------------------------------------
+def test_open_loop_objective_excludes_only_flagged_room():
+    """Two rooms: corrupt open-window on room A must not change room B's fit."""
+    rooms = [_room("a"), _room("b")]
+    heaters = [_heater("a"), ElectricHeater("hb", "b", 3000.0, power_scale=1.0)]
+    est = KalmanMLEstimator(rooms, heaters, dt=900.0)
+
+    t0 = 1_000_000.0
+    dt = 900.0
+    n = 60
+
+    def _two_room(corrupt_a: bool):
+        history = []
+        for i in range(n):
+            a_open = 40 <= i < 60
+            ta = -50.0 if (a_open and corrupt_a) else (20.0 + 0.01 * i)
+            tb = 21.0 + 0.02 * (i % 7)
+            history.append(
+                {
+                    "y": [ta, tb],
+                    "u": [0.5, 0.5],
+                    "d_outdoor": 2.0,
+                    "d_solar": {"a": 0.0, "b": 0.0},
+                    "timestamp": t0 + dt * i,
+                    "window_open": {"a": a_open, "b": False},
+                }
+            )
+        return history
+
+    layout = _ThetaLayout(
+        n_rooms=2,
+        identifiable_sources=[],
+        identifiable_pairs=[],
+    )
+    theta = np.concatenate(
+        [
+            est._log_mass_prior,
+            est._log_r_prior,
+            est._q_int_prior,
+            np.zeros(2),
+        ]
+    )
+
+    def _mse(history):
+        std = est._convert_history_std(history, use_ym=True)
+        mse, _ = est._simulation_mse_and_grad(
+            theta,
+            layout,
+            std,
+            nominal_dt=est._dt,
+            max_window_steps=est._max_window_steps,
+            min_segment_steps=est._min_segment_steps,
+        )
+        return mse
+
+    assert np.isclose(
+        _mse(_two_room(False)),
+        _mse(_two_room(True)),
+        rtol=0,
+        atol=1e-9,
+    )
+
 
 def _ekf(history, dt=900.0):
     return run_sysid_ekf(
-        history, HouseModel([_room()]), [_heater()], ["studio"], dt,
-        horizon_steps=len(history), room_params={}, sigma_w=0.1, sigma_v=0.5,
+        history,
+        HouseModel([_room()]),
+        [_heater()],
+        ["studio"],
+        dt,
+        horizon_steps=len(history),
+        room_params={},
+        sigma_w=0.1,
+        sigma_v=0.5,
     )["per_room"]["studio"]
 
 
@@ -156,9 +234,7 @@ def test_ekf_reconstruction_gaps_open_window():
 
 
 def test_ekf_reconstruction_excludes_open_window_from_rmse():
-    """A corrupted *trailing* open-window block (nothing scored after it) leaves
-    the RMSE/MAE identical to the clean run — the samples never enter the error.
-    """
+    """Trailing corrupt open-window block leaves RMSE/MAE identical."""
     clean = _history(n=40, open_range=(30, 40), corrupt_open=False)
     corrupt = _history(n=40, open_range=(30, 40), corrupt_open=True)
     rc, rk = _ekf(clean), _ekf(corrupt)
@@ -168,41 +244,38 @@ def test_ekf_reconstruction_excludes_open_window_from_rmse():
 
 
 def test_ekf_reconstruction_reanchors_after_window():
-    """After the window closes the prediction restarts from the room's *real*
-    reading (re-anchored during the gap), not from a stale pre-window free-run.
-    """
+    """After the window closes, prediction restarts from the real reading."""
     dt = 900.0
     t0 = 1_000_000.0
     history = []
     for i in range(40):
         is_open = 20 <= i < 30
-        # Real trace: a genuine 5 °C cooling dip while the window is open that
-        # persists just past it, so a model that ignored the dip would mispredict.
         temp = 15.0 if 20 <= i < 32 else 20.0
-        history.append({
-            "y": [temp], "u": [0.0], "d_outdoor": 2.0, "d_solar": {"studio": 0.0},
-            "timestamp": t0 + dt * i, "window_open": {"studio": bool(is_open)},
-        })
+        history.append(
+            {
+                "y": [temp],
+                "u": [0.0],
+                "d_outdoor": 2.0,
+                "d_solar": {"studio": 0.0},
+                "timestamp": t0 + dt * i,
+                "window_open": {"studio": bool(is_open)},
+            }
+        )
     sim = _ekf(history)["simulation"]
-    # First scored step after the window (step 30) must track the real ~15 °C,
-    # which is only possible if the state was re-anchored through the gap.
     step30 = next(e for e in sim if round((e["time"] - t0) / dt) == 30)
     assert step30["predicted"] is not None
-    # Re-anchored → closer to the real 15 °C dip than to the pre-window 20 °C a
-    # stale (non-anchored) free-run would have held.  (The wall node's lag keeps
-    # it a little above 15 °C, which is physically correct.)
     assert abs(step30["predicted"] - 15.0) < abs(step30["predicted"] - 20.0)
 
-
-# ---------------------------------------------------------------------------
-# Open-loop diagnostic renders gaps and excludes them from the RMSE
-# ---------------------------------------------------------------------------
 
 def _open_loop(history, dt=900.0):
     system = HouseThermalSDE(HouseModel([_room()]), [_heater()], dt)
     return compute_open_loop_predictions(
-        history=history, system=system, room_names=["studio"],
-        n_rooms=1, dt=dt, segment_length=None,
+        history=history,
+        system=system,
+        room_names=["studio"],
+        n_rooms=1,
+        dt=dt,
+        segment_length=None,
     )["per_room"]["studio"]
 
 
