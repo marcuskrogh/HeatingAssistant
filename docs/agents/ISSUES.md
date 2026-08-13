@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-322 | Task | [Tweak] Exclude open door/window room samples from Parameter Estimation | To Do | — | docs/agents/PLAN-pe-exclude-window-open.md | `/implement SWD-322` (await PLAN approval) — https://github.com/marcuskrogh/HeatingAssistant/pull/610 |
 | SWD-321 | Task | [Tweak] Room DISTURBANCES outdoor/solar history as Measured-style points | Done | — | docs/agents/PLAN-disturbances-history-points.md | Done — feature #607; CalVer closeout https://github.com/marcuskrogh/HeatingAssistant/pull/609 |
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | Done | — | docs/ROADMAP.md | Done — map complete |
 | SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |

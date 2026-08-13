@@ -103,7 +103,7 @@
 - Task: SWD-322
 - Sub-tasks: —
 - Branch: `cursor/swd-322-pe-exclude-window-open-f7b1`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/610
 - Classification: tweak
 - Workflow: delta-fast
 
