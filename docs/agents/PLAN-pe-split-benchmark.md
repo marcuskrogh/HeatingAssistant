@@ -85,7 +85,7 @@
 - Task: [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326)
 - Sub-tasks: [SWD-327](https://marcusknielsen.atlassian.net/browse/SWD-327)
 - Branch: `cursor/swd-326-pe-effectiveness-747e`
-- PR: (opened at persist)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/611
 - Classification: feature
 - Workflow: feature-standard
 

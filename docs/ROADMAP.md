@@ -44,7 +44,7 @@ Product PE changes and in-app guidance wait until the SWD-326 report is evaluate
 - Model: `docs/agents/MODEL-pe-hidden-tw.md`
 - Plan: `docs/agents/PLAN-pe-split-benchmark.md`
 - Branch: `cursor/swd-326-pe-effectiveness-747e`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/611
 
 ## Next
 `/implement SWD-326` — Offline combined vs separated/staged PE benchmark (tests + report).
