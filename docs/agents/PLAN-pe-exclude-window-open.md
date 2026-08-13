@@ -108,5 +108,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-322` — Enforce per-room PE exclusion for override-active
-samples per PLAN.md (same branch/PR); or `/ship SWD-322` for remaining chain
+`/review-fix SWD-322` — Review and auto-fix per Workflow binding
