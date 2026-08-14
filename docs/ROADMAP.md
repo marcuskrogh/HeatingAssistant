@@ -9,7 +9,7 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - Primary score is hold-out open-loop air RMSE/MAE/R² (SWD-332). Physical θ error is a secondary check.
 - Fit criterion stays **open-loop output-error**. Kalman/PED one-step likelihood lost on that score in SWD-332.
 - Synthesise now; real home recordings come later as a separate check.
-- 2R2C is the working hypothesis, not a lock. Reevaluate structure if extras still fail the val bar.
+- 2R2C is the working hypothesis, not a lock. A 1R1C estimator on the current 2R2C plant lost badly on hold-out open-loop air RMSE (mean 4.2 °C vs 1.5 °C). Reevaluate structure only if extras still fail the val bar; do not drop to 1R1C to make \(C,R\) unique.
 
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
@@ -37,7 +37,7 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - Product vs harness-only for the first robust estimator — SWD-335.
 - Your home recordings as a later check.
 - In-app PE guidance.
-- A different RC structure if extras still miss the val bar.
+- A different RC structure if extras still miss the val bar (1R1C estimator already checked: worse free-run, not a PE shortcut).
 - Numerical \(\Delta t_{\min}\) for interior gaps.
 - Estimator-family bake-off (collocation OE, full CTSM) — parked; OE stays unless the val bar fails.
 

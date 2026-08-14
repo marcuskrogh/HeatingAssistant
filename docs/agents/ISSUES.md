@@ -88,6 +88,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — SWD-323: 1R1C vs 2R2C estimator on the household 2R2C plant; 1R1C degenerate mean val RMSE 4.17 °C vs 2R2C 1.53 °C (clean rooms 3.46 vs 0.45). Keep 2R2C. Next `/define SWD-335`.
 - 2026-08-14 — `/model` SWD-334: identify contact-gated \(UA_{\mathrm{open}}\) + day-gated \(q_{\mathrm{day}}\) (MAP prior toward 0, no \(C,R\) lock, keep OE). Probe: id-UA mean val 0.64 °C vs assumed-UA 0.83 °C; unregularized day-\(q\) grid overfits weak occ. Artifact `docs/agents/MODEL-pe-contact-ua-occupancy.md` on `cursor/swd-335-robust-ol-pe-747e`. SWD-334 Done. Next `/define SWD-335`.
 - 2026-08-14 — `/explore` SWD-323 rechart: robust/reliable open-loop PE; identify contact-gated UA + occupancy disturbance (no C,R lock); keep OE; SWD-334 then SWD-335 (blocked by 334). Val bar: beat `window_ua`+OL 0.83 °C, no closed-window regression. Next `/model SWD-334`.
 - 2026-08-14 — `/implement` SWD-332: train/val open-loop RMSE/MAE/R² on SWD-329 harness; 11 helper tests + on-demand 108-fit grid (~62 s); report updated; PR #613. Next `/review-fix SWD-332`.
