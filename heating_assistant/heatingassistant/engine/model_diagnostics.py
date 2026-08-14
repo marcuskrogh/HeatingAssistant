@@ -592,6 +592,14 @@ def compute_open_loop_predictions(
 
     has_disturbance_vector = hasattr(system, "disturbance_vector")
     rooms = getattr(getattr(system, "_model", None), "rooms", {}) or {}
+    set_window_open = getattr(system, "set_window_open", None)
+
+    def _ua_modelled(room_name: str) -> bool:
+        room_obj = rooms.get(room_name)
+        return float(getattr(room_obj, "ua_open", 0.0) or 0.0) > 0.0
+
+    def _gap_open(flags: Dict[str, Any], room_name: str) -> bool:
+        return bool(flags.get(room_name, False)) and not _ua_modelled(room_name)
 
     def _make_d(record: Dict[str, Any]) -> np.ndarray:
         outdoor = float(record.get("d_outdoor", 0.0))
@@ -675,10 +683,12 @@ def compute_open_loop_predictions(
         ts_prev = float(seg[0].get("timestamp", 0.0))
         has_wall_states = len(x) > n
         window_open0 = seg[0].get("window_open") or {}
+        if callable(set_window_open):
+            set_window_open(window_open0)
         for room_idx, room_name in enumerate(room_names):
             if room_idx >= len(y0):
                 continue
-            if window_open0.get(room_name, False):
+            if _gap_open(window_open0, room_name):
                 simulation[room_name].append(
                     {"time": ts_prev, "measured": None, "predicted": None}
                 )
@@ -694,7 +704,10 @@ def compute_open_loop_predictions(
             simulation[room_name].append(entry)
 
         valid_segment = True
+        prev_window_open = window_open0
         for record in seg[1:]:
+            if callable(set_window_open):
+                set_window_open(prev_window_open)
             d = _make_d(record)
             u = np.zeros(n_u)
             for k, value in enumerate(record.get("u", [])):
@@ -731,7 +744,7 @@ def compute_open_loop_predictions(
                 if room_idx >= len(y_meas):
                     continue
                 meas_val = float(y_meas[room_idx])
-                if window_open.get(room_name, False):
+                if _gap_open(window_open, room_name):
                     x[room_idx] = meas_val
                     simulation[room_name].append(
                         {"time": ts, "measured": None, "predicted": None}
@@ -748,6 +761,7 @@ def compute_open_loop_predictions(
                 if has_wall and n + room_idx < len(x):
                     sim_entry["predicted_wall"] = round(float(x[n + room_idx]), 3)
                 simulation[room_name].append(sim_entry)
+            prev_window_open = window_open
 
         if valid_segment:
             n_segments += 1

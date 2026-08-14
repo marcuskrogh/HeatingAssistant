@@ -106,6 +106,33 @@ class _Handler(BaseHTTPRequestHandler):
             room_slug = query.get("room_slug", [None])[0]
             self._send_json({"datasets": self.runtime.datasets(room_slug)})
             return
+        if path == "/api/pe_coverage":
+            query = parse_qs(parsed.query)
+            from heatingassistant.app import sysid_services
+
+            dataset_ids = query.get("dataset_ids", [])
+            expanded: list[str] = []
+            for raw in dataset_ids:
+                expanded.extend(part for part in str(raw).split(",") if part)
+            payload: dict[str, Any] = {
+                "room_slug": query.get("room_slug", [None])[0] or query.get("room_name", [None])[0],
+            }
+            if expanded:
+                payload["dataset_ids"] = expanded
+            dataset_id = query.get("dataset_id", [None])[0]
+            if dataset_id:
+                payload["dataset_id"] = dataset_id
+            start = self._optional_timestamp(query.get("window_start", [None])[0])
+            end = self._optional_timestamp(query.get("window_end", [None])[0])
+            if start is not None:
+                payload["window_start"] = start
+            if end is not None:
+                payload["window_end"] = end
+            horizon = self._optional_float(query.get("horizon_hours", [None])[0])
+            if horizon is not None:
+                payload["horizon_hours"] = horizon
+            self._send_json(asyncio.run(sysid_services.handle_get_pe_coverage(self.runtime, payload)))
+            return
         if path.startswith("/api/datasets/"):
             dataset_id = unquote(path.removeprefix("/api/datasets/"))
             self._send_json({"dataset": self.runtime.dataset(dataset_id)})

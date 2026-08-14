@@ -385,6 +385,9 @@ def _theta_from_result(result: Dict[str, Any]) -> Dict[str, float]:
             splits.get("r_aw_fraction", PRIOR["r_aw_fraction"])
         ),
         "t_wall_initial": float(tw0) if tw0 is not None else float("nan"),
+        "ua_open": float(
+            (result.get("estimated_ua_open") or {}).get(ROOM, 0.0) or 0.0
+        ),
         "success": 1.0 if result.get("success") else 0.0,
     }
 
@@ -432,20 +435,20 @@ def _step_fitted(
     heater: ElectricHeater,
     rec: Dict[str, Any],
     use_ua: bool,
+    ua_open: float = 0.0,
 ) -> float:
     duty = _duty(rec)
     solar = _solar_w(rec)
     tout = float(rec["d_outdoor"])
-    ta = float(model.rooms[ROOM].temperature)
     q_heat = duty * heater.max_power * heater.efficiency * heater.power_scale
-    q_ua = 0.0
-    if use_ua and _contact_open(rec):
-        q_ua = UA_ASSUMED * (tout - ta)
+    ua = UA_ASSUMED if use_ua else float(ua_open or 0.0)
+    model.rooms[ROOM].ua_open = ua
     model.step(
         dt=DT_S,
-        heat_inputs={ROOM: q_heat + q_ua},
+        heat_inputs={ROOM: q_heat},
         outdoor_temp=tout,
         solar_gains={ROOM: solar},
+        window_open={ROOM: _contact_open(rec)},
     )
     return float(model.rooms[ROOM].temperature)
 
@@ -457,9 +460,10 @@ def roll_wall_through_train(
 ) -> float:
     """Hidden wall at the train/val seam from an open-loop roll of fitted θ."""
     tw0 = _finite_or(theta.get("t_wall_initial", math.nan), 16.0)
+    ua_open = float(theta.get("ua_open", 0.0) or 0.0)
     model, heater = _model_from_theta(theta, 20.0, tw0)
     for rec in train:
-        _step_fitted(model, heater, rec, use_ua)
+        _step_fitted(model, heater, rec, use_ua, ua_open)
     return float(model.rooms[ROOM].wall_temperature)
 
 
@@ -472,9 +476,10 @@ def open_loop_air_preds(
 ) -> List[float]:
     """Free-run fitted 2R2C; no plant occupancy watts."""
     model, heater = _model_from_theta(theta, ta0, tw0)
+    ua_open = float(theta.get("ua_open", 0.0) or 0.0)
     preds: List[float] = []
     for rec in history:
-        preds.append(_step_fitted(model, heater, rec, use_ua))
+        preds.append(_step_fitted(model, heater, rec, use_ua, ua_open))
     return preds
 
 

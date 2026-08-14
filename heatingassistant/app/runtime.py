@@ -782,6 +782,7 @@ class HeatingRuntime:
                 return {"config": await self._set_room_enabled(payload)}
             sysid_handler = {
                 "estimate_parameters_ml": sysid_services.handle_estimate_parameters_ml,
+                "get_pe_coverage": sysid_services.handle_get_pe_coverage,
                 "run_sysid_simulation": sysid_services.handle_run_sysid_simulation,
                 "run_open_loop_simulation": sysid_services.handle_run_open_loop_simulation,
                 "store_identified_parameters": sysid_services.handle_store_identified_parameters,
@@ -2632,6 +2633,13 @@ class HeatingRuntime:
             for room_name in self.control_engine.model.room_names
         }
         setter(scales)
+        window_setter = getattr(controller, "set_window_open", None)
+        if callable(window_setter):
+            flags = {
+                room_name: self.is_window_override_active(room_name)
+                for room_name in self.control_engine.model.room_names
+            }
+            window_setter(flags)
 
     def _source_actuation_enabled(self, source_cfg: Mapping[str, Any] | None) -> bool:
         if not bool(self.options.get("system_enabled", False)):

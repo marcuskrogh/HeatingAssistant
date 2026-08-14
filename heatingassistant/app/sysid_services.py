@@ -257,6 +257,9 @@ def _merge_ml_result(runtime: Any, result: Mapping[str, Any], horizon_hours: flo
             existing["r_external"] = params.get("r_external")
         if room_name in internal_gains:
             existing["internal_gain"] = internal_gains[room_name]
+        ua_open = result.get("estimated_ua_open", {}) or {}
+        if room_name in ua_open:
+            existing["ua_open"] = ua_open[room_name]
         if room_name in solar_scales:
             existing["solar_scale"] = solar_scales[room_name]
         if room_name in envelope_splits and isinstance(envelope_splits[room_name], Mapping):
@@ -530,6 +533,52 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     return dict(result)
 
 
+async def handle_get_pe_coverage(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return recommended-data coverage for the next PE fit of one room."""
+    values = _payload(data)
+    room_name = _resolve_room(runtime, str(values.get("room_name") or values.get("room_slug") or ""))
+    dataset_ids = _dataset_id_list(values.get("dataset_ids"))
+    horizon_hours = values.get("horizon_hours")
+    history = await resolve_history(
+        runtime,
+        dataset_ids=dataset_ids,
+        dataset_id=None if dataset_ids else values.get("dataset_id"),
+        window_start=values.get("window_start"),
+        window_end=values.get("window_end"),
+        horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
+    )
+    dt = _dt(runtime)
+    from heatingassistant.engine.estimation.constants import _MIN_HISTORY_TIME_S
+    from heatingassistant.engine.estimation.coverage import categorise_pe_coverage
+
+    min_steps = max(10, int((_MIN_HISTORY_TIME_S / dt) + 0.999)) if dt > 0 else 10
+    return categorise_pe_coverage(
+        history,
+        room_name=room_name,
+        room_names=_room_names(runtime),
+        sources=_heat_sources(runtime),
+        dt=dt,
+        has_contact_entity=_room_has_contact(runtime, room_name),
+        min_history_steps=min_steps,
+    )
+
+
+def _room_has_contact(runtime: Any, room_name: str) -> bool:
+    rooms = getattr(runtime, "options", {}).get("rooms") or []
+    slug = _slug(runtime, room_name)
+    for room in rooms:
+        if not isinstance(room, Mapping):
+            continue
+        name = str(room.get("name") or "")
+        if name != room_name and _slug(runtime, name) != slug:
+            continue
+        sensors = room.get("window_sensors") or []
+        if isinstance(sensors, str):
+            return bool(sensors.strip())
+        return bool(sensors)
+    return False
+
+
 async def handle_store_identified_parameters(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
     values = _payload(data)
     room_name = _resolve_room(runtime, str(values.get("room_name") or ""))
@@ -647,6 +696,7 @@ def sysid_sensor_attrs(runtime: Any, room_name: str) -> dict[str, Any]:
         "thermal_mass": room_data.get("thermal_mass"),
         "r_external": room_data.get("r_external"),
         "internal_gain": room_data.get("internal_gain"),
+        "ua_open": room_data.get("ua_open"),
         "solar_scale": room_data.get("solar_scale"),
         "c_air_fraction": room_data.get("c_air_fraction"),
         "r_aw_fraction": room_data.get("r_aw_fraction"),
@@ -833,6 +883,7 @@ def parameter_confidence_sensor(runtime: Any, room_name: str) -> tuple[Any, dict
             "thermal_mass": validation.thermal_mass,
             "r_external": validation.r_external,
             "internal_gain": round(float(getattr(room, "internal_gain", 0.0) or 0.0), 2),
+            "ua_open": round(float(getattr(room, "ua_open", 0.0) or 0.0), 3),
             "time_constant_hours": round(float(validation.time_constant_hours), 2),
             "mass_valid": validation.mass_valid,
             "r_external_valid": validation.r_external_valid,
@@ -857,6 +908,7 @@ __all__ = [
     "handle_delete_dataset",
     "handle_delete_parameter_history",
     "handle_estimate_parameters_ml",
+    "handle_get_pe_coverage",
     "handle_run_open_loop_simulation",
     "handle_run_sysid_simulation",
     "handle_store_identified_parameters",

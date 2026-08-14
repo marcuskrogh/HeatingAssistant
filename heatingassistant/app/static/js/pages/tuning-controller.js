@@ -3,16 +3,16 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=120';
+} from '../components/time-series-chart.js?v=121';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=120';
+} from '../charts/mpc-preview-charts.js?v=121';
 import {
   updateControllerTuning,
   updateEstimationParams,
-} from '../ha-services.js?v=120';
+} from '../ha-services.js?v=121';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 

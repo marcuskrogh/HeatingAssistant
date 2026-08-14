@@ -207,6 +207,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         # Per-room covariance scaling for process noise (Phase 3 W1).
         # Values are covariance multipliers; 1.0 means no inflation.
         self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
+        self._window_open: np.ndarray = np.zeros(n, dtype=bool)
 
         # 2R2C state layout: ``x_phys = [T_a (n), T_w (n)]`` with
         # ``nx_phys = 2n`` — air block first so the measured/controlled
@@ -463,6 +464,34 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         self._room_q_scales = scales
         self._sigma_matrix = self._build_sigma_matrix()
 
+    def set_window_open(self, flags: Optional[Dict[str, bool]]) -> None:
+        """Record which rooms currently have an open window/door contact.
+
+        Used by the contact-gated extra-UA term in :meth:`f` / :meth:`dfdx`.
+        Missing names stay closed.
+        """
+        self._window_open[:] = False
+        if not flags:
+            return
+        for name, is_open in flags.items():
+            idx = self._room_idx.get(name)
+            if idx is None:
+                continue
+            self._window_open[idx] = bool(is_open)
+
+    def _contact_ua_watts(self, outdoor_temp: float, T_a: np.ndarray) -> np.ndarray:
+        """Air-node extra heat [W] from identified UA_open while contact is open."""
+        n = self._n_rooms
+        q = np.zeros(n, dtype=float)
+        for i, name in enumerate(self._room_list):
+            if not bool(self._window_open[i]):
+                continue
+            ua = float(getattr(self._model.rooms[name], "ua_open", 0.0) or 0.0)
+            if ua <= 0.0:
+                continue
+            q[i] = ua * (outdoor_temp - float(T_a[i]))
+        return q
+
     def _build_sigma_matrix(self) -> np.ndarray:
         """Build (or rebuild) the diagonal diffusion matrix σ from current Q
         scales.
@@ -617,6 +646,11 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
             delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys[:n])
             dT_phys[:n] += (delta_ua * self._inv_C_cap[:n]) * (outdoor_temp - T_phys[:n])
 
+        # Identified contact-gated extra UA (simulated air).
+        q_ua = self._contact_ua_watts(outdoor_temp, T_phys[:n])
+        if np.any(q_ua):
+            dT_phys[:n] += q_ua * self._inv_C_cap[:n]
+
         # Filter-block drift  dφ/dt = (u_cmd - φ) / τ_em.
         if m > 0:
             phi = x[nx_phys: nx_phys + m]
@@ -760,6 +794,20 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
             F_eff[self._diag_n_idx, self._diag_n_idx] -= delta_ua * self._inv_C_cap[:n]
         else:
             F_eff = self._F
+
+        if np.any(self._window_open):
+            extra = None
+            for i, name in enumerate(self._room_list):
+                if not bool(self._window_open[i]):
+                    continue
+                ua = float(getattr(self._model.rooms[name], "ua_open", 0.0) or 0.0)
+                if ua <= 0.0:
+                    continue
+                if extra is None:
+                    extra = F_eff if F_eff is not self._F else self._F.copy()
+                extra[i, i] -= ua * self._inv_C_cap[i]
+            if extra is not None:
+                F_eff = extra
 
         J = np.zeros((self._nx, self._nx))
         J[:nx_phys, :nx_phys] = F_eff
@@ -1956,6 +2004,11 @@ class HeatingMPCController:
         """Apply per-room EKF/OCP process-noise covariance multipliers."""
         self._system.set_room_process_noise_covariance_scales(scales_by_room)
         self._control_system.set_room_process_noise_covariance_scales(scales_by_room)
+
+    def set_window_open(self, flags: Dict[str, bool]) -> None:
+        """Hold current window/door contact on the EKF and MPC predictors."""
+        self._system.set_window_open(flags)
+        self._control_system.set_window_open(flags)
 
     @property
     def last_innovation(self) -> Optional[List[float]]:

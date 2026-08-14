@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=120';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=120';
-import { createCollapsible } from '../components/collapsible.js?v=120';
-import { formatNumber, modelFitLabel } from '../utils.js?v=120';
-import { setPanelHash } from '../panel-hash.js?v=120';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=121';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=121';
+import { createCollapsible } from '../components/collapsible.js?v=121';
+import { formatNumber, modelFitLabel } from '../utils.js?v=121';
+import { setPanelHash } from '../panel-hash.js?v=121';
 import {
   createDataset,
   deleteDataset,
@@ -12,9 +12,9 @@ import {
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=120';
-import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=120';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=120';
+} from '../ha-services.js?v=121';
+import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=121';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=121';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -139,6 +139,14 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
           <input class="form-input form-input--readonly" type="text" id="param-t-wall-initial"
             readonly value="&mdash;" tabindex="-1">
           <span class="form-hint">&deg;C &mdash; identified envelope temperature at window start (populated after parameter estimation; lock to hold fixed)</span>
+        </div>
+        <div class="form-group">
+          <div class="form-group__header">
+            <label class="form-label" for="param-ua-open">Open-contact UA</label>
+          </div>
+          <input class="form-input form-input--readonly" type="text" id="param-ua-open"
+            readonly value="&mdash;" tabindex="-1">
+          <span class="form-hint">W/K &mdash; extra outdoor exchange while a window or door contact is open (populated after parameter estimation)</span>
         </div>
       </div>
     </div>
@@ -353,6 +361,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const cAirFractionInput = container.querySelector('#param-c-air-fraction');
   const rAwFractionInput = container.querySelector('#param-r-aw-fraction');
   const tWallInitialInput = container.querySelector('#param-t-wall-initial');
+  const uaOpenInput = container.querySelector('#param-ua-open');
   const interRoomRSubsection = container.querySelector('#inter-room-r-subsection');
   const interRoomRList = container.querySelector('#inter-room-r-list');
   const sigmaWInput = container.querySelector('#param-sigma-w');
@@ -919,6 +928,11 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     } else if (sysidAttrs.t_wall_initial == null && !lockedParams.has('t_wall_initial')) {
       tWallInitialInput.value = '—';
     }
+    if (sysidAttrs.ua_open != null) {
+      uaOpenInput.value = formatNumber(sysidAttrs.ua_open, 2);
+    } else {
+      uaOpenInput.value = '—';
+    }
 
     const connections = sysidAttrs.estimated_inter_room_r;
     if (connections && typeof connections === 'object' && Object.keys(connections).length > 0) {
@@ -1310,6 +1324,16 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     getSelectedDatasetId: () => selectedDatasetId,
     runAutoIdentification,
   });
+  const refreshCoverage = () => {
+    if (refreshHandles && typeof refreshHandles.refreshCoverage === 'function') {
+      refreshHandles.refreshCoverage();
+    }
+  };
+  windowStartInput.addEventListener('change', refreshCoverage);
+  windowEndInput.addEventListener('change', refreshCoverage);
+  horizonInput.addEventListener('change', refreshCoverage);
+  windowModeRecentBtn.addEventListener('click', refreshCoverage);
+  windowModeCustomBtn.addEventListener('click', refreshCoverage);
 
   // Stored Datasets section is already appended inside setupDatasetsAndExperiments();
   // append Applied Model History here so it appears below Stored Datasets.

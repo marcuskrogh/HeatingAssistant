@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=120';
-import { createCollapsible } from '../components/collapsible.js?v=120';
-import { makeDataset } from '../components/time-series-chart.js?v=120';
+import { deleteDataset, createDataset } from '../ha-services.js?v=121';
+import { createCollapsible } from '../components/collapsible.js?v=121';
+import { makeDataset } from '../components/time-series-chart.js?v=121';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -64,6 +64,15 @@ export function setupDatasetsAndExperiments(ctx) {
       Select datasets for joint automatic parameter estimation, or load one into the
       custom window to inspect, validate, or identify it on its own.
     </p>
+    <div class="pe-coverage" id="pe-coverage">
+      <div class="params-subsection__title">Recommended data</div>
+      <p class="pe-coverage__desc">
+        What this room should supply for a reliable estimate. Checked items already
+        cover the recommend duration or identifiability gate. These indicators are
+        a guide only — they do not exclude samples from the fit.
+      </p>
+      <ul class="pe-coverage-list" id="pe-coverage-list"></ul>
+    </div>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
         Run Automatic Parameter Estimation (0)
@@ -85,6 +94,7 @@ export function setupDatasetsAndExperiments(ctx) {
   const dsIdStatus = dsCollapsible.body.querySelector('#ds-id-status');
   const btnIdentifySelected = dsCollapsible.body.querySelector('#btn-identify-selected');
   const btnClearSelection = dsCollapsible.body.querySelector('#btn-clear-selection');
+  const coverageListEl = dsCollapsible.body.querySelector('#pe-coverage-list');
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
@@ -120,6 +130,48 @@ export function setupDatasetsAndExperiments(ctx) {
     btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
     btnIdentifySelected.disabled = n === 0;
     btnClearSelection.disabled = n === 0;
+    refreshCoverage();
+  }
+
+  function _fmtHaveRecommend(haveS, recommendS) {
+    if (haveS == null && recommendS == null) return '';
+    const have = haveS == null ? '—' : _fmtDuration(haveS);
+    const rec = recommendS == null ? '—' : _fmtDuration(recommendS);
+    return `${have} / ${rec} recommended`;
+  }
+
+  async function refreshCoverage() {
+    if (!coverageListEl || !connection || !connection.getPeCoverage) return;
+    const opts = { roomSlug };
+    if (selectedIds.size > 0) {
+      opts.datasetIds = [...selectedIds];
+    } else {
+      const { startTs, endTs } = currentWindowBounds();
+      opts.windowStart = startTs;
+      opts.windowEnd = endTs;
+    }
+    const coverage = await connection.getPeCoverage(opts);
+    const cats = coverage && Array.isArray(coverage.categories) ? coverage.categories : [];
+    if (!cats.length) {
+      coverageListEl.innerHTML = '<li class="pe-coverage-item pe-coverage-item--empty">No history in the next-fit window yet.</li>';
+      return;
+    }
+    coverageListEl.innerHTML = cats.map((cat) => {
+      const status = cat.status || 'unchecked';
+      const na = status === 'na';
+      const checked = status === 'checked';
+      const mark = na ? 'N/A' : (checked ? '✓' : '');
+      const dur = na ? '' : _fmtHaveRecommend(cat.have_s, cat.recommend_s);
+      const hint = cat.hint ? `<span class="pe-coverage-hint">${cat.hint}</span>` : '';
+      return `<li class="pe-coverage-item pe-coverage-item--${status}">
+        <span class="pe-coverage-check" aria-hidden="true">${mark}</span>
+        <span class="pe-coverage-body">
+          <span class="pe-coverage-label">${cat.label || ''}</span>
+          ${dur ? `<span class="pe-coverage-dur">${dur}</span>` : ''}
+          ${hint}
+        </span>
+      </li>`;
+    }).join('');
   }
 
   function markLoadedRow() {
@@ -321,6 +373,7 @@ export function setupDatasetsAndExperiments(ctx) {
 
   return {
     destroy() { clearInterval(timer); },
+    refreshCoverage,
   };
 }
 
