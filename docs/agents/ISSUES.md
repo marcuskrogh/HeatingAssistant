@@ -4,7 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-329` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/explore SWD-323` |
+| SWD-331 | Task | [Research] PE methods for grey-box 2R2C / RC building models | Done | SWD-323 | docs/agents/RESEARCH-pe-methods.md | `/explore SWD-323` |
 | SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/review-fix SWD-329` |
 | SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | In Review | SWD-323 | docs/agents/PLAN-pe-robustness-household.md | `/review-fix SWD-329` |
 | SWD-330 | Sub-task | Offline PE robustness harness + on-demand factorial + report | Done | SWD-329 | docs/agents/REPORT-pe-robustness-household.md | — |
@@ -84,6 +85,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/research` SWD-331: PE method families (OE MSE vs stochastic ML/CTSM, collocation, two-step PEM, ARX); finding docs `docs/agents/RESEARCH-pe-methods.md` on `cursor/swd-331-pe-methods-747e` (no PR). SWD-331 Done. Next `/explore SWD-323`. SWD-329 stays In Review.
 - 2026-08-13 — `/implement` SWD-329: on-demand household PE factorial + helper tests; report `docs/agents/REPORT-pe-robustness-household.md`; PR #612; In Review. Next `/review-fix SWD-329`.
 - 2026-08-13 — `/define` SWD-329: offline PE robustness factorial (occupancy × openings; six procedures × open-loop/Kalman); occupancy + extra UA harness-only; PLAN `docs/agents/PLAN-pe-robustness-household.md`; Sub-task SWD-330; feature-standard. Next `/implement SWD-329`.
 - 2026-08-13 — `/research` SWD-328: household-like 2R2C extras (occupancy ≠ window); finding docs on `cursor/swd-329-pe-robustness-747e`; SWD-328 Done. Next `/define SWD-329`.

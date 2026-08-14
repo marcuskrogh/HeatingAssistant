@@ -13,6 +13,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 - SWD-326: offline combined vs separated/staged bake-off; no product winner. Report `docs/agents/REPORT-pe-dataset-separation.md`.
 - SWD-328: occupancy is extra air-node heat; open window/door is extra outdoor exchange, not the same term. True \(C,R\) recovery needs clean regimes or those extras in the estimator. Artifact `docs/agents/RESEARCH-pe-robustness-household.md`.
 - SWD-329: offline factorial (occupancy × openings; six procedures × open-loop/Kalman). Occupancy + extra UA are harness best-effort. Plan `docs/agents/PLAN-pe-robustness-household.md`.
+- SWD-331: estimator *families* (OE MSE vs stochastic ML / CTSM / collocation / two-step PEM). Finding docs only. Artifact `docs/agents/RESEARCH-pe-methods.md`.
 
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
@@ -22,14 +23,17 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 | 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | Done | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
 | 4 | Synthesise household-like single-room traces and identify robust PE approaches | research | — | Done | [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328) |
 | 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | In Review | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
+| 6 | Survey PE method families for grey-box 2R2C (supportive) | research | — | Done | [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331) |
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation, guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
 - [SWD-325 model](https://marcusknielsen.atlassian.net/browse/SWD-325) — \(T_{w}(t_{0})\) as PE decision; \(T_{w}(t)\) not; window merge/split; 24 h box \(\pm 25\%\) width. Artifact `docs/agents/MODEL-pe-hidden-tw.md`.
 - [SWD-326 define](https://marcusknielsen.atlassian.net/browse/SWD-326) — offline combined vs separated/staged bake-off; report does not pick a product winner. Artifact `docs/agents/REPORT-pe-dataset-separation.md`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/611 (`9b1e380`).
 - [SWD-328 research](https://marcusknielsen.atlassian.net/browse/SWD-328) — occupancy ≠ window; known-truth extras; disturbance-state vs constant \(Q_\mathrm{int}\); SWD-322 excludes openings. Artifact `docs/agents/RESEARCH-pe-robustness-household.md`.
+- [SWD-331 research](https://marcusknielsen.atlassian.net/browse/SWD-331) — production PE is deterministic OE (simulation MSE); literature that scores physical \(\theta\) recommends stochastic ML (CTSM/PED) with diffusion ID; collocation improves OE numerics; ARX for HLC not 2R2C \(\theta\). Artifact `docs/agents/RESEARCH-pe-methods.md`. No product winner.
 
 ## Not yet specified
+- Estimator-family bake-off (stochastic ML / collocation OE / two-step PEM vs current simulation MSE) — not specified; SWD-331 is evidence only.
 - Extra estimated terms or a different RC structure if 2R2C plant + 2R2C estimator fails.
 - Your home recordings as a later check.
 - Product estimator changes and in-app guidance.
@@ -44,13 +48,15 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 ## Tracker
 - Provider: jira (`SWD`)
 - Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
-- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330)
+- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330), [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331)
 - Research (prior): `docs/agents/RESEARCH-pe-effectiveness.md`
-- Research (this slice): `docs/agents/RESEARCH-pe-robustness-household.md`
+- Research (household extras): `docs/agents/RESEARCH-pe-robustness-household.md`
+- Research (this slice): `docs/agents/RESEARCH-pe-methods.md`
 - Model: `docs/agents/MODEL-pe-hidden-tw.md`
 - Prior analysis: `docs/agents/PLAN-pe-split-benchmark.md`, `docs/agents/REPORT-pe-dataset-separation.md`
 - Plan: `docs/agents/PLAN-pe-robustness-household.md`
-- Delivery branch: `cursor/swd-329-pe-robustness-747e`
+- Delivery branch (SWD-329): `cursor/swd-329-pe-robustness-747e` (PR #612)
+- Finding-docs branch (SWD-331): `cursor/swd-331-pe-methods-747e` (no PR; SWD-329 delivery PR already open)
 
 ## Next
-`/review-fix SWD-329` — review the robustness report and harness (same PR).
+`/explore SWD-323` — rechart whether to bake off estimator families (SWD-331) or finish `/review-fix SWD-329` first.
