@@ -637,6 +637,7 @@ async def handle_store_identified_parameters(runtime: Any, data: Mapping[str, An
         c_air_fraction=float(values["c_air_fraction"]) if values.get("c_air_fraction") is not None else None,
         r_aw_fraction=float(values["r_aw_fraction"]) if values.get("r_aw_fraction") is not None else None,
         heater_scales=dict(values["heater_scales"]) if isinstance(values.get("heater_scales"), Mapping) else None,
+        ua_open=float(values["ua_open"]) if values.get("ua_open") not in (None, "") else None,
     )
     _persist_runtime_config(runtime)
     return {"stored": True, "estimated_params": snapshot}

@@ -283,6 +283,7 @@ def store_identified_parameters(
     c_air_fraction: Optional[float] = None,
     r_aw_fraction: Optional[float] = None,
     heater_scales: Optional[Mapping[str, float]] = None,
+    ua_open: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Apply one room's identified parameters and persist a full snapshot."""
 
@@ -313,6 +314,8 @@ def store_identified_parameters(
         room.c_air_fraction = float(c_air_fraction)
     if r_aw_fraction is not None:
         room.r_aw_fraction = float(r_aw_fraction)
+    if ua_open is not None:
+        room.ua_open = max(0.0, float(ua_open))
     if heater_scales:
         for src in heat_sources:
             name = str(getattr(src, "name", ""))

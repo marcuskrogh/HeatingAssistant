@@ -272,6 +272,26 @@ def test_handle_get_pe_coverage_uses_buffer_history(monkeypatch):
     ]
 
 
+def test_handle_get_pe_coverage_unknown_room_raises():
+    runtime = SimpleNamespace(
+        options={"rooms": []},
+        control_engine=SimpleNamespace(model=SimpleNamespace(room_names=["studio"])),
+    )
+    with pytest.raises(ValueError, match="not found"):
+        asyncio.run(handle_get_pe_coverage(runtime, {}))
+
+
+def test_pe_coverage_http_maps_unknown_room_to_bad_request():
+    main = (
+        Path(__file__).resolve().parents[1]
+        / "heatingassistant"
+        / "app"
+        / "__main__.py"
+    ).read_text(encoding="utf-8")
+    assert "handle_get_pe_coverage" in main
+    assert "HTTPStatus.BAD_REQUEST" in main.split("if path == \"/api/pe_coverage\":", 1)[1].split("if path.startswith", 1)[0]
+
+
 def test_union_pe_coverage_checks_category_if_any_dataset_covers_it():
     from heatingassistant.engine.estimation.coverage import union_pe_coverage
 
@@ -333,6 +353,7 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert 'type="checkbox"' not in datasets
     assert "coverage_categories" in datasets
     assert "param-ua-open" in detail
+    assert "ua_open: uaOpen" in detail
     assert "refreshCoverage" in detail
     assert "heating_assistant/get_pe_coverage" in conn
     assert ".pe-coverage-row" in css

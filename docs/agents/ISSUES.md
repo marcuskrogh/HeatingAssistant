@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-335` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/ship SWD-335` |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | `/implement SWD-335` |
-| SWD-335 | Task | [Define] Robust open-loop PE for household extras | In Review | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | `/review-fix SWD-335` |
+| SWD-335 | Task | [Define] Robust open-loop PE for household extras | In Review | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | `/ship SWD-335` |
 | SWD-336 | Sub-task | Identified contact-gated UA in production open-loop PE | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-337 | Sub-task | Backend dataset category coverage for PE | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-338 | Sub-task | PE page recommended-data checklist | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
@@ -92,6 +92,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/review-fix` SWD-335 CLEAN (focused): 0 blockers / 3 should-fix addressed (Apply persists UA_open, pe_coverage 400, on-demand val bar). Next `/ship SWD-335`.
 - 2026-08-14 — `/implement` SWD-335 UX: recommended-data category tiles (grey Not set to teal Supplied); not native checkboxes. Cache-bust 123. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/implement` SWD-335 UX: compact category checkboxes driven by Use on stored datasets; dataset summary chips; Run recommended estimation when all required boxes are checked. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/implement` SWD-335: identified contact-gated UA_open in production open-loop PE; PE recommended-data checklist + `/api/pe_coverage`; CalVer 2026.08.3; PR #614. Next `/review-fix SWD-335`.

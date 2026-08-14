@@ -134,8 +134,7 @@
 ## Open items
 - Exact copy strings for category labels (implement may tune wording).
 - Whether fitted \(UA_{\mathrm{open}}\) is shown as an editable room
-  parameter next to \(C,R\) (yes if it already has a param slot; otherwise
-  report-only in estimate result this slice).
+  parameter next to \(C,R\) (readonly display; Apply persists it).
 
 ## Tracker
 - Provider: jira
@@ -148,4 +147,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/review-fix SWD-335` — Review and auto-fix per Workflow binding
+`/ship SWD-335` — review-fix CLEAN; merge and close out

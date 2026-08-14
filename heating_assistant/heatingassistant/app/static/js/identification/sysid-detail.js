@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=123';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=123';
-import { createCollapsible } from '../components/collapsible.js?v=123';
-import { formatNumber, modelFitLabel } from '../utils.js?v=123';
-import { setPanelHash } from '../panel-hash.js?v=123';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=124';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=124';
+import { createCollapsible } from '../components/collapsible.js?v=124';
+import { formatNumber, modelFitLabel } from '../utils.js?v=124';
+import { setPanelHash } from '../panel-hash.js?v=124';
 import {
   createDataset,
   deleteDataset,
@@ -12,9 +12,9 @@ import {
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=123';
-import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=123';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=123';
+} from '../ha-services.js?v=124';
+import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=124';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -1223,6 +1223,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         const val = parseFloat(inp.value);
         if (isFinite(val)) heaterScales[srcName] = val;
       }
+      const uaOpen = parseFloat(uaOpenInput.value);
       await storeIdentifiedParameters(hass, {
         room_name: roomSlug,
         thermal_mass: parseFloat(thermalMassInput.value),
@@ -1231,6 +1232,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         solar_scale: parseFloat(solarScaleInput.value),
         c_air_fraction: parseFloat(cAirFractionInput.value),
         r_aw_fraction: parseFloat(rAwFractionInput.value),
+        ...(Number.isFinite(uaOpen) ? { ua_open: uaOpen } : {}),
         ...(Object.keys(heaterScales).length ? { heater_scales: heaterScales } : {}),
         source: 'manual',
       });

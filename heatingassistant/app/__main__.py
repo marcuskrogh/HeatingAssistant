@@ -131,7 +131,12 @@ class _Handler(BaseHTTPRequestHandler):
             horizon = self._optional_float(query.get("horizon_hours", [None])[0])
             if horizon is not None:
                 payload["horizon_hours"] = horizon
-            self._send_json(asyncio.run(sysid_services.handle_get_pe_coverage(self.runtime, payload)))
+            try:
+                self._send_json(
+                    asyncio.run(sysid_services.handle_get_pe_coverage(self.runtime, payload))
+                )
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         if path.startswith("/api/datasets/"):
             dataset_id = unquote(path.removeprefix("/api/datasets/"))
