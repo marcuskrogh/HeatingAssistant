@@ -97,9 +97,9 @@
 - Sub-tasks: [SWD-333](https://marcusknielsen.atlassian.net/browse/SWD-333)
 - Relates: [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329)
 - Branch: `cursor/swd-332-pe-val-acc-747e`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/613
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-332` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-332` — review the val-accuracy harness and report (same PR)

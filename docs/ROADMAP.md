@@ -23,7 +23,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 | 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | Done | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
 | 4 | Synthesise household-like single-room traces and identify robust PE approaches | research | — | Done | [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328) |
 | 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | In Review | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
-| 6 | Offline PE validation open-loop prediction accuracy | tweak | SWD-329 | To Do | [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332) |
+| 6 | Offline PE validation open-loop prediction accuracy | tweak | SWD-329 | In Review | [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332) |
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation, guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
@@ -54,7 +54,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 - Plan (SWD-329): `docs/agents/PLAN-pe-robustness-household.md`
 - Plan (this slice): `docs/agents/PLAN-pe-validation-accuracy.md`
 - Delivery branch (SWD-329): `cursor/swd-329-pe-robustness-747e` (PR #612)
-- Delivery branch (SWD-332): `cursor/swd-332-pe-val-acc-747e` (stacked on SWD-329)
+- Delivery branch (SWD-332): `cursor/swd-332-pe-val-acc-747e` (stacked on SWD-329; PR https://github.com/marcuskrogh/HeatingAssistant/pull/613)
 
 ## Next
-`/implement SWD-332` — hold-out open-loop validation accuracy on the SWD-329 harness.
+`/review-fix SWD-332` — review the val-accuracy harness and report (same PR).
