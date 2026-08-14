@@ -4,7 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-332` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/model SWD-334` |
+| SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | To Do | SWD-323 | docs/ROADMAP.md | `/model SWD-334` |
+| SWD-335 | Task | [Define] Robust open-loop PE for household extras | To Do | SWD-323 | docs/ROADMAP.md | `/define SWD-335` after SWD-334 Done |
 | SWD-332 | Task | [Tweak] Offline PE validation open-loop prediction accuracy | In Review | SWD-323 | docs/agents/PLAN-pe-validation-accuracy.md | `/review-fix SWD-332` |
 | SWD-333 | Sub-task | Harness train/val open-loop score + report | Done | SWD-332 | docs/agents/REPORT-pe-robustness-household.md | — |
 | SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/review-fix SWD-329` |
@@ -86,6 +88,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/explore` SWD-323 rechart: robust/reliable open-loop PE; identify contact-gated UA + occupancy disturbance (no C,R lock); keep OE; SWD-334 then SWD-335 (blocked by 334). Val bar: beat `window_ua`+OL 0.83 °C, no closed-window regression. Next `/model SWD-334`.
 - 2026-08-14 — `/implement` SWD-332: train/val open-loop RMSE/MAE/R² on SWD-329 harness; 11 helper tests + on-demand 108-fit grid (~62 s); report updated; PR #613. Next `/review-fix SWD-332`.
 - 2026-08-14 — `/define` SWD-332: hold-out open-loop val RMSE/MAE/R² on SWD-329 harness (MPC-relevant); θ error secondary; PLAN `docs/agents/PLAN-pe-validation-accuracy.md`; Sub-task SWD-333; delta-fast. Next `/implement SWD-332`.
 - 2026-08-13 — `/implement` SWD-329: on-demand household PE factorial + helper tests; report `docs/agents/REPORT-pe-robustness-household.md`; PR #612; In Review. Next `/review-fix SWD-329`.
