@@ -132,7 +132,7 @@
 - Task: [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
 - Sub-tasks: [SWD-336](https://marcusknielsen.atlassian.net/browse/SWD-336), [SWD-337](https://marcusknielsen.atlassian.net/browse/SWD-337), [SWD-338](https://marcusknielsen.atlassian.net/browse/SWD-338), [SWD-339](https://marcusknielsen.atlassian.net/browse/SWD-339)
 - Branch: `cursor/swd-335-robust-ol-pe-747e`
-- PR: (filled after open)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/614
 - Classification: feature
 - Workflow: feature-standard
 
