@@ -31,7 +31,10 @@ HEATER = "lab_heater"
 T0 = 1_700_000_000.0
 SOLAR_OFF = 1.0  # W
 HEATER_OFF = 0.02  # duty
-N_STEPS = 96  # 24 h at 15 min
+N_STEPS = 96  # 24 h at 15 min (train or val slice)
+N_TRAIN = N_STEPS
+N_VAL = N_STEPS
+N_TOTAL = N_TRAIN + N_VAL
 MAXITER = 25
 UA_ASSUMED = 15.0  # W/K — harness guess, not plant truth
 NIGHT_END_H = 6.0
@@ -158,10 +161,22 @@ def _excitation(k: int) -> Tuple[float, float]:
     return duty, solar
 
 
+def split_train_val(
+    history: Sequence[Dict[str, Any]],
+    n_train: int = N_TRAIN,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Time-separated hold-out. Fits must see only the train slice."""
+    if len(history) <= n_train:
+        raise ValueError(
+            f"need > {n_train} steps for train/val, have {len(history)}"
+        )
+    return list(history[:n_train]), list(history[n_train:])
+
+
 def simulate_history(
     occ: str,
     win: str,
-    n_steps: int = N_STEPS,
+    n_steps: int = N_TOTAL,
     seed: int = 0,
 ) -> List[Dict[str, Any]]:
     """2R2C plant with extras added on the air node via heat_inputs."""
@@ -350,6 +365,9 @@ def _run_fit(
 
 def _theta_from_result(result: Dict[str, Any]) -> Dict[str, float]:
     ep = result.get("estimated_params", {}).get(ROOM, {})
+    splits = (result.get("estimated_envelope_splits") or {}).get(ROOM) or {}
+    q_int = (result.get("estimated_internal_gains") or {}).get(ROOM, 0.0)
+    tw0 = (result.get("estimated_t_wall_initial") or {}).get(ROOM, float("nan"))
     return {
         "thermal_mass": float(ep.get("thermal_mass", math.nan)),
         "r_external": float(ep.get("r_external", math.nan)),
@@ -359,6 +377,14 @@ def _theta_from_result(result: Dict[str, Any]) -> Dict[str, float]:
         "power_scale": float(
             result.get("estimated_heater_scales", {}).get(HEATER, math.nan)
         ),
+        "internal_gain": float(q_int if q_int is not None else 0.0),
+        "c_air_fraction": float(
+            splits.get("c_air_fraction", PRIOR["c_air_fraction"])
+        ),
+        "r_aw_fraction": float(
+            splits.get("r_aw_fraction", PRIOR["r_aw_fraction"])
+        ),
+        "t_wall_initial": float(tw0) if tw0 is not None else float("nan"),
         "success": 1.0 if result.get("success") else 0.0,
     }
 
@@ -367,6 +393,125 @@ def _rel_err(est: float, truth: float) -> float:
     if not math.isfinite(est) or abs(truth) < 1e-12:
         return float("nan")
     return abs(est - truth) / abs(truth)
+
+
+def _finite_or(value: float, fallback: float) -> float:
+    return float(value) if math.isfinite(value) else float(fallback)
+
+
+def _model_from_theta(
+    theta: Dict[str, float], ta: float, tw: float,
+) -> Tuple[HouseModel, ElectricHeater]:
+    room = _truth_room(
+        thermal_mass=_finite_or(theta.get("thermal_mass", math.nan), PRIOR["thermal_mass"]),
+        r_external=_finite_or(theta.get("r_external", math.nan), PRIOR["r_external"]),
+        solar_scale=_finite_or(theta.get("solar_scale", math.nan), PRIOR["solar_scale"]),
+        c_air_fraction=_finite_or(
+            theta.get("c_air_fraction", math.nan), PRIOR["c_air_fraction"],
+        ),
+        r_aw_fraction=_finite_or(
+            theta.get("r_aw_fraction", math.nan), PRIOR["r_aw_fraction"],
+        ),
+        internal_gain=float(theta.get("internal_gain", 0.0) or 0.0),
+        temperature=ta,
+        wall_temperature=tw,
+    )
+    return HouseModel([room]), _heater(
+        _finite_or(theta.get("power_scale", math.nan), PRIOR["power_scale"])
+    )
+
+
+def _contact_open(rec: Dict[str, Any]) -> bool:
+    if rec.get("window_contact") is not None:
+        return bool(rec["window_contact"])
+    return _is_open(rec)
+
+
+def _step_fitted(
+    model: HouseModel,
+    heater: ElectricHeater,
+    rec: Dict[str, Any],
+    use_ua: bool,
+) -> float:
+    duty = _duty(rec)
+    solar = _solar_w(rec)
+    tout = float(rec["d_outdoor"])
+    ta = float(model.rooms[ROOM].temperature)
+    q_heat = duty * heater.max_power * heater.efficiency * heater.power_scale
+    q_ua = 0.0
+    if use_ua and _contact_open(rec):
+        q_ua = UA_ASSUMED * (tout - ta)
+    model.step(
+        dt=DT_S,
+        heat_inputs={ROOM: q_heat + q_ua},
+        outdoor_temp=tout,
+        solar_gains={ROOM: solar},
+    )
+    return float(model.rooms[ROOM].temperature)
+
+
+def roll_wall_through_train(
+    theta: Dict[str, float],
+    train: Sequence[Dict[str, Any]],
+    use_ua: bool = False,
+) -> float:
+    """Hidden wall at the train/val seam from an open-loop roll of fitted θ."""
+    tw0 = _finite_or(theta.get("t_wall_initial", math.nan), 16.0)
+    model, heater = _model_from_theta(theta, 20.0, tw0)
+    for rec in train:
+        _step_fitted(model, heater, rec, use_ua)
+    return float(model.rooms[ROOM].wall_temperature)
+
+
+def open_loop_air_preds(
+    theta: Dict[str, float],
+    history: Sequence[Dict[str, Any]],
+    tw0: float,
+    ta0: float,
+    use_ua: bool = False,
+) -> List[float]:
+    """Free-run fitted 2R2C; no plant occupancy watts."""
+    model, heater = _model_from_theta(theta, ta0, tw0)
+    preds: List[float] = []
+    for rec in history:
+        preds.append(_step_fitted(model, heater, rec, use_ua))
+    return preds
+
+
+def score_air_predictions(
+    preds: Sequence[float],
+    history: Sequence[Dict[str, Any]],
+) -> Dict[str, float]:
+    meas = np.asarray(
+        [float((rec.get("y") or rec["ym"])[0]) for rec in history],
+        dtype=float,
+    )
+    yhat = np.asarray(preds, dtype=float)
+    err = yhat - meas
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+    mae = float(np.mean(np.abs(err)))
+    denom = float(np.sum((meas - np.mean(meas)) ** 2))
+    r2 = float("nan") if denom < 1e-12 else float(1.0 - np.sum(err ** 2) / denom)
+    return {"rmse": rmse, "mae": mae, "r2": r2}
+
+
+def validate_open_loop(
+    theta: Dict[str, float],
+    train: Sequence[Dict[str, Any]],
+    val: Sequence[Dict[str, Any]],
+    use_ua: bool = False,
+) -> Dict[str, float]:
+    """Open-loop air accuracy on val. Ta at the seam from last train measurement."""
+    if not val or not train:
+        return {"rmse": float("nan"), "mae": float("nan"), "r2": float("nan")}
+    tw_seam = roll_wall_through_train(theta, train, use_ua=use_ua)
+    ta_seam = float((train[-1].get("y") or train[-1]["ym"])[0])
+    preds = open_loop_air_preds(theta, val, tw_seam, ta_seam, use_ua=use_ua)
+    return score_air_predictions(preds, val)
+
+
+def procedure_uses_ua(name: str) -> bool:
+    return name in ("window_ua", "both")
 
 
 def procedure_today_combined(
@@ -521,6 +666,9 @@ class Row:
     rel: Dict[str, float]
     message: str
     extra: str = field(default="")
+    val_rmse: float = field(default=float("nan"))
+    val_mae: float = field(default=float("nan"))
+    val_r2: float = field(default=float("nan"))
 
 
 def run_bakeoff(
@@ -532,11 +680,12 @@ def run_bakeoff(
     grid = scenarios or [(o, w) for o in OCC_LEVELS for w in WIN_LEVELS]
     procs = procedures or PROCEDURES
     for occ, win in grid:
-        history = simulate_history(occ, win)
+        history = simulate_history(occ, win, n_steps=N_TOTAL)
+        train, val = split_train_val(history)
         kind = scenario_name(occ, win)
         for name, fn in procs:
             for path in paths:
-                result = fn(history, path)
+                result = fn(train, path)
                 theta = _theta_from_result(result)
                 rel = {
                     k: _rel_err(theta[k], TRUTH[k])
@@ -551,6 +700,11 @@ def run_bakeoff(
                 locked = result.get("locked_keys")
                 if locked:
                     extra = (extra + f" locked={locked}").strip()
+                scores = {"rmse": float("nan"), "mae": float("nan"), "r2": float("nan")}
+                if result.get("success"):
+                    scores = validate_open_loop(
+                        theta, train, val, use_ua=procedure_uses_ua(name),
+                    )
                 rows.append(Row(
                     scenario=kind,
                     procedure=name,
@@ -560,6 +714,9 @@ def run_bakeoff(
                     rel=rel,
                     message=str(result.get("message") or ""),
                     extra=extra,
+                    val_rmse=scores["rmse"],
+                    val_mae=scores["mae"],
+                    val_r2=scores["r2"],
                 ))
     return rows
 
@@ -571,8 +728,10 @@ def write_report(rows: List[Row], path: str = REPORT_PATH) -> str:
     lines = [
         "# Report: PE robustness on household-like 2R2C traces",
         "",
-        "Offline synthetic factorial for SWD-329. **No product winner is declared.**",
-        "Judge whether extras / procedures recover true θ well enough to ship.",
+        "Offline synthetic factorial for SWD-329 + SWD-332. "
+        "**No product winner is declared.**",
+        "Primary score is **hold-out open-loop indoor-air accuracy** "
+        "(MPC-relevant free-run). Relative |error| vs true θ is secondary.",
         "",
         "## Truth",
         "",
@@ -620,7 +779,8 @@ def write_report(rows: List[Row], path: str = REPORT_PATH) -> str:
         "",
         "## Runtime caps",
         "",
-        f"- n_steps = {N_STEPS} (24 h at 15 min).",
+        f"- n_train = {N_TRAIN} (24 h); n_val = {N_VAL} (next 24 h). "
+        "Fits see train only.",
         f"- maxiter = {MAXITER}; physics-informed start skipped (prior only).",
         f"- Grid size: {n_expected} fits "
         f"({len(OCC_LEVELS)}×{len(WIN_LEVELS)} scenarios × "
@@ -628,11 +788,33 @@ def write_report(rows: List[Row], path: str = REPORT_PATH) -> str:
         "procedures add extra inner fits.",
         "- Marker: `pytest.mark.ondemand` — not CI.",
         "",
-        "## Relative |error| vs true θ",
+        "## Validation open-loop air accuracy (primary)",
+        "",
+        "Fitted 2R2C free-run on the hold-out day. Air at the seam is the last "
+        "train measurement; wall is rolled through train with fitted θ. "
+        "Plant occupancy watts are not injected. Assumed-UA procedures apply "
+        "the same assumed UA × contact on val.",
+        "",
+        "| Scenario | Procedure | Path | OK | RMSE °C | MAE °C | R² | notes |",
+        "|----------|-----------|------|----|---------|--------|----|-------|",
+    ]
+    for row in rows:
+        def fmt_f(v: float, nd: int = 3) -> str:
+            return "—" if not math.isfinite(v) else f"{v:.{nd}f}"
+        notes = (row.extra or "").replace("|", "/")
+        lines.append(
+            f"| {row.scenario} | {row.procedure} | {row.path} | "
+            f"{'yes' if row.success else 'no'} | "
+            f"{fmt_f(row.val_rmse)} | {fmt_f(row.val_mae)} | "
+            f"{fmt_f(row.val_r2, 3)} | {notes} |"
+        )
+    lines.extend([
+        "",
+        "## Relative |error| vs true θ (secondary)",
         "",
         "| Scenario | Procedure | Path | OK | C | R_ext | solar_scale | α | notes |",
         "|----------|-----------|------|----|---|-------|-------------|---|-------|",
-    ]
+    ])
     for row in rows:
         def fmt(key: str) -> str:
             v = row.rel.get(key, float("nan"))
@@ -757,13 +939,88 @@ class TestSwd329Helpers:
                 "power_scale": 0.0,
             },
             message="ok",
+            val_rmse=0.12,
+            val_mae=0.09,
+            val_r2=0.95,
         )
         path = write_report([row], path=str(tmp_path / "report.md"))
         body = open(path, encoding="utf-8").read()
         assert "No product winner is declared" in body
+        assert "Validation open-loop air accuracy (primary)" in body
+        assert "0.120" in body
         assert "today_combined" in body
         assert "occupancy_tv" in body
         assert "window_ua" in body
+
+    def test_split_train_val_does_not_overlap(self):
+        hist = simulate_history("none", "none", n_steps=N_TOTAL, seed=0)
+        train, val = split_train_val(hist)
+        assert len(train) == N_TRAIN
+        assert len(val) == N_VAL
+        assert train[-1]["timestamp"] < val[0]["timestamp"]
+
+    def test_bakeoff_fits_train_only(self):
+        seen: List[int] = []
+
+        def stub(history: List[Dict[str, Any]], path: str) -> Dict[str, Any]:
+            seen.append(len(history))
+            return {
+                "success": True,
+                "estimated_params": {
+                    ROOM: {
+                        "thermal_mass": TRUTH["thermal_mass"],
+                        "r_external": TRUTH["r_external"],
+                    }
+                },
+                "estimated_solar_scales": {ROOM: TRUTH["solar_scale"]},
+                "estimated_heater_scales": {HEATER: TRUTH["power_scale"]},
+                "estimated_internal_gains": {ROOM: 0.0},
+                "estimated_envelope_splits": {
+                    ROOM: {
+                        "c_air_fraction": TRUTH["c_air_fraction"],
+                        "r_aw_fraction": TRUTH["r_aw_fraction"],
+                    }
+                },
+                "estimated_t_wall_initial": {ROOM: 16.0},
+            }
+
+        rows = run_bakeoff(
+            scenarios=[("none", "none")],
+            procedures=[("today_combined", stub)],
+            paths=["open_loop"],
+        )
+        assert seen == [N_TRAIN]
+        assert len(rows) == 1
+        assert math.isfinite(rows[0].val_rmse)
+
+    def test_truth_theta_beats_prior_on_clean_val(self):
+        hist = simulate_history("none", "none", n_steps=N_TOTAL, seed=3)
+        train, val = split_train_val(hist)
+        truth_theta = {
+            "thermal_mass": TRUTH["thermal_mass"],
+            "r_external": TRUTH["r_external"],
+            "solar_scale": TRUTH["solar_scale"],
+            "power_scale": TRUTH["power_scale"],
+            "internal_gain": 0.0,
+            "c_air_fraction": TRUTH["c_air_fraction"],
+            "r_aw_fraction": TRUTH["r_aw_fraction"],
+            "t_wall_initial": 16.0,
+        }
+        prior_theta = {
+            "thermal_mass": PRIOR["thermal_mass"],
+            "r_external": PRIOR["r_external"],
+            "solar_scale": PRIOR["solar_scale"],
+            "power_scale": PRIOR["power_scale"],
+            "internal_gain": 0.0,
+            "c_air_fraction": PRIOR["c_air_fraction"],
+            "r_aw_fraction": PRIOR["r_aw_fraction"],
+            "t_wall_initial": 18.0,
+        }
+        s_truth = validate_open_loop(truth_theta, train, val)
+        s_prior = validate_open_loop(prior_theta, train, val)
+        assert s_truth["rmse"] < s_prior["rmse"]
+        # Sensor noise is 0.05 °C; a well-specified 2R2C should be near that.
+        assert s_truth["rmse"] < 0.25
 
 
 class TestSwd329Bakeoff:
@@ -777,6 +1034,7 @@ class TestSwd329Bakeoff:
         assert os.path.isfile(path)
         body = open(path, encoding="utf-8").read()
         assert "No product winner is declared" in body
+        assert "Validation open-loop air accuracy (primary)" in body
         assert "today_combined" in body
         assert "occupancy_tv" in body
         assert "window_ua" in body
@@ -789,4 +1047,5 @@ class TestSwd329Bakeoff:
             and r.path == "open_loop"
         )
         assert none_today.success
-        # Do not assert which procedure recovers θ best.
+        assert math.isfinite(none_today.val_rmse)
+        # Do not assert which procedure predicts or recovers θ best.
