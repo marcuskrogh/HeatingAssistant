@@ -92,6 +92,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/implement` SWD-335 UX: recommended-data category tiles (grey Not set to teal Supplied); not native checkboxes. Cache-bust 123. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/implement` SWD-335 UX: compact category checkboxes driven by Use on stored datasets; dataset summary chips; Run recommended estimation when all required boxes are checked. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/implement` SWD-335: identified contact-gated UA_open in production open-loop PE; PE recommended-data checklist + `/api/pe_coverage`; CalVer 2026.08.3; PR #614. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/define` SWD-335: product winner = identified contact-gated UA + 24 h q_int (not day-gated occupancy). PE page read-only data-coverage checklist. PLAN `docs/agents/PLAN-pe-robust-open-loop.md`; Sub-tasks SWD-336–339; feature-standard. Next `/implement SWD-335`.
