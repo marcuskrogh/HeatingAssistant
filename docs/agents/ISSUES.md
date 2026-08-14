@@ -4,7 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-329` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/implement SWD-332` |
+| SWD-332 | Task | [Tweak] Offline PE validation open-loop prediction accuracy | To Do | SWD-323 | docs/agents/PLAN-pe-validation-accuracy.md | `/implement SWD-332` |
+| SWD-333 | Sub-task | Harness train/val open-loop score + report | To Do | SWD-332 | docs/agents/PLAN-pe-validation-accuracy.md | — |
 | SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/review-fix SWD-329` |
 | SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | In Review | SWD-323 | docs/agents/PLAN-pe-robustness-household.md | `/review-fix SWD-329` |
 | SWD-330 | Sub-task | Offline PE robustness harness + on-demand factorial + report | Done | SWD-329 | docs/agents/REPORT-pe-robustness-household.md | — |
@@ -84,6 +86,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/define` SWD-332: hold-out open-loop val RMSE/MAE/R² on SWD-329 harness (MPC-relevant); θ error secondary; PLAN `docs/agents/PLAN-pe-validation-accuracy.md`; Sub-task SWD-333; delta-fast. Next `/implement SWD-332`.
 - 2026-08-13 — `/implement` SWD-329: on-demand household PE factorial + helper tests; report `docs/agents/REPORT-pe-robustness-household.md`; PR #612; In Review. Next `/review-fix SWD-329`.
 - 2026-08-13 — `/define` SWD-329: offline PE robustness factorial (occupancy × openings; six procedures × open-loop/Kalman); occupancy + extra UA harness-only; PLAN `docs/agents/PLAN-pe-robustness-household.md`; Sub-task SWD-330; feature-standard. Next `/implement SWD-329`.
 - 2026-08-13 — `/research` SWD-328: household-like 2R2C extras (occupancy ≠ window); finding docs on `cursor/swd-329-pe-robustness-747e`; SWD-328 Done. Next `/define SWD-329`.

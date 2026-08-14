@@ -13,6 +13,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 - SWD-326: offline combined vs separated/staged bake-off; no product winner. Report `docs/agents/REPORT-pe-dataset-separation.md`.
 - SWD-328: occupancy is extra air-node heat; open window/door is extra outdoor exchange, not the same term. True \(C,R\) recovery needs clean regimes or those extras in the estimator. Artifact `docs/agents/RESEARCH-pe-robustness-household.md`.
 - SWD-329: offline factorial (occupancy × openings; six procedures × open-loop/Kalman). Occupancy + extra UA are harness best-effort. Plan `docs/agents/PLAN-pe-robustness-household.md`.
+- SWD-332: offline harness adds time-separated **validation** open-loop air RMSE/MAE/R² (MPC-relevant). θ error stays secondary. Plan `docs/agents/PLAN-pe-validation-accuracy.md`.
 
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
@@ -22,6 +23,7 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 | 3 | Offline PE combined vs separated/staged benchmark | define | SWD-325 | Done | [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326) |
 | 4 | Synthesise household-like single-room traces and identify robust PE approaches | research | — | Done | [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328) |
 | 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | In Review | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
+| 6 | Offline PE validation open-loop prediction accuracy | tweak | SWD-329 | To Do | [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332) |
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation, guidance. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
@@ -44,13 +46,15 @@ Reliably identify a thermal model with high predictive power for real rooms. On 
 ## Tracker
 - Provider: jira (`SWD`)
 - Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
-- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330)
+- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330), [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332), [SWD-333](https://marcusknielsen.atlassian.net/browse/SWD-333)
 - Research (prior): `docs/agents/RESEARCH-pe-effectiveness.md`
 - Research (this slice): `docs/agents/RESEARCH-pe-robustness-household.md`
 - Model: `docs/agents/MODEL-pe-hidden-tw.md`
 - Prior analysis: `docs/agents/PLAN-pe-split-benchmark.md`, `docs/agents/REPORT-pe-dataset-separation.md`
-- Plan: `docs/agents/PLAN-pe-robustness-household.md`
-- Delivery branch: `cursor/swd-329-pe-robustness-747e`
+- Plan (SWD-329): `docs/agents/PLAN-pe-robustness-household.md`
+- Plan (this slice): `docs/agents/PLAN-pe-validation-accuracy.md`
+- Delivery branch (SWD-329): `cursor/swd-329-pe-robustness-747e` (PR #612)
+- Delivery branch (SWD-332): `cursor/swd-332-pe-val-acc-747e` (stacked on SWD-329)
 
 ## Next
-`/review-fix SWD-329` — review the robustness report and harness (same PR).
+`/implement SWD-332` — hold-out open-loop validation accuracy on the SWD-329 harness.
