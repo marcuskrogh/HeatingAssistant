@@ -6,9 +6,10 @@
 - Keep 2R2C. Do **not** ship day-gated occupancy in this slice (unregularized
   day-\(q\) overfit weak occupancy on hold-out).
 - Backend categorises each stored dataset. The Parameter Estimation room
-  page shows a compact single-line row of category checkboxes. Using a
-  dataset checks the categories that set already covers. When every
-  required box is checked, the user can run the recommended estimate.
+  page shows a compact row of equal category tiles (grey until a selected
+  set covers that category, teal when supplied). Using a dataset lights
+  the categories that set already covers. When every required category is
+  supplied, the user can run the recommended estimate.
 
 ## Scope / Decisions / Constraints
 **In**
@@ -38,13 +39,13 @@
 - Dataset list metadata includes those category tags. Each stored-dataset
   summary shows the categories that set covers.
 - Parameter Estimation **room detail** (Stored Datasets): compact
-  **single-line** read-only checkboxes (Envelope, Heater, Solar, Open UA).
-  **Use** on a dataset checks every category that set covers. Un-Use
-  clears those checks unless another selected set still covers them.
+  **four-up** read-only category tiles (Envelope, Heater, Solar, Open UA).
+  **Use** on a dataset lights every category that set covers. Un-Use
+  clears those lights unless another selected set still covers them.
 - When every required category has at least one selected covering set,
   the primary action is **Run recommended estimation**. Incomplete
   selection can still run automatic PE (not labelled recommended).
-  Checkboxes are not a second exclude-from-fit UI.
+  Tiles are not a second exclude-from-fit UI.
 - Tests: helper coverage categoriser; production UA include/exclude
   behaviour; on-demand household grid must beat assumed-UA mean 0.83 °C
   with this procedure and not regress vs `today_combined` on
@@ -112,11 +113,12 @@
 4. Closed-window rooms are not worse than today’s combined OE on the
    SWD-329/332 hold-out (0.45 / 0.46 / 0.99 °C). Mean val RMSE beats
    assumed-UA 0.83 °C.
-5. PE room page shows four compact category checkboxes on one line
-   (N/A for open-contact when the room has no contact). Checked when at
-   least one **Use**-selected dataset covers that category.
+5. PE room page shows four equal category tiles on one line
+   (N/A for open-contact when the room has no contact). Grey until
+   supplied; teal when at least one **Use**-selected dataset covers
+   that category.
 6. Each stored-dataset summary shows the categories that set covers.
-7. All required boxes checked → **Run recommended estimation**.
+7. All required categories supplied → **Run recommended estimation**.
 8. Focused tests cover categoriser, per-dataset tags, UA include/exclude;
    on-demand grid for the val bar; version bump + App sync.
 
@@ -125,7 +127,7 @@
    samples only when UA is identified).
 2. Backend coverage categoriser per stored dataset (four categories,
    durations, N/A) plus union of selected sets.
-3. Parameter Estimation room page: compact category checkboxes, dataset
+3. Parameter Estimation room page: compact grey/teal category tiles, dataset
    category chips, recommended-estimation CTA.
 4. Tests, on-demand val bar, version bump, App package sync.
 

@@ -1,6 +1,6 @@
 // System Status page — MQTT / API / module health / MPC operational detail.
-import { systemEntity, entityAttr, entityValue, formatNumber } from '../utils.js?v=122';
-import { mpcLoadPercent } from '../kpi-engine.js?v=122';
+import { systemEntity, entityAttr, entityValue, formatNumber } from '../utils.js?v=123';
+import { mpcLoadPercent } from '../kpi-engine.js?v=123';
 
 const QUALITY_LABEL = {
   healthy: 'HEALTHY',

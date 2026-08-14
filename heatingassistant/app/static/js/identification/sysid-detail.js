@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=122';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=122';
-import { createCollapsible } from '../components/collapsible.js?v=122';
-import { formatNumber, modelFitLabel } from '../utils.js?v=122';
-import { setPanelHash } from '../panel-hash.js?v=122';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=123';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=123';
+import { createCollapsible } from '../components/collapsible.js?v=123';
+import { formatNumber, modelFitLabel } from '../utils.js?v=123';
+import { setPanelHash } from '../panel-hash.js?v=123';
 import {
   createDataset,
   deleteDataset,
@@ -12,9 +12,9 @@ import {
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=122';
-import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=122';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=122';
+} from '../ha-services.js?v=123';
+import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=123';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=123';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);

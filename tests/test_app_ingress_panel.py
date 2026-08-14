@@ -59,7 +59,7 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
             body = response.read().decode("utf-8")
 
     assert "static/js/app-hass-shim.js" in body
-    assert "ha-industrial-panel/industrial-dashboard.js?v=122" in body
+    assert "ha-industrial-panel/industrial-dashboard.js?v=123" in body
     assert "ha-industrial-panel" in body
     assert "Home Assistant custom-panel entry point" not in body
 

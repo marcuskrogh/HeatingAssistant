@@ -1,18 +1,18 @@
-import { setPanelHash } from '../panel-hash.js?v=122';
+import { setPanelHash } from '../panel-hash.js?v=123';
 import {
   updateHeatSources,
   updateRooms,
   updateSystemConfig,
   updateSystemParams,
   updateUiSettings,
-} from '../ha-services.js?v=122';
-import { ICONS } from './config-icons.js?v=122';
-import { LANDING_CARDS } from './config-landing.js?v=122';
+} from '../ha-services.js?v=123';
+import { ICONS } from './config-icons.js?v=123';
+import { LANDING_CARDS } from './config-landing.js?v=123';
 import {
   ROOM_SIZE_PRESETS,
   HOUSE_AGE_PRESETS,
   nearestPreset,
-} from './config-presets.js?v=122';
+} from './config-presets.js?v=123';
 import {
   el,
   schedulePanelNav,
@@ -32,7 +32,7 @@ import {
   fmt,
   entitySelectorField,
   listEditor,
-} from './config-ui.js?v=122';
+} from './config-ui.js?v=123';
 
 // Heat sources — editor (sections driven by HVAC mode)
 // ---------------------------------------------------------------------------

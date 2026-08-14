@@ -1,7 +1,7 @@
-import { setPanelHash } from '../panel-hash.js?v=122';
+import { setPanelHash } from '../panel-hash.js?v=123';
 import {
   el, configPageShell, configListHeader, loadingNode,
-} from './config-ui.js?v=122';
+} from './config-ui.js?v=123';
 
 // Rooms — list
 // ---------------------------------------------------------------------------

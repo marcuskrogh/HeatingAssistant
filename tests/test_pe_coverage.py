@@ -328,10 +328,14 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "Recommended data" in datasets
     assert "Run recommended estimation" in datasets
     assert "pe-coverage-row" in datasets
-    assert "pe-coverage-chip" in datasets
+    assert "pe-coverage-tile" in datasets
+    assert "pe-coverage-chip" not in datasets
+    assert 'type="checkbox"' not in datasets
     assert "coverage_categories" in datasets
     assert "param-ua-open" in detail
     assert "refreshCoverage" in detail
     assert "heating_assistant/get_pe_coverage" in conn
     assert ".pe-coverage-row" in css
-    assert ".pe-coverage-chip" in css
+    assert ".pe-coverage-tile" in css
+    assert ".pe-coverage-tile--checked" in css
+    assert ".pe-coverage-chip" not in css

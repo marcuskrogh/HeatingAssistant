@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=122';
-import { createCollapsible } from '../components/collapsible.js?v=122';
-import { makeDataset } from '../components/time-series-chart.js?v=122';
+import { deleteDataset, createDataset } from '../ha-services.js?v=123';
+import { createCollapsible } from '../components/collapsible.js?v=123';
+import { makeDataset } from '../components/time-series-chart.js?v=123';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -97,15 +97,16 @@ export function setupDatasetsAndExperiments(ctx) {
   dsCollapsible.body.innerHTML = `
     <p class="tuning-section__desc" style="margin:0 0 12px">
       Use stored datasets for joint automatic parameter estimation. Each set
-      shows the categories it covers. Using a set checks those boxes.
+      shows the categories it covers. Using a set lights those categories.
     </p>
     <div class="pe-coverage" id="pe-coverage">
       <div class="params-subsection__title">Recommended data</div>
       <p class="pe-coverage__desc">
         Select at least one set in each category, then run the recommended
-        estimate. Boxes are a guide — they do not exclude samples from the fit.
+        estimate. These indicators are a guide — they do not exclude samples
+        from the fit.
       </p>
-      <div class="pe-coverage-row" id="pe-coverage-list"></div>
+      <div class="pe-coverage-row" id="pe-coverage-list" role="list"></div>
     </div>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
@@ -188,12 +189,14 @@ export function setupDatasetsAndExperiments(ctx) {
     coverageListEl.innerHTML = PE_CATEGORIES.map((spec) => {
       const status = statuses[spec.id] || 'unchecked';
       const na = status === 'na';
-      const checked = status === 'checked';
-      return `<span class="pe-coverage-chip pe-coverage-chip--${status}" title="${spec.label}">
-        <input type="checkbox" class="pe-coverage-chip__box" tabindex="-1"
-          ${checked ? 'checked' : ''} ${na ? 'disabled' : ''} data-cat="${spec.id}" aria-hidden="true">
-        <span class="pe-coverage-chip__label">${na ? `${spec.short} N/A` : spec.short}</span>
-      </span>`;
+      const on = status === 'checked';
+      const state = na ? 'N/A' : (on ? 'Supplied' : 'Not set');
+      const aria = na ? 'not applicable' : (on ? 'supplied' : 'not supplied');
+      return `<div class="pe-coverage-tile pe-coverage-tile--${status}" role="listitem"
+        aria-label="${spec.label}: ${aria}" title="${spec.label}">
+        <span class="pe-coverage-tile__name">${spec.short}</span>
+        <span class="pe-coverage-tile__state">${state}</span>
+      </div>`;
     }).join('');
   }
 
