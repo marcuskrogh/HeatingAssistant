@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=121';
-import { createCollapsible } from '../components/collapsible.js?v=121';
-import { makeDataset } from '../components/time-series-chart.js?v=121';
+import { deleteDataset, createDataset } from '../ha-services.js?v=122';
+import { createCollapsible } from '../components/collapsible.js?v=122';
+import { makeDataset } from '../components/time-series-chart.js?v=122';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -18,9 +18,44 @@ function _fmtDuration(seconds) {
   return `${Math.round(seconds / 60)} min`;
 }
 
+const PE_CATEGORIES = [
+  { id: 'closed_window_envelope', short: 'Envelope', label: 'Closed-window envelope' },
+  { id: 'heater_excitation', short: 'Heater', label: 'Heater excitation' },
+  { id: 'solar_variation', short: 'Solar', label: 'Solar variation' },
+  { id: 'open_contact', short: 'Open UA', label: 'Open-contact (extra UA)' },
+];
+
 function _toLocalInput(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function _datasetCategoryTags(dataset) {
+  const cats = Array.isArray(dataset && dataset.coverage_categories)
+    ? dataset.coverage_categories
+    : [];
+  return cats.filter((cat) => cat && cat.status === 'checked');
+}
+
+function _unionSelectedStatuses(datasets, selectedIds) {
+  const byId = {};
+  for (const spec of PE_CATEGORIES) {
+    byId[spec.id] = 'unchecked';
+  }
+  for (const ds of datasets) {
+    const cats = Array.isArray(ds.coverage_categories) ? ds.coverage_categories : [];
+    for (const cat of cats) {
+      if (cat && cat.status === 'na') byId[cat.id] = 'na';
+    }
+  }
+  for (const ds of datasets) {
+    if (!selectedIds.has(ds.id)) continue;
+    const cats = Array.isArray(ds.coverage_categories) ? ds.coverage_categories : [];
+    for (const cat of cats) {
+      if (cat && cat.status === 'checked') byId[cat.id] = 'checked';
+    }
+  }
+  return byId;
 }
 
 // Build the stored-dataset cards, append them to the container, and wire all
@@ -61,17 +96,16 @@ export function setupDatasetsAndExperiments(ctx) {
   const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
   dsCollapsible.body.innerHTML = `
     <p class="tuning-section__desc" style="margin:0 0 12px">
-      Select datasets for joint automatic parameter estimation, or load one into the
-      custom window to inspect, validate, or identify it on its own.
+      Use stored datasets for joint automatic parameter estimation. Each set
+      shows the categories it covers. Using a set checks those boxes.
     </p>
     <div class="pe-coverage" id="pe-coverage">
       <div class="params-subsection__title">Recommended data</div>
       <p class="pe-coverage__desc">
-        What this room should supply for a reliable estimate. Checked items already
-        cover the recommended duration or identifiability gate. These indicators are
-        a guide only — they do not exclude samples from the fit.
+        Select at least one set in each category, then run the recommended
+        estimate. Boxes are a guide — they do not exclude samples from the fit.
       </p>
-      <ul class="pe-coverage-list" id="pe-coverage-list"></ul>
+      <div class="pe-coverage-row" id="pe-coverage-list"></div>
     </div>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
@@ -98,6 +132,7 @@ export function setupDatasetsAndExperiments(ctx) {
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
+  let lastDatasets = [];
 
   function setStatus(el, text, type = '') {
     el.textContent = text;
@@ -125,52 +160,40 @@ export function setupDatasetsAndExperiments(ctx) {
   });
 
   // ---- Multi-select identification ---------------------------------------
+  function _requiredReady(statuses) {
+    return PE_CATEGORIES.every((spec) => {
+      const status = statuses[spec.id] || 'unchecked';
+      return status === 'checked' || status === 'na';
+    });
+  }
+
   function updateSelectionToolbar() {
     const n = selectedIds.size;
-    btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
+    const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
+    const ready = n > 0 && _requiredReady(statuses);
+    if (ready) {
+      btnIdentifySelected.textContent = 'Run recommended estimation';
+    } else {
+      btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
+    }
     btnIdentifySelected.disabled = n === 0;
+    btnIdentifySelected.classList.toggle('btn--accent', ready || n > 0);
     btnClearSelection.disabled = n === 0;
     refreshCoverage();
   }
 
-  function _fmtHaveRecommend(haveS, recommendS) {
-    if (haveS == null && recommendS == null) return '';
-    const have = haveS == null ? '—' : _fmtDuration(haveS);
-    const rec = recommendS == null ? '—' : _fmtDuration(recommendS);
-    return `${have} / ${rec} recommended`;
-  }
-
-  async function refreshCoverage() {
-    if (!coverageListEl || !connection || !connection.getPeCoverage) return;
-    const opts = { roomSlug };
-    if (selectedIds.size > 0) {
-      opts.datasetIds = [...selectedIds];
-    } else {
-      const { startTs, endTs } = currentWindowBounds();
-      opts.windowStart = startTs;
-      opts.windowEnd = endTs;
-    }
-    const coverage = await connection.getPeCoverage(opts);
-    const cats = coverage && Array.isArray(coverage.categories) ? coverage.categories : [];
-    if (!cats.length) {
-      coverageListEl.innerHTML = '<li class="pe-coverage-item pe-coverage-item--empty">No history in the next-fit window yet.</li>';
-      return;
-    }
-    coverageListEl.innerHTML = cats.map((cat) => {
-      const status = cat.status || 'unchecked';
+  function refreshCoverage() {
+    if (!coverageListEl) return;
+    const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
+    coverageListEl.innerHTML = PE_CATEGORIES.map((spec) => {
+      const status = statuses[spec.id] || 'unchecked';
       const na = status === 'na';
       const checked = status === 'checked';
-      const mark = na ? 'N/A' : (checked ? '✓' : '');
-      const dur = na ? '' : _fmtHaveRecommend(cat.have_s, cat.recommend_s);
-      const hint = cat.hint ? `<span class="pe-coverage-hint">${cat.hint}</span>` : '';
-      return `<li class="pe-coverage-item pe-coverage-item--${status}">
-        <span class="pe-coverage-check" aria-hidden="true">${mark}</span>
-        <span class="pe-coverage-body">
-          <span class="pe-coverage-label">${cat.label || ''}</span>
-          ${dur ? `<span class="pe-coverage-dur">${dur}</span>` : ''}
-          ${hint}
-        </span>
-      </li>`;
+      return `<span class="pe-coverage-chip pe-coverage-chip--${status}" title="${spec.label}">
+        <input type="checkbox" class="pe-coverage-chip__box" tabindex="-1"
+          ${checked ? 'checked' : ''} ${na ? 'disabled' : ''} data-cat="${spec.id}" aria-hidden="true">
+        <span class="pe-coverage-chip__label">${na ? `${spec.short} N/A` : spec.short}</span>
+      </span>`;
     }).join('');
   }
 
@@ -285,7 +308,6 @@ export function setupDatasetsAndExperiments(ctx) {
     updateSelectionToolbar();
   }
 
-  let lastDatasets = [];
   async function refreshDatasets() {
     const datasets = await connection.listDatasets(roomSlug);
     // ``null`` means the fetch failed (transient WebSocket error). Keep the
@@ -318,12 +340,17 @@ export function setupDatasetsAndExperiments(ctx) {
       const dur = _fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts));
       const recs = d.record_count != null ? `${d.record_count}` : '—';
       const notes = d.notes ? `<div class="store-row__notes">${d.notes}</div>` : '';
+      const catTags = _datasetCategoryTags(d).map((cat) => {
+        const short = cat.short_label || PE_CATEGORIES.find((s) => s.id === cat.id)?.short || cat.label || '';
+        return `<span class="store-row__tag store-row__tag--cat">${short}</span>`;
+      }).join('');
       return `
         <div class="store-row store-row--dataset ${sel ? 'store-row--selected' : ''} ${isLoaded ? 'store-row--loaded' : ''}" data-id="${d.id}">
           <div class="store-row__main">
             <div class="store-row__name">
               <span class="store-row__title">${d.name || '(unnamed)'}</span>
               <span class="store-row__tag store-row__tag--${source.toLowerCase() === 'experiment' ? 'accent' : ''}">${source}</span>
+              ${catTags}
             </div>
             <div class="store-row__meta">
               ${stat('Room', roomLabel)}${stat('Window', span)}${stat('Length', dur)}${stat('Points', recs)}

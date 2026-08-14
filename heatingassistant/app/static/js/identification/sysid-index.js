@@ -1,6 +1,6 @@
-import { setPanelHash } from '../panel-hash.js?v=121';
-import { formatNumber, modelFitLabel } from '../utils.js?v=121';
-import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=121';
+import { setPanelHash } from '../panel-hash.js?v=122';
+import { formatNumber, modelFitLabel } from '../utils.js?v=122';
+import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=122';
 
 export function renderIdentificationIndex(container, rooms, state) {
   container.innerHTML = '';

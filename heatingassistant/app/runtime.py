@@ -1190,7 +1190,8 @@ class HeatingRuntime:
     def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
         """Return persisted system-identification dataset metadata."""
 
-        return self.dataset_store.list_meta(room_slug)
+        metas = self.dataset_store.list_meta(room_slug)
+        return sysid_services.annotate_datasets_with_coverage(self, metas)
 
     def dataset(self, dataset_id: str) -> dict[str, Any] | None:
         """Return one persisted system-identification dataset when present."""

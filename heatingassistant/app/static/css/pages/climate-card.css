@@ -888,78 +888,42 @@ input[type="time"] {
   font-size: 12px;
   line-height: 1.4;
 }
-.pe-coverage-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.pe-coverage-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
 }
-.pe-coverage-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.pe-coverage-item--checked {
-  border-left: 3px solid var(--accent);
-}
-.pe-coverage-item--unchecked {
-  border-left: 3px solid var(--text-dim);
-  opacity: 0.92;
-}
-.pe-coverage-item--na {
-  border-left: 3px solid var(--border);
-}
-.pe-coverage-item--empty {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-.pe-coverage-check {
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
+.pe-coverage-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  gap: 6px;
+  margin: 0;
   font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  background: var(--bg-primary);
-}
-.pe-coverage-item--checked .pe-coverage-check {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-}
-.pe-coverage-item--na .pe-coverage-check {
-  font-size: 9px;
-  letter-spacing: 0.02em;
+  font-weight: 600;
   color: var(--text-secondary);
-  font-weight: 600;
+  cursor: default;
+  user-select: none;
+  pointer-events: none;
 }
-.pe-coverage-body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.pe-coverage-chip__box {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  flex: 0 0 13px;
+  accent-color: var(--accent);
+  pointer-events: none;
 }
-.pe-coverage-label {
-  font-size: 13px;
-  font-weight: 600;
+.pe-coverage-chip--checked {
   color: var(--text-primary);
 }
-.pe-coverage-dur {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-}
-.pe-coverage-hint {
-  font-size: 11px;
+.pe-coverage-chip--na {
   color: var(--text-dim);
+  font-weight: 500;
+}
+.store-row__tag--cat {
+  color: var(--accent);
+  border-color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0.02em;
 }

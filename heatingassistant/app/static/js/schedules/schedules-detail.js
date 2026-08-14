@@ -14,11 +14,11 @@ import {
   SCHEDULE_TYPE_DATE_RANGE,
   SCHEDULE_TYPE_WEEKLY,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=121';
-import { setPanelHash } from '../panel-hash.js?v=121';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=121';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=121';
-import { renderExperimentsSection } from './schedules-experiments.js?v=121';
+} from '../schedule-utils.js?v=122';
+import { setPanelHash } from '../panel-hash.js?v=122';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=122';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=122';
+import { renderExperimentsSection } from './schedules-experiments.js?v=122';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // Touch hold duration before a card enters drag mode (SWD-24). Chosen so

@@ -533,34 +533,75 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     return dict(result)
 
 
+def _pe_coverage_kwargs(runtime: Any, room_name: str) -> dict[str, Any]:
+    dt = _dt(runtime)
+    from heatingassistant.engine.estimation.constants import _MIN_HISTORY_TIME_S
+
+    min_steps = max(10, int((_MIN_HISTORY_TIME_S / dt) + 0.999)) if dt > 0 else 10
+    return {
+        "room_name": room_name,
+        "room_names": _room_names(runtime),
+        "sources": _heat_sources(runtime),
+        "dt": dt,
+        "has_contact_entity": _room_has_contact(runtime, room_name),
+        "min_history_steps": min_steps,
+    }
+
+
+def _categorise_records(runtime: Any, records: Sequence[Mapping[str, Any]], room_name: str) -> dict[str, Any]:
+    from heatingassistant.engine.estimation.coverage import categorise_pe_coverage
+
+    return categorise_pe_coverage(list(records or []), **_pe_coverage_kwargs(runtime, room_name))
+
+
+def annotate_datasets_with_coverage(runtime: Any, metas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Attach per-dataset PE category tags for the stored-dataset summary."""
+    from heatingassistant.engine.estimation.coverage import coverage_tags
+
+    out: list[dict[str, Any]] = []
+    engine = getattr(runtime, "control_engine", None)
+    can_categorise = engine is not None and getattr(engine, "model", None) is not None
+    for meta in metas:
+        item = dict(meta)
+        if not can_categorise:
+            out.append(item)
+            continue
+        dataset_id = item.get("id")
+        records = records_for_dataset(runtime, str(dataset_id)) if dataset_id else None
+        room_value = item.get("room_name") or item.get("room_slug")
+        try:
+            room_name = _resolve_room(runtime, str(room_value or ""))
+            cov = _categorise_records(runtime, records or [], room_name)
+            item["coverage_categories"] = coverage_tags(cov)
+        except Exception:
+            _LOGGER.debug("PE coverage tags skipped for dataset %s", dataset_id, exc_info=True)
+        out.append(item)
+    return out
+
+
 async def handle_get_pe_coverage(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
-    """Return recommended-data coverage for the next PE fit of one room."""
+    """Return recommended-data coverage for selected datasets or the live window."""
     values = _payload(data)
     room_name = _resolve_room(runtime, str(values.get("room_name") or values.get("room_slug") or ""))
     dataset_ids = _dataset_id_list(values.get("dataset_ids"))
+    from heatingassistant.engine.estimation.coverage import union_pe_coverage
+
+    if dataset_ids:
+        coverages = []
+        for dataset_id in dataset_ids:
+            records = await asyncio.to_thread(records_for_dataset, runtime, dataset_id)
+            coverages.append(_categorise_records(runtime, records or [], room_name))
+        return union_pe_coverage(coverages, room_name=room_name)
+
     horizon_hours = values.get("horizon_hours")
     history = await resolve_history(
         runtime,
-        dataset_ids=dataset_ids,
-        dataset_id=None if dataset_ids else values.get("dataset_id"),
+        dataset_id=values.get("dataset_id"),
         window_start=values.get("window_start"),
         window_end=values.get("window_end"),
         horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
     )
-    dt = _dt(runtime)
-    from heatingassistant.engine.estimation.constants import _MIN_HISTORY_TIME_S
-    from heatingassistant.engine.estimation.coverage import categorise_pe_coverage
-
-    min_steps = max(10, int((_MIN_HISTORY_TIME_S / dt) + 0.999)) if dt > 0 else 10
-    return categorise_pe_coverage(
-        history,
-        room_name=room_name,
-        room_names=_room_names(runtime),
-        sources=_heat_sources(runtime),
-        dt=dt,
-        has_contact_entity=_room_has_contact(runtime, room_name),
-        min_history_steps=min_steps,
-    )
+    return _categorise_records(runtime, history, room_name)
 
 
 def _room_has_contact(runtime: Any, room_name: str) -> bool:
@@ -908,6 +949,7 @@ __all__ = [
     "handle_delete_dataset",
     "handle_delete_parameter_history",
     "handle_estimate_parameters_ml",
+    "annotate_datasets_with_coverage",
     "handle_get_pe_coverage",
     "handle_run_open_loop_simulation",
     "handle_run_sysid_simulation",

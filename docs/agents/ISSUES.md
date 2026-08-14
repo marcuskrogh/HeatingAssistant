@@ -6,7 +6,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 |-----|------|-------|--------|--------|----------|------|
 | SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-335` |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | `/implement SWD-335` |
-| SWD-335 | Task | [Define] Robust open-loop PE for household extras | In Review | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | `/review-fix SWD-335` |
+| SWD-335 | Task | [Define] Robust open-loop PE for household extras | In Progress | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | `/implement SWD-335` |
 | SWD-336 | Sub-task | Identified contact-gated UA in production open-loop PE | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-337 | Sub-task | Backend dataset category coverage for PE | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-338 | Sub-task | PE page recommended-data checklist | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
@@ -92,6 +92,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/implement` SWD-335 UX: compact category checkboxes driven by Use on stored datasets; dataset summary chips; Run recommended estimation when all required boxes are checked.
 - 2026-08-14 — `/implement` SWD-335: identified contact-gated UA_open in production open-loop PE; PE recommended-data checklist + `/api/pe_coverage`; CalVer 2026.08.3; PR #614. Next `/review-fix SWD-335`.
 - 2026-08-14 — `/define` SWD-335: product winner = identified contact-gated UA + 24 h q_int (not day-gated occupancy). PE page read-only data-coverage checklist. PLAN `docs/agents/PLAN-pe-robust-open-loop.md`; Sub-tasks SWD-336–339; feature-standard. Next `/implement SWD-335`.
 - 2026-08-14 — SWD-323: 1R1C vs 2R2C estimator on the household 2R2C plant; 1R1C degenerate mean val RMSE 4.17 °C vs 2R2C 1.53 °C (clean rooms 3.46 vs 0.45). Keep 2R2C. Next `/define SWD-335`.

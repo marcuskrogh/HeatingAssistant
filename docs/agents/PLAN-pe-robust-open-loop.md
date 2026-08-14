@@ -5,9 +5,10 @@
   existing 24 h `internal_gain`, open-loop output-error, no envelope lock.
 - Keep 2R2C. Do **not** ship day-gated occupancy in this slice (unregularized
   day-\(q\) overfit weak occupancy on hold-out).
-- Backend categorises the data that would enter the next fit. The Parameter
-  Estimation room page shows a **read-only** recommended-category list with
-  have vs recommend durations and checked/unchecked coverage.
+- Backend categorises each stored dataset. The Parameter Estimation room
+  page shows a compact single-line row of category checkboxes. Using a
+  dataset checks the categories that set already covers. When every
+  required box is checked, the user can run the recommended estimate.
 
 ## Scope / Decisions / Constraints
 **In**
@@ -23,22 +24,27 @@
 - Fit linearisation may use measured air in the UA term; the free-run /
   MPC predictor uses simulated air. Occupancy stays 24 h `internal_gain`.
 - \(T_{\mathrm{w}}(t_{0})\) unchanged (SWD-325). \(C,R\) stay free.
-- Backend coverage for the records that will be fitted (selected stored
-  datasets, else the live PE window), per room:
+- Backend coverage **per stored dataset** (that dataset’s own records),
+  per room:
   1. **Closed-window envelope** — recommend 12 h closed (hint: 24 h is
-     better). Checked when closed duration ≥ 12 h.
-  2. **Heater excitation** — checked when the existing duty-cycle gate
+     better). The dataset covers this category when closed duration ≥ 12 h.
+  2. **Heater excitation** — covers when the existing duty-cycle gate
      would treat the room’s heater scale / splits as identifiable.
-  3. **Solar variation** — checked when the existing solar-scale gate
+  3. **Solar variation** — covers when the existing solar-scale gate
      would treat solar as identifiable.
-  4. **Open-contact (extra UA)** — recommend 30 min open. Checked when
+  4. **Open-contact (extra UA)** — recommend 30 min open. Covers when
      open duration ≥ 30 min. If the room has no window/door entity, show
-     **N/A** (not a failure).
-- Parameter Estimation **room detail** (Stored Datasets / run-estimation
-  area): list those categories with check/unchecked (or N/A), have
-  duration, and recommended duration. Updates when dataset selection
-  changes. Indicators are read-only (guide collection; not a second
-  exclude-from-fit UI).
+     **N/A** (not a failure; not required for recommended).
+- Dataset list metadata includes those category tags. Each stored-dataset
+  summary shows the categories that set covers.
+- Parameter Estimation **room detail** (Stored Datasets): compact
+  **single-line** read-only checkboxes (Envelope, Heater, Solar, Open UA).
+  **Use** on a dataset checks every category that set covers. Un-Use
+  clears those checks unless another selected set still covers them.
+- When every required category has at least one selected covering set,
+  the primary action is **Run recommended estimation**. Incomplete
+  selection can still run automatic PE (not labelled recommended).
+  Checkboxes are not a second exclude-from-fit UI.
 - Tests: helper coverage categoriser; production UA include/exclude
   behaviour; on-demand household grid must beat assumed-UA mean 0.83 °C
   with this procedure and not regress vs `today_combined` on
@@ -59,8 +65,9 @@
   0.64 °C, closed-window tie). Day-gated occupancy is a later iterate if
   still needed after this ships.
 - Product, not harness-only.
-- Coverage is computed on the **next-fit** history, not on all stored
-  datasets blindly.
+- Coverage is computed **per stored dataset**; the compact row is the
+  union of **Use**-selected sets (not the merged live window).
+- A dataset may cover more than one category.
 - Open-contact category is optional when the room has no contact entity.
 
 **Constraints**
@@ -105,19 +112,21 @@
 4. Closed-window rooms are not worse than today’s combined OE on the
    SWD-329/332 hold-out (0.45 / 0.46 / 0.99 °C). Mean val RMSE beats
    assumed-UA 0.83 °C.
-5. PE room page shows the four categories (or N/A for open-contact) with
-   have vs recommend duration and checked when coverage meets the
-   recommend / existing identifiability gate.
-6. Checklist reflects the currently selected datasets (else live window).
-7. Focused tests cover categoriser + UA include/exclude; on-demand grid
-   for the val bar; version bump + App sync.
+5. PE room page shows four compact category checkboxes on one line
+   (N/A for open-contact when the room has no contact). Checked when at
+   least one **Use**-selected dataset covers that category.
+6. Each stored-dataset summary shows the categories that set covers.
+7. All required boxes checked → **Run recommended estimation**.
+8. Focused tests cover categoriser, per-dataset tags, UA include/exclude;
+   on-demand grid for the val bar; version bump + App sync.
 
 ## Work packages
 1. Identified contact-gated UA in production open-loop PE (include open
    samples only when UA is identified).
-2. Backend coverage categoriser for next-fit history (four categories,
-   durations, N/A).
-3. Parameter Estimation room page: read-only recommended-data checklist.
+2. Backend coverage categoriser per stored dataset (four categories,
+   durations, N/A) plus union of selected sets.
+3. Parameter Estimation room page: compact category checkboxes, dataset
+   category chips, recommended-estimation CTA.
 4. Tests, on-demand val bar, version bump, App package sync.
 
 ## Open items

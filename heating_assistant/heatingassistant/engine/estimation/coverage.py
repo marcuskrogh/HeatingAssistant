@@ -22,6 +22,19 @@ STATUS_CHECKED = "checked"
 STATUS_UNCHECKED = "unchecked"
 STATUS_NA = "na"
 
+SHORT_LABELS = {
+    "closed_window_envelope": "Envelope",
+    "heater_excitation": "Heater",
+    "solar_variation": "Solar",
+    "open_contact": "Open UA",
+}
+
+_STATUS_RANK = {
+    STATUS_NA: 0,
+    STATUS_UNCHECKED: 1,
+    STATUS_CHECKED: 2,
+}
+
 
 def _step_duration(history: Sequence[Mapping[str, Any]], index: int, dt: float) -> float:
     if index + 1 < len(history):
@@ -69,6 +82,7 @@ def _category(
     return {
         "id": cat_id,
         "label": label,
+        "short_label": SHORT_LABELS.get(cat_id, label),
         "status": status,
         "have_s": None if have_s is None else round(float(have_s), 1),
         "recommend_s": None if recommend_s is None else round(float(recommend_s), 1),
@@ -171,12 +185,75 @@ def categorise_pe_coverage(
     }
 
 
+def coverage_tags(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Slim category tags for a stored-dataset summary."""
+    tags: List[Dict[str, Any]] = []
+    for cat in result.get("categories") or []:
+        tags.append(
+            {
+                "id": cat.get("id"),
+                "label": cat.get("label"),
+                "short_label": cat.get("short_label") or SHORT_LABELS.get(str(cat.get("id") or ""), ""),
+                "status": cat.get("status"),
+            }
+        )
+    return tags
+
+
+def union_pe_coverage(
+    coverages: Sequence[Mapping[str, Any]],
+    *,
+    room_name: str = "",
+) -> Dict[str, Any]:
+    """Union per-dataset coverage: a category is checked if any set covers it."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    n_steps = 0
+    duration_s = 0.0
+    for cov in coverages:
+        n_steps += int(cov.get("n_steps") or 0)
+        try:
+            duration_s += float(cov.get("duration_s") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        for cat in cov.get("categories") or []:
+            cid = str(cat.get("id") or "")
+            if not cid:
+                continue
+            prev = by_id.get(cid)
+            if prev is None:
+                by_id[cid] = dict(cat)
+                continue
+            prev_rank = _STATUS_RANK.get(str(prev.get("status")), 0)
+            new_rank = _STATUS_RANK.get(str(cat.get("status")), 0)
+            if new_rank > prev_rank:
+                prev["status"] = cat.get("status")
+            for key in ("have_s",):
+                left = prev.get(key)
+                right = cat.get(key)
+                if left is None:
+                    prev[key] = right
+                elif right is not None:
+                    try:
+                        prev[key] = round(float(left) + float(right), 1)
+                    except (TypeError, ValueError):
+                        pass
+    return {
+        "room": room_name or (coverages[0].get("room") if coverages else ""),
+        "n_steps": n_steps,
+        "duration_s": round(duration_s, 1),
+        "categories": list(by_id.values()),
+    }
+
+
 __all__ = [
     "CLOSED_HINT_S",
     "CLOSED_RECOMMEND_S",
     "OPEN_RECOMMEND_S",
+    "SHORT_LABELS",
     "STATUS_CHECKED",
     "STATUS_NA",
     "STATUS_UNCHECKED",
     "categorise_pe_coverage",
+    "coverage_tags",
+    "union_pe_coverage",
 ]

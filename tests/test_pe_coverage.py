@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from heatingassistant.app.sysid_services import _room_has_contact, handle_get_pe_coverage
+from heatingassistant.app.sysid_services import (
+    _room_has_contact,
+    annotate_datasets_with_coverage,
+    handle_get_pe_coverage,
+)
 from heatingassistant.engine.estimation.coverage import (
     CLOSED_RECOMMEND_S,
     OPEN_RECOMMEND_S,
@@ -71,6 +75,7 @@ def test_closed_window_checked_after_twelve_hours():
     )
     closed = _by_id(result)["closed_window_envelope"]
     assert closed["status"] == STATUS_CHECKED
+    assert closed["short_label"] == "Envelope"
     assert closed["have_s"] >= CLOSED_RECOMMEND_S
     assert closed["recommend_s"] == CLOSED_RECOMMEND_S
 
@@ -186,7 +191,28 @@ def test_open_contact_unchecked_with_entity_but_little_open_time():
     assert open_cat["have_s"] == pytest.approx(900.0)
 
 
-def test_room_has_contact_reads_window_sensors():
+def test_annotate_datasets_with_coverage_adds_tags():
+    dt = 900.0
+    history = _history(40, dt=dt, u_on=True)
+    runtime = SimpleNamespace(
+        options={
+            "update_interval": dt,
+            "rooms": [{"name": "studio", "window_sensors": ["binary_sensor.w"]}],
+        },
+        control_engine=SimpleNamespace(
+            model=SimpleNamespace(room_names=["studio"]),
+            heat_sources=[_heater()],
+        ),
+        dataset_store=SimpleNamespace(get_records=lambda _id: history),
+        _room_slug=lambda name: name,
+    )
+    metas = annotate_datasets_with_coverage(
+        runtime, [{"id": "abc", "room_name": "studio"}]
+    )
+    tags = {cat["id"]: cat["status"] for cat in metas[0]["coverage_categories"]}
+    assert tags["heater_excitation"] == STATUS_CHECKED
+    assert tags["closed_window_envelope"] == STATUS_UNCHECKED
+    assert "short_label" in metas[0]["coverage_categories"][0]
     runtime = SimpleNamespace(
         options={
             "rooms": [
@@ -246,6 +272,50 @@ def test_handle_get_pe_coverage_uses_buffer_history(monkeypatch):
     ]
 
 
+def test_union_pe_coverage_checks_category_if_any_dataset_covers_it():
+    from heatingassistant.engine.estimation.coverage import union_pe_coverage
+
+    closed = categorise_pe_coverage(
+        _history(int(CLOSED_RECOMMEND_S / 900.0) + 2, u_on=False),
+        room_name="studio",
+        room_names=["studio"],
+        sources=[_heater()],
+        dt=900.0,
+        has_contact_entity=True,
+        min_history_steps=10,
+    )
+    heater = categorise_pe_coverage(
+        _history(40, u_on=True),
+        room_name="studio",
+        room_names=["studio"],
+        sources=[_heater()],
+        dt=900.0,
+        has_contact_entity=True,
+        min_history_steps=10,
+    )
+    assert _by_id(closed)["heater_excitation"]["status"] == STATUS_UNCHECKED
+    unioned = union_pe_coverage([closed, heater], room_name="studio")
+    cats = _by_id(unioned)
+    assert cats["closed_window_envelope"]["status"] == STATUS_CHECKED
+    assert cats["heater_excitation"]["status"] == STATUS_CHECKED
+
+
+def test_union_keeps_open_contact_na():
+    from heatingassistant.engine.estimation.coverage import union_pe_coverage
+
+    a = categorise_pe_coverage(
+        _history(20),
+        room_name="studio",
+        room_names=["studio"],
+        sources=[_heater()],
+        dt=900.0,
+        has_contact_entity=False,
+        min_history_steps=10,
+    )
+    unioned = union_pe_coverage([a], room_name="studio")
+    assert _by_id(unioned)["open_contact"]["status"] == STATUS_NA
+
+
 def test_pe_page_sources_include_recommended_data_checklist():
     root = Path(__file__).resolve().parents[1]
     static = root / "heatingassistant" / "app" / "static" / "js"
@@ -256,9 +326,12 @@ def test_pe_page_sources_include_recommended_data_checklist():
         root / "heatingassistant" / "app" / "static" / "css" / "pages" / "climate-card.css"
     ).read_text(encoding="utf-8")
     assert "Recommended data" in datasets
-    assert "getPeCoverage" in datasets
-    assert "pe-coverage-list" in datasets
+    assert "Run recommended estimation" in datasets
+    assert "pe-coverage-row" in datasets
+    assert "pe-coverage-chip" in datasets
+    assert "coverage_categories" in datasets
     assert "param-ua-open" in detail
     assert "refreshCoverage" in detail
     assert "heating_assistant/get_pe_coverage" in conn
-    assert ".pe-coverage" in css
+    assert ".pe-coverage-row" in css
+    assert ".pe-coverage-chip" in css
