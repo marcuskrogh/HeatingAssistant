@@ -4,9 +4,13 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/define SWD-335` |
-| SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | `/define SWD-335` |
-| SWD-335 | Task | [Define] Robust open-loop PE for household extras | To Do | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | `/define SWD-335` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/implement SWD-335` |
+| SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | `/implement SWD-335` |
+| SWD-335 | Task | [Define] Robust open-loop PE for household extras | To Do | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | `/implement SWD-335` |
+| SWD-336 | Sub-task | Identified contact-gated UA in production open-loop PE | To Do | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
+| SWD-337 | Sub-task | Backend dataset category coverage for PE | To Do | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
+| SWD-338 | Sub-task | PE page recommended-data checklist | To Do | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
+| SWD-339 | Sub-task | Tests, val bar, version bump, App sync | To Do | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-332 | Task | [Tweak] Offline PE validation open-loop prediction accuracy | In Review | SWD-323 | docs/agents/PLAN-pe-validation-accuracy.md | `/review-fix SWD-332` |
 | SWD-333 | Sub-task | Harness train/val open-loop score + report | Done | SWD-332 | docs/agents/REPORT-pe-robustness-household.md | — |
 | SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/review-fix SWD-329` |
@@ -88,6 +92,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-14 — `/define` SWD-335: product winner = identified contact-gated UA + 24 h q_int (not day-gated occupancy). PE page read-only data-coverage checklist. PLAN `docs/agents/PLAN-pe-robust-open-loop.md`; Sub-tasks SWD-336–339; feature-standard. Next `/implement SWD-335`.
 - 2026-08-14 — SWD-323: 1R1C vs 2R2C estimator on the household 2R2C plant; 1R1C degenerate mean val RMSE 4.17 °C vs 2R2C 1.53 °C (clean rooms 3.46 vs 0.45). Keep 2R2C. Next `/define SWD-335`.
 - 2026-08-14 — `/model` SWD-334: identify contact-gated \(UA_{\mathrm{open}}\) + day-gated \(q_{\mathrm{day}}\) (MAP prior toward 0, no \(C,R\) lock, keep OE). Probe: id-UA mean val 0.64 °C vs assumed-UA 0.83 °C; unregularized day-\(q\) grid overfits weak occ. Artifact `docs/agents/MODEL-pe-contact-ua-occupancy.md` on `cursor/swd-335-robust-ol-pe-747e`. SWD-334 Done. Next `/define SWD-335`.
 - 2026-08-14 — `/explore` SWD-323 rechart: robust/reliable open-loop PE; identify contact-gated UA + occupancy disturbance (no C,R lock); keep OE; SWD-334 then SWD-335 (blocked by 334). Val bar: beat `window_ua`+OL 0.83 °C, no closed-window regression. Next `/model SWD-334`.

@@ -34,7 +34,7 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - [SWD-334 model](https://marcusknielsen.atlassian.net/browse/SWD-334) — identify contact-gated \(UA_{\mathrm{open}}\) (one scalar/room); replace 24 h `internal_gain` with day-gated \(q_{\mathrm{day}}\) under the existing MAP prior; keep OE; no \(C,R\) lock. Artifact `docs/agents/MODEL-pe-contact-ua-occupancy.md`.
 
 ## Not yet specified
-- Product vs harness-only for the first robust estimator — SWD-335.
+- Product vs harness-only for the first robust estimator — decided: product (SWD-335).
 - Your home recordings as a later check.
 - In-app PE guidance.
 - A different RC structure if extras still miss the val bar (1R1C estimator already checked: worse free-run, not a PE shortcut).
@@ -51,10 +51,10 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 ## Tracker
 - Provider: jira (`SWD`)
 - Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
-- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330), [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331), [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332), [SWD-333](https://marcusknielsen.atlassian.net/browse/SWD-333), [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334), [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
+- Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330), [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331), [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332), [SWD-333](https://marcusknielsen.atlassian.net/browse/SWD-333), [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334), [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335), [SWD-336](https://marcusknielsen.atlassian.net/browse/SWD-336), [SWD-337](https://marcusknielsen.atlassian.net/browse/SWD-337), [SWD-338](https://marcusknielsen.atlassian.net/browse/SWD-338), [SWD-339](https://marcusknielsen.atlassian.net/browse/SWD-339)
 - Research: `docs/agents/RESEARCH-pe-effectiveness.md`, `docs/agents/RESEARCH-pe-robustness-household.md`, `docs/agents/RESEARCH-pe-methods.md`
 - Model: `docs/agents/MODEL-pe-hidden-tw.md`, `docs/agents/MODEL-pe-contact-ua-occupancy.md`
 - Reports: `docs/agents/REPORT-pe-dataset-separation.md`, `docs/agents/REPORT-pe-robustness-household.md`
 
 ## Next
-`/define SWD-335` — robust open-loop PE implementing identified contact-gated UA and day-gated occupancy; beat assumed-UA 0.83 °C without closed-window regression.
+`/implement SWD-335` — identified contact-gated UA + PE data-coverage checklist.
