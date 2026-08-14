@@ -137,4 +137,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/implement SWD-335` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-335` — Review and auto-fix per Workflow binding

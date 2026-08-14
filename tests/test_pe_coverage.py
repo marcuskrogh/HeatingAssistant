@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -199,8 +200,7 @@ def test_room_has_contact_reads_window_sensors():
     assert _room_has_contact(runtime, "Unknown") is False
 
 
-@pytest.mark.asyncio
-async def test_handle_get_pe_coverage_uses_buffer_history(monkeypatch):
+def test_handle_get_pe_coverage_uses_buffer_history(monkeypatch):
     dt = 900.0
     t0 = 1_800_000_000.0
     history = _history(16, dt=dt)
@@ -234,7 +234,7 @@ async def test_handle_get_pe_coverage_uses_buffer_history(monkeypatch):
         _fake_resolve,
     )
 
-    result = await handle_get_pe_coverage(runtime, {"room_name": "studio"})
+    result = asyncio.run(handle_get_pe_coverage(runtime, {"room_name": "studio"}))
     assert result["room"] == "studio"
     assert result["n_steps"] == 16
     ids = [cat["id"] for cat in result["categories"]]

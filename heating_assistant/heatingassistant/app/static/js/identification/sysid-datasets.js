@@ -68,7 +68,7 @@ export function setupDatasetsAndExperiments(ctx) {
       <div class="params-subsection__title">Recommended data</div>
       <p class="pe-coverage__desc">
         What this room should supply for a reliable estimate. Checked items already
-        cover the recommend duration or identifiability gate. These indicators are
+        cover the recommended duration or identifiability gate. These indicators are
         a guide only — they do not exclude samples from the fit.
       </p>
       <ul class="pe-coverage-list" id="pe-coverage-list"></ul>
