@@ -21,7 +21,7 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 | 5 | Offline PE robustness analysis on synthetic household-like data | define | SWD-328 | In Review | [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329) |
 | 6 | Offline PE validation open-loop prediction accuracy | tweak | SWD-329 | In Review | [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332) |
 | 7 | Survey PE method families for grey-box 2R2C | research | — | Done | [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331) |
-| 8 | Contact-gated extra UA + occupancy disturbance (no envelope lock) | model | — | To Do | [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334) |
+| 8 | Contact-gated extra UA + occupancy disturbance (no envelope lock) | model | — | Done | [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334) |
 | 9 | Robust open-loop PE for household extras | define | SWD-334 | To Do | [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335) |
 
 ## Cleared so far
@@ -31,10 +31,9 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - [SWD-328 research](https://marcusknielsen.atlassian.net/browse/SWD-328) — occupancy ≠ window; extras belong in the estimator. Artifact `docs/agents/RESEARCH-pe-robustness-household.md`.
 - [SWD-331 research](https://marcusknielsen.atlassian.net/browse/SWD-331) — stochastic ML for physical \(\theta\); this destination scores open-loop fit, so keep OE. Artifact `docs/agents/RESEARCH-pe-methods.md`.
 - [SWD-332 analysis](https://marcusknielsen.atlassian.net/browse/SWD-332) — val open-loop RMSE. Best harness: `window_ua`+open_loop (mean 0.83 °C, −46% vs `today_combined` 1.53 °C). Night-lock occupancy and Kalman/PED are regressions. Report `docs/agents/REPORT-pe-robustness-household.md`.
+- [SWD-334 model](https://marcusknielsen.atlassian.net/browse/SWD-334) — identify contact-gated \(UA_{\mathrm{open}}\) (one scalar/room); replace 24 h `internal_gain` with day-gated \(q_{\mathrm{day}}\) under the existing MAP prior; keep OE; no \(C,R\) lock. Artifact `docs/agents/MODEL-pe-contact-ua-occupancy.md`.
 
 ## Not yet specified
-- Whether identified extra UA is one parameter per room or per opening event.
-- Occupancy disturbance shape (slowly varying state vs day/night \(Q\) vs constant \(Q_\mathrm{int}\) plus UA only) — SWD-334.
 - Product vs harness-only for the first robust estimator — SWD-335.
 - Your home recordings as a later check.
 - In-app PE guidance.
@@ -54,8 +53,8 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - Story (map): [SWD-323](https://marcusknielsen.atlassian.net/browse/SWD-323)
 - Tasks: [SWD-324](https://marcusknielsen.atlassian.net/browse/SWD-324), [SWD-325](https://marcusknielsen.atlassian.net/browse/SWD-325), [SWD-326](https://marcusknielsen.atlassian.net/browse/SWD-326), [SWD-328](https://marcusknielsen.atlassian.net/browse/SWD-328), [SWD-329](https://marcusknielsen.atlassian.net/browse/SWD-329), [SWD-330](https://marcusknielsen.atlassian.net/browse/SWD-330), [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331), [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332), [SWD-333](https://marcusknielsen.atlassian.net/browse/SWD-333), [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334), [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
 - Research: `docs/agents/RESEARCH-pe-effectiveness.md`, `docs/agents/RESEARCH-pe-robustness-household.md`, `docs/agents/RESEARCH-pe-methods.md`
-- Model (prior): `docs/agents/MODEL-pe-hidden-tw.md`
+- Model: `docs/agents/MODEL-pe-hidden-tw.md`, `docs/agents/MODEL-pe-contact-ua-occupancy.md`
 - Reports: `docs/agents/REPORT-pe-dataset-separation.md`, `docs/agents/REPORT-pe-robustness-household.md`
 
 ## Next
-`/model SWD-334` — formulate identified contact-gated UA and a non-destructive occupancy disturbance so the estimator can beat assumed-UA 0.83 °C without regressing on clean rooms.
+`/define SWD-335` — robust open-loop PE implementing identified contact-gated UA and day-gated occupancy; beat assumed-UA 0.83 °C without closed-window regression.
