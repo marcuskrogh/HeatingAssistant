@@ -103,4 +103,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-332` — review the val-accuracy harness and report (same PR)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/613
