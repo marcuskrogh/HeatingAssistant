@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=126';
-import { createCollapsible } from '../components/collapsible.js?v=126';
-import { makeDataset } from '../components/time-series-chart.js?v=126';
+import { deleteDataset, createDataset } from '../ha-services.js?v=127';
+import { createCollapsible } from '../components/collapsible.js?v=127';
+import { makeDataset } from '../components/time-series-chart.js?v=127';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -20,7 +20,7 @@ function _fmtDuration(seconds) {
 
 const PE_CATEGORIES = [
   { id: 'closed_window_envelope', short: 'Envelope', label: 'Closed-window envelope' },
-  { id: 'heater_excitation', short: 'Heater', label: 'Heater power scale' },
+  { id: 'heater_excitation', short: 'Heater', label: 'Heater command variation' },
   { id: 'solar_variation', short: 'Solar', label: 'Solar variation' },
   { id: 'open_contact', short: 'Open UA', label: 'Open-contact (extra UA)' },
 ];
@@ -35,12 +35,12 @@ const PE_GUIDES = {
     store: 'Set the estimation window to that closed period, Save Current Window, then Use the new set.',
   },
   heater_excitation: {
-    title: 'Heater power scale',
-    target: 'This room\'s heater must change output in the saved window — typically off and on — for at least about an hour. Stuck at one level will not cover it.',
-    why: 'Heater means the estimator can fit this room\'s heater power scale: how much heat the heater actually delivers versus its rated power (the × factor on Heater Power Scales). If output never changes, that scale cannot be separated from insulation and thermal mass — a strong heater in a leaky room looks like a weak heater in a tight room. The same on/off change also reveals how heat splits between air and walls.',
-    do: 'Save a window where this room\'s heater turns on and later turns off, or the reverse. Existing controller behaviour is enough: price-driven on/off, a scheduled setback, or morning recovery. If the heater sits at a constant output, change the setpoint by about 1–2 °C while you are out so it goes from off to on, then back.',
-    avoid: 'A window that is always off, always full, or nearly constant mid-output will not cover Heater. One clear on/off change is enough; do not force large comfort-band violations.',
-    store: 'Save a window that includes both the lower and higher heater output, then Use the set.',
+    title: 'Heater command variation',
+    target: 'The dataset must include this room\'s heater command both off (0) and on, for at least about an hour.',
+    why: 'Each identification sample stores this room\'s commanded heater output as a fraction from 0 (off) to 1 (full). Coverage uses that series for heaters assigned to this room only. Another room\'s heater does not count. Always off, always full, or a flat mid command does not count.',
+    do: 'Save a window that contains off samples and on samples for this room. Existing controller on/off is enough (price-driven, a setback, or morning recovery). If the command never moves, shift the setpoint about 1–2 °C while you are out so it goes off then on.',
+    avoid: 'Do not save a window of only off, only full, or a constant mid output.',
+    store: 'Save that mixed-command window, then Use the set.',
   },
   solar_variation: {
     title: 'Solar variation',
