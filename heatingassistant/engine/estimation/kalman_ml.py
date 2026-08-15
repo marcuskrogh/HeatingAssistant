@@ -920,6 +920,9 @@ class KalmanMLEstimator:
         history: List[Dict[str, Any]],
         room_params: Optional[Dict[str, Dict[str, Any]]] = None,
         calibration_history: Optional[List[Dict[str, Any]]] = None,
+        *,
+        prior_mean: str = "midpoint",
+        min_lam: Optional[float] = None,
     ) -> Dict[str, float]:
         """Quickly estimate only the wall-envelope initial temperature.
 
@@ -934,6 +937,13 @@ class KalmanMLEstimator:
         on a leading calibration window while applying the result at the
         start of a separate simulation window.
 
+        ``prior_mean`` ``"air"`` seeds the MAP prior at the first measured
+        air temperature (diagnostic simulate).  The default ``"midpoint"``
+        keeps the PE prior (air/outdoor blend).
+
+        ``min_lam`` overrides ``_T_WALL_MIN_LAM`` so diagnostic simulate can
+        let the window pull Tw0 farther from the prior.
+
         Returns a dict ``{room_name: t_wall_initial_float}``.  Falls back to
         the physics-informed prior when history is too short or the
         optimiser fails.
@@ -947,6 +957,15 @@ class KalmanMLEstimator:
         self._update_wall_init_prior_from_history(
             fit_history if fit_history else history
         )
+        if prior_mean == "air":
+            first_y = list((fit_history[0].get("y") if fit_history else []) or [])
+            for i in range(n):
+                if i >= len(first_y):
+                    continue
+                try:
+                    self._t_wall_init_prior[i] = float(first_y[i])
+                except (TypeError, ValueError):
+                    pass
 
         fallback = {
             self._room_names[i]: round(float(self._t_wall_init_prior[i]), 2)
@@ -1014,7 +1033,8 @@ class KalmanMLEstimator:
                 )
                 a_tw, b_tw = layout.idx_t_wall_init
                 t_wall = theta[a_tw:b_tw]
-                lam_tw = max(self._regularization, _T_WALL_MIN_LAM)
+                floor = _T_WALL_MIN_LAM if min_lam is None else float(min_lam)
+                lam_tw = max(self._regularization, floor)
                 reg = lam_tw * float(
                     np.sum((t_wall - self._t_wall_init_prior) ** 2)
                 ) / (_T_WALL_PRIOR_STD ** 2)

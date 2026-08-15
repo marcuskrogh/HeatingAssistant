@@ -16,6 +16,7 @@ _SIM_ROOM_PARAM_KEYS = (
     "solar_scale",
     "c_air_fraction",
     "r_aw_fraction",
+    "t_wall_initial",
 )
 
 
@@ -218,6 +219,32 @@ async def estimate_simulation_initial_state(
     return await asyncio.to_thread(_run)
 
 
+def optimal_t_wall_for_window(
+    history: List[Dict[str, Any]],
+    model: Any,
+    heat_sources: Sequence[Any],
+    dt: float,
+    room_params: Optional[Dict[str, Dict[str, float]]] = None,
+) -> Dict[str, float]:
+    """Wall-only Tw0 on the history being simulated (diagnostic IC)."""
+
+    from ..parameter_estimator import KalmanMLEstimator
+
+    rooms = getattr(model, "rooms", {}) or {}
+    room_list = list(rooms.values()) if isinstance(rooms, dict) else list(rooms)
+    estimator = KalmanMLEstimator(
+        rooms=room_list,
+        sources=list(heat_sources),
+        dt=float(dt),
+    )
+    return estimator.estimate_wall_initial_only(
+        list(history or []),
+        room_params=room_params,
+        prior_mean="air",
+        min_lam=1.0,
+    )
+
+
 __all__ = [
     "compute_open_loop_rmse_by_horizon",
     "effective_heater_scales",
@@ -226,5 +253,6 @@ __all__ = [
     "inject_identified_t_wall_initial",
     "merge_per_room_into_sysid_results",
     "open_loop_t_wall_initial_dict",
+    "optimal_t_wall_for_window",
     "patched_heat_sources",
 ]

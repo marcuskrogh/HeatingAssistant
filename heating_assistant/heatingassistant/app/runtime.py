@@ -783,6 +783,7 @@ class HeatingRuntime:
             sysid_handler = {
                 "estimate_parameters_ml": sysid_services.handle_estimate_parameters_ml,
                 "get_pe_coverage": sysid_services.handle_get_pe_coverage,
+                "get_pe_inputs": sysid_services.handle_get_pe_inputs,
                 "run_sysid_simulation": sysid_services.handle_run_sysid_simulation,
                 "run_open_loop_simulation": sysid_services.handle_run_open_loop_simulation,
                 "store_identified_parameters": sysid_services.handle_store_identified_parameters,

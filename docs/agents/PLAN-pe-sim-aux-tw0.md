@@ -73,9 +73,9 @@
 - Sub-tasks: [SWD-345](https://marcusknielsen.atlassian.net/browse/SWD-345), [SWD-346](https://marcusknielsen.atlassian.net/browse/SWD-346), [SWD-347](https://marcusknielsen.atlassian.net/browse/SWD-347), [SWD-348](https://marcusknielsen.atlassian.net/browse/SWD-348)
 - Relates: [SWD-343](https://marcusknielsen.atlassian.net/browse/SWD-343)
 - Branch: `cursor/swd-344-pe-sim-aux-tw0-bcb7`
-- PR: (draft, this define)
+- PR: (draft, this implement)
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-344` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-344` — Review and auto-fix per Workflow binding

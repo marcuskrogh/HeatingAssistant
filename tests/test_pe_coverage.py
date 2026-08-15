@@ -289,7 +289,11 @@ def test_pe_coverage_http_maps_unknown_room_to_bad_request():
         / "__main__.py"
     ).read_text(encoding="utf-8")
     assert "handle_get_pe_coverage" in main
-    assert "HTTPStatus.BAD_REQUEST" in main.split("if path == \"/api/pe_coverage\":", 1)[1].split("if path.startswith", 1)[0]
+    assert "handle_get_pe_inputs" in main
+    block = main.split(
+        'if path in {"/api/pe_coverage", "/api/pe_inputs"}:', 1
+    )[1].split("if path.startswith", 1)[0]
+    assert "HTTPStatus.BAD_REQUEST" in block
 
 
 def test_union_pe_coverage_checks_category_if_any_dataset_covers_it():
@@ -353,16 +357,18 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "PE_GUIDES" in datasets
     assert "pe-coverage-guide" in datasets
     assert "pe-save-coverage" in datasets
-    assert "Scroll to Save Current Window" in datasets
-    assert "low-comfort" in datasets
-    assert "Keep windows and doors closed" in datasets
-    assert "heater command both off" in datasets
+    assert "Scroll to Save Current Window" not in datasets
+    assert "low-comfort" not in datasets
+    assert "windows and doors kept shut" in datasets
+    assert "heater both off and on" in datasets
     assert "does not count" in datasets
-    assert "commanded heater output" in datasets
     assert "always full" in datasets
-    assert "Record a clear or mixed day" in datasets
+    assert "changing sunlight" in datasets
     assert "planned airing" in datasets
     assert "no window or door contact configured" in datasets
+    guides_block = datasets.split("const PE_GUIDES = {", 1)[1].split("};", 1)[0]
+    assert "<ol>" not in guides_block
+    assert "Save Current Window" not in guides_block
     assert "This window would cover" in datasets
     assert "getPeCoverage" in datasets
     assert "function _esc(value)" in datasets

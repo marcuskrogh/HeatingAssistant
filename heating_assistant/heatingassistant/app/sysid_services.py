@@ -17,8 +17,6 @@ from heatingassistant.engine.history.datasets import (
     records_for_datasets,
 )
 from heatingassistant.engine.history.window import (
-    history_time_range,
-    select_leading_window,
     select_recent_window,
     select_window_by_timestamps,
 )
@@ -37,21 +35,20 @@ from heatingassistant.engine.parameter_lifecycle import (
     store_identified_parameters,
 )
 from heatingassistant.engine.simulation.model_patch import build_sim_model
+from heatingassistant.engine.history.plot_series import identification_aux_series
 from heatingassistant.engine.simulation.sysid_helpers import (
     compute_open_loop_rmse_by_horizon,
     effective_heater_scales,
-    estimate_simulation_initial_state,
     extract_sim_room_params,
-    inject_identified_t_wall_initial,
     merge_per_room_into_sysid_results,
     open_loop_t_wall_initial_dict,
+    optimal_t_wall_for_window,
     patched_heat_sources,
 )
 from heatingassistant.engine.sysid import run_sysid_simulation
 from heatingassistant.persistence import save_config
 
 _LOGGER = logging.getLogger(__name__)
-_LEADING_HOURS = 6.0
 HouseThermalSDE: Any | None = None
 
 
@@ -184,30 +181,95 @@ async def resolve_history(
     return buffer
 
 
-async def _history_with_leading(
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _locked_t_wall_from_request(
+    values: Mapping[str, Any],
+    room_params: Mapping[str, Mapping[str, Any]],
+    room_names: Sequence[str],
+) -> dict[str, float]:
+    if not _truthy(values.get("t_wall_locked")):
+        return {}
+    result: dict[str, float] = {}
+    for name in room_names:
+        raw = room_params.get(str(name), {}).get("t_wall_initial")
+        if raw is None:
+            continue
+        try:
+            result[str(name)] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _resolve_simulation_t_wall(
+    history: list[dict[str, Any]],
     runtime: Any,
-    window_start: float,
-    window_end: float,
-    *,
-    leading_hours: float = _LEADING_HOURS,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    leading_seconds = float(leading_hours) * 3600.0
-    full = await resolve_history(
-        runtime,
-        window_start=float(window_start) - leading_seconds,
-        window_end=float(window_end),
-    )
-    leading = select_leading_window(full, float(window_start), leading_seconds)
-    simulation = select_window_by_timestamps(full, float(window_start), float(window_end))
-    return leading, simulation
+    heat_sources: Sequence[Any],
+    room_names: Sequence[str],
+    dt: float,
+    room_params: dict[str, dict[str, float]],
+    values: Mapping[str, Any],
+) -> dict[str, float]:
+    locked = _locked_t_wall_from_request(values, room_params, room_names)
+    if locked:
+        return locked
+    try:
+        estimated = optimal_t_wall_for_window(
+            history,
+            _model(runtime),
+            heat_sources,
+            dt,
+            room_params=room_params or None,
+        )
+    except Exception as exc:
+        _LOGGER.warning("Diagnostic wall-initial optimisation failed: %s", exc)
+        estimated = {}
+    result = {str(name): float(val) for name, val in dict(estimated or {}).items()}
+    if not result:
+        result = open_loop_t_wall_initial_dict(
+            room_params,
+            room_names,
+            getattr(runtime, "sysid_results", None),
+        )
+    for name, value in result.items():
+        room_params.setdefault(str(name), {})["t_wall_initial"] = float(value)
+    return result
 
 
-async def _leading_for_history(runtime: Any, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    min_ts, max_ts = history_time_range(history)
-    if min_ts is None or max_ts is None:
-        return []
-    leading, _simulation = await _history_with_leading(runtime, min_ts, max_ts)
-    return leading
+def _attach_aux_and_tw0(
+    per_room: Mapping[str, Any],
+    history: list[dict[str, Any]],
+    heat_sources: Sequence[Any],
+    t_wall: Mapping[str, float],
+) -> None:
+    for room_name, room_data in per_room.items():
+        if not isinstance(room_data, dict):
+            continue
+        aux = identification_aux_series(history, heat_sources, str(room_name), iso_time=_iso_time)
+        room_data.update(aux)
+        if room_name in t_wall:
+            room_data["t_wall_initial"] = float(t_wall[room_name])
+
+
+def _iso_series(entries: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for entry in list(entries or []):
+        if not isinstance(entry, Mapping):
+            continue
+        stamp = entry.get("time")
+        if stamp is None:
+            continue
+        if not isinstance(stamp, str):
+            stamp = _iso_time(stamp)
+        if stamp is None:
+            continue
+        out.append({"time": stamp, "value": entry.get("value")})
+    return out
 
 
 def _persist_runtime_config(runtime: Any) -> None:
@@ -335,17 +397,17 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
     window_start = values.get("window_start")
     window_end = values.get("window_end")
     window_spec = None
-    leading_history: list[dict[str, Any]] = []
 
     dataset_id = values.get("dataset_id")
     if dataset_id:
         history = await resolve_history(runtime, dataset_id=str(dataset_id))
     elif window_start is not None and window_end is not None:
         window_spec = (float(window_start), float(window_end))
-        leading_history, history = await _history_with_leading(runtime, *window_spec)
+        history = await resolve_history(
+            runtime, window_start=float(window_start), window_end=float(window_end)
+        )
     else:
         history = await resolve_history(runtime, horizon_hours=horizon_hours)
-        leading_history = await _leading_for_history(runtime, history)
 
     room_names = _room_names(runtime)
     room_params = extract_sim_room_params(values, room_names)
@@ -354,44 +416,17 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
     )
     sim_heat_sources = patched_heat_sources(_heat_sources(runtime), heater_scales)
 
-    try:
-        sim_model = build_sim_model(_model(runtime), room_params, room_names)
-        init_system = _house_thermal_sde(
-            sim_model,
-            sim_heat_sources,
-            dt,
-            sigma_w=float(values.get("sigma_w", runtime.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W))),
-            sigma_v=float(values.get("sigma_v", runtime.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V))),
-            augment_offsets=False,
-        )
-    except Exception as exc:
-        _LOGGER.warning("EKF sim: could not build initial-state system: %s", exc)
-        init_system = None
-
     sigma_w = float(values.get("sigma_w", runtime.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W)))
     sigma_v = float(values.get("sigma_v", runtime.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V)))
-
-    if init_system is not None:
-        try:
-            init_state = await estimate_simulation_initial_state(
-                history,
-                init_system,
-                _model(runtime),
-                sim_heat_sources,
-                room_names,
-                dt,
-                leading_history=leading_history,
-                room_params=room_params if room_params else None,
-                sigma_w=sigma_w,
-                sigma_v=sigma_v,
-            )
-            for room_name, t_wall in dict(init_state.get("t_wall", {}) or {}).items():
-                room_params.setdefault(room_name, {})["t_wall_initial"] = float(t_wall)
-        except Exception as exc:
-            _LOGGER.warning("EKF sim initial-state estimation failed: %s", exc)
-            inject_identified_t_wall_initial(room_params, room_names, runtime.sysid_results)
-    else:
-        inject_identified_t_wall_initial(room_params, room_names, runtime.sysid_results)
+    t_wall_initial = _resolve_simulation_t_wall(
+        history,
+        runtime,
+        sim_heat_sources,
+        room_names,
+        dt,
+        room_params,
+        values,
+    )
 
     result = await asyncio.to_thread(
         run_sysid_simulation,
@@ -408,6 +443,7 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
     )
     if "error" not in result:
         per_room = dict(result.get("per_room", {}) or {})
+        _attach_aux_and_tw0(per_room, history, sim_heat_sources, t_wall_initial)
         for room_data in per_room.values():
             if isinstance(room_data, dict):
                 room_data["horizon_steps"] = result.get("horizon_steps", horizon_steps)
@@ -428,18 +464,16 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     horizon_hours = values.get("horizon_hours")
     window_start = values.get("window_start")
     window_end = values.get("window_end")
-    leading_history: list[dict[str, Any]] = []
 
     dataset_id = values.get("dataset_id")
     if dataset_id:
         history = await resolve_history(runtime, dataset_id=str(dataset_id))
     elif window_start is not None and window_end is not None:
-        leading_history, history = await _history_with_leading(
-            runtime, float(window_start), float(window_end)
+        history = await resolve_history(
+            runtime, window_start=float(window_start), window_end=float(window_end)
         )
     elif horizon_hours is not None:
         history = await resolve_history(runtime, horizon_hours=float(horizon_hours))
-        leading_history = await _leading_for_history(runtime, history)
     else:
         history = await resolve_history(runtime)
 
@@ -478,29 +512,15 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
                 augment_offsets=False,
             )
 
-    try:
-        init_state = await estimate_simulation_initial_state(
-            history,
-            system,
-            _model(runtime),
-            base_heat_sources,
-            room_names,
-            dt,
-            leading_history=leading_history,
-            room_params=room_params if room_params else None,
-            sigma_w=sigma_w,
-            sigma_v=sigma_v,
-        )
-        t_wall_initial = {
-            name: float(value) for name, value in dict(init_state.get("t_wall", {}) or {}).items()
-        }
-    except Exception as exc:
-        _LOGGER.warning("Open-loop initial-state estimation failed: %s", exc)
-        t_wall_initial = open_loop_t_wall_initial_dict(
-            room_params,
-            room_names,
-            runtime.sysid_results,
-        )
+    t_wall_initial = _resolve_simulation_t_wall(
+        history,
+        runtime,
+        base_heat_sources,
+        room_names,
+        dt,
+        room_params,
+        values,
+    )
 
     result = await asyncio.to_thread(
         compute_open_loop_predictions,
@@ -514,6 +534,7 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     )
     if "error" not in result:
         per_room = dict(result.get("per_room", {}) or {})
+        _attach_aux_and_tw0(per_room, history, base_heat_sources, t_wall_initial)
         rmse_by_horizon = await compute_open_loop_rmse_by_horizon(
             history,
             system,
@@ -602,6 +623,27 @@ async def handle_get_pe_coverage(runtime: Any, data: Mapping[str, Any]) -> dict[
         horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
     )
     return _categorise_records(runtime, history, room_name)
+
+
+async def handle_get_pe_inputs(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return heater / outdoor / solar series for the PE window or dataset."""
+    values = _payload(data)
+    room_name = _resolve_room(runtime, str(values.get("room_name") or values.get("room_slug") or ""))
+    horizon_hours = values.get("horizon_hours")
+    history = await resolve_history(
+        runtime,
+        dataset_id=values.get("dataset_id"),
+        dataset_ids=values.get("dataset_ids"),
+        window_start=values.get("window_start"),
+        window_end=values.get("window_end"),
+        horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
+    )
+    return identification_aux_series(
+        history,
+        _heat_sources(runtime),
+        room_name,
+        iso_time=_iso_time,
+    )
 
 
 def _room_has_contact(runtime: Any, room_name: str) -> bool:
@@ -752,6 +794,9 @@ def sysid_sensor_attrs(runtime: Any, room_name: str) -> dict[str, Any]:
         "horizon_hours": horizon_hours,
         "window_start": room_data.get("window_start"),
         "window_end": room_data.get("window_end"),
+        "heating_power": _iso_series(room_data.get("heating_power")),
+        "outdoor_temp": _iso_series(room_data.get("outdoor_temp")),
+        "solar_gain": _iso_series(room_data.get("solar_gain")),
     }
 
 
@@ -774,6 +819,10 @@ def open_loop_sensor_attrs(runtime: Any, room_name: str) -> dict[str, Any]:
         "open_loop_mae": room_data.get("mae"),
         "rmse_by_horizon": room_data.get("rmse_by_horizon"),
         "simulation": formatted,
+        "t_wall_initial": room_data.get("t_wall_initial"),
+        "heating_power": _iso_series(room_data.get("heating_power")),
+        "outdoor_temp": _iso_series(room_data.get("outdoor_temp")),
+        "solar_gain": _iso_series(room_data.get("solar_gain")),
     }
     if "error" in room_data:
         attrs["error"] = room_data["error"]
@@ -952,6 +1001,7 @@ __all__ = [
     "handle_estimate_parameters_ml",
     "annotate_datasets_with_coverage",
     "handle_get_pe_coverage",
+    "handle_get_pe_inputs",
     "handle_run_open_loop_simulation",
     "handle_run_sysid_simulation",
     "handle_store_identified_parameters",

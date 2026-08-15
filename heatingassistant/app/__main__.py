@@ -106,7 +106,7 @@ class _Handler(BaseHTTPRequestHandler):
             room_slug = query.get("room_slug", [None])[0]
             self._send_json({"datasets": self.runtime.datasets(room_slug)})
             return
-        if path == "/api/pe_coverage":
+        if path in {"/api/pe_coverage", "/api/pe_inputs"}:
             query = parse_qs(parsed.query)
             from heatingassistant.app import sysid_services
 
@@ -131,10 +131,13 @@ class _Handler(BaseHTTPRequestHandler):
             horizon = self._optional_float(query.get("horizon_hours", [None])[0])
             if horizon is not None:
                 payload["horizon_hours"] = horizon
+            handler = (
+                sysid_services.handle_get_pe_coverage
+                if path == "/api/pe_coverage"
+                else sysid_services.handle_get_pe_inputs
+            )
             try:
-                self._send_json(
-                    asyncio.run(sysid_services.handle_get_pe_coverage(self.runtime, payload))
-                )
+                self._send_json(asyncio.run(handler(self.runtime, payload)))
             except ValueError as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
