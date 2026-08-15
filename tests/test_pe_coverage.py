@@ -370,6 +370,10 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "pe-coverage-chip" not in datasets
     assert 'type="checkbox"' not in datasets
     assert "coverage_categories" in datasets
+    assert "_datasetCategoryStrip" in datasets
+    assert "store-row__cats" in datasets
+    assert "store-row__tag--cat" not in datasets
+    assert "filter((cat) => cat && cat.status === 'checked')" not in datasets
     assert "param-ua-open" in detail
     assert "ua_open: uaOpen" in detail
     assert "refreshCoverage" in detail
@@ -380,7 +384,9 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert ".pe-coverage-guide" in css
     assert ".pe-save-chip" in css
     assert ".store-row--guide-match" in css
+    assert ".store-row__cats" in css
     assert ".pe-coverage-chip" not in css
+    assert ".store-row__tag--cat" not in css
     tile_rule = css.split(".pe-coverage-tile {", 1)[1].split("}", 1)[0]
     assert "pointer-events: none" not in tile_rule
     assert "cursor: pointer" in tile_rule

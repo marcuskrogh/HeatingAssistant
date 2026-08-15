@@ -32,6 +32,7 @@
 - Save Current Window previews which categories the configured live window
   would cover, using the existing coverage API.
 - Clicking a tile highlights stored datasets that already cover that category.
+- Each stored-dataset row shows all four categories (Envelope, Heater, Solar, Open UA) as chips: teal if that set covers it, grey if not, dashed N/A. Manual/Experiment stays on the title line.
 - Stored Datasets starts open so the category row is visible without hunting.
 - Focused tests cover the new UI seams; existing coverage tests stay green.
 - CalVer bump + App package sync.

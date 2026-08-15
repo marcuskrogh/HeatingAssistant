@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=127';
-import { createCollapsible } from '../components/collapsible.js?v=127';
-import { makeDataset } from '../components/time-series-chart.js?v=127';
+import { deleteDataset, createDataset } from '../ha-services.js?v=128';
+import { createCollapsible } from '../components/collapsible.js?v=128';
+import { makeDataset } from '../components/time-series-chart.js?v=128';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -66,11 +66,33 @@ function _toLocalInput(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function _datasetCategoryTags(dataset) {
+function _statusWord(status) {
+  if (status === 'checked') return 'Yes';
+  if (status === 'na') return 'N/A';
+  return 'No';
+}
+
+function _peChipHtml(spec, status, withState) {
+  const state = _statusWord(status);
+  const text = withState ? `${spec.short}: ${state}` : spec.short;
+  return `<span class="pe-save-chip pe-save-chip--${status}" title="${spec.short}: ${state}">${text}</span>`;
+}
+
+function _datasetCategoryStrip(dataset) {
   const cats = Array.isArray(dataset && dataset.coverage_categories)
     ? dataset.coverage_categories
     : [];
-  return cats.filter((cat) => cat && cat.status === 'checked');
+  const byId = {};
+  for (const cat of cats) {
+    if (cat && cat.id) byId[cat.id] = cat.status || 'unchecked';
+  }
+  const items = PE_CATEGORIES.map((spec) => ({
+    spec,
+    status: byId[spec.id] || 'unchecked',
+  }));
+  const aria = items.map(({ spec, status }) => `${spec.short} ${_statusWord(status)}`).join(', ');
+  const chips = items.map(({ spec, status }) => _peChipHtml(spec, status, false)).join('');
+  return `<div class="store-row__cats" aria-label="${aria}">${chips}</div>`;
 }
 
 function _unionSelectedStatuses(datasets, selectedIds) {
@@ -332,11 +354,8 @@ export function setupDatasetsAndExperiments(ctx) {
     const coveredShorts = [];
     saveCoverageChipsEl.innerHTML = PE_CATEGORIES.map((spec) => {
       const status = byId[spec.id] || 'unchecked';
-      const na = status === 'na';
-      const on = status === 'checked';
-      if (on) coveredShorts.push(spec.short);
-      const state = na ? 'N/A' : (on ? 'Yes' : 'No');
-      return `<span class="pe-save-chip pe-save-chip--${status}">${spec.short}: ${state}</span>`;
+      if (status === 'checked') coveredShorts.push(spec.short);
+      return _peChipHtml(spec, status, true);
     }).join('');
     if (!(dsNameInput.value || '').trim() && coveredShorts.length) {
       dsNameInput.placeholder = `${coveredShorts.join(' + ')} — ${room.name}`;
@@ -512,18 +531,14 @@ export function setupDatasetsAndExperiments(ctx) {
       const dur = _fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts));
       const recs = d.record_count != null ? `${d.record_count}` : '—';
       const notes = d.notes ? `<div class="store-row__notes">${d.notes}</div>` : '';
-      const catTags = _datasetCategoryTags(d).map((cat) => {
-        const short = cat.short_label || PE_CATEGORIES.find((s) => s.id === cat.id)?.short || cat.label || '';
-        return `<span class="store-row__tag store-row__tag--cat">${short}</span>`;
-      }).join('');
       return `
         <div class="store-row store-row--dataset ${sel ? 'store-row--selected' : ''} ${isLoaded ? 'store-row--loaded' : ''}" data-id="${d.id}">
           <div class="store-row__main">
             <div class="store-row__name">
               <span class="store-row__title">${d.name || '(unnamed)'}</span>
               <span class="store-row__tag store-row__tag--${source.toLowerCase() === 'experiment' ? 'accent' : ''}">${source}</span>
-              ${catTags}
             </div>
+            ${_datasetCategoryStrip(d)}
             <div class="store-row__meta">
               ${stat('Room', roomLabel)}${stat('Window', span)}${stat('Length', dur)}${stat('Points', recs)}
             </div>

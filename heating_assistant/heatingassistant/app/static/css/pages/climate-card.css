@@ -1056,9 +1056,13 @@ input[type="time"] {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
-.store-row__tag--cat {
-  color: var(--accent);
-  border-color: var(--accent);
-  text-transform: none;
-  letter-spacing: 0.02em;
+.store-row__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.store-row__cats .pe-save-chip {
+  font-size: 10px;
+  padding: 2px 7px;
 }
