@@ -55,4 +55,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/615
 
 ## Next
-`/review-fix SWD-343` — Review and auto-fix (single pass)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/615

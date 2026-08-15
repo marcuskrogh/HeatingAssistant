@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-343` — four-up dataset chips on PR #615 |
+| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/615 |
 | SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | Done | — | docs/ROADMAP.md | Done — map complete (PR #612) |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | Done — SWD-335 shipped |
 | SWD-335 | Task | [Define] Robust open-loop PE for household extras | Done | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/614 |
@@ -93,6 +93,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-15 — shipped SWD-343 via PR #615: clickable PE category guides, live save-window coverage preview, four-up dataset chips; review-fix CLEAN (focused); changelog skipped (none).
 - 2026-08-15 — SWD-343 copy: Heater guide states the dataset must include this room's heater command off and on.
 - 2026-08-15 — SWD-343 copy: Heater guide states heater power scale (off vs on duty) vs rated power.
 - 2026-08-15 — `/iterate` SWD-343 In Review: clickable PE category guides + live save preview; PR https://github.com/marcuskrogh/HeatingAssistant/pull/615; CalVer 2026.08.4. Next `/review-fix SWD-343`.
