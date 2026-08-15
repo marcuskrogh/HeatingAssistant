@@ -21,9 +21,10 @@
   `internal_gain`). Plant occupancy watts are **not** injected. Procedures
   that used the assumed-UA channel apply the same assumed UA × contact on val
   (contacts are known, as they would be to MPC).
-- Val free-run initial state: air = first val measurement; wall = last wall
-  temperature from rolling the fitted model through train (MPC-style
-  continuation). Fallback if the roll fails: `(T_a + T_out) / 2`.
+- Val free-run initial state: air = last train measurement at the val
+  seam; wall = last wall temperature from rolling the fitted model
+  through train (MPC-style continuation). Fallback if the roll fails:
+  `(T_a + T_out) / 2`.
 - Report columns: val open-loop RMSE / MAE / R², plus existing relative
   |error| vs true θ.
 - Helper unit tests (no optimiser): split does not leak val into fit;
