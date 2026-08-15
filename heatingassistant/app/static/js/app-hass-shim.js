@@ -169,6 +169,14 @@
     if (msg.plot_forecast_hours != null) {
       params.set('plot_forecast_hours', String(msg.plot_forecast_hours));
     }
+    if (msg.dataset_id != null) params.set('dataset_id', String(msg.dataset_id));
+    const datasetIds = Array.isArray(msg.dataset_ids) ? msg.dataset_ids : [];
+    for (const id of datasetIds) {
+      if (id) params.append('dataset_ids', String(id));
+    }
+    if (msg.window_start != null) params.set('window_start', String(msg.window_start));
+    if (msg.window_end != null) params.set('window_end', String(msg.window_end));
+    if (msg.horizon_hours != null) params.set('horizon_hours', String(msg.horizon_hours));
     const text = params.toString();
     return text ? `?${text}` : '';
   }
@@ -275,6 +283,8 @@
           return requestJson(`api/datasets${queryFromMessage(msg)}`);
         case 'heating_assistant/get_dataset':
           return requestJson(`api/datasets/${encodeURIComponent(msg.dataset_id || '')}`);
+        case 'heating_assistant/get_pe_coverage':
+          return requestJson(`api/pe_coverage${queryFromMessage(msg)}`);
         case 'heating_assistant/list_experiments':
           return requestJson('api/experiments');
         case 'history/history_during_period':

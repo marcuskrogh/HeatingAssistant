@@ -21,14 +21,16 @@ class _ThetaLayout:
           log_r_ij_{p_k} for p_k in identifiable_pairs
           log_solar_{i_k} for i_k in identifiable_solar
           c_air_{i_k}    for i_k in identifiable_splits   (linear space)
-          r_aw_{i_k}     for i_k in identifiable_splits   (linear space) ]
+          r_aw_{i_k}     for i_k in identifiable_splits   (linear space)
+          ua_open_{i_k}  for i_k in identifiable_ua       (linear space, ≥ 0) ]
 
     The first three blocks always exist (one entry per room); the gated
     blocks are present only for the rooms / sources / pairs that passed
     their identifiability gates, so an old 3n-element θ remains a valid
     layout with all gates closed.  ``n_wall_segs`` controls how many
     dataset-level initial-wall-temperature blocks are included; each block
-    covers all rooms.
+    covers all rooms.  ``ua_open`` is appended last so HouseThermalSDE.f
+    offsets for q_int / α are unchanged.
     """
 
     def __init__(
@@ -38,6 +40,7 @@ class _ThetaLayout:
         identifiable_pairs: List[Tuple[int, int]],
         identifiable_solar: Optional[List[int]] = None,
         identifiable_splits: Optional[List[int]] = None,
+        identifiable_ua: Optional[List[int]] = None,
         n_wall_segs: int = 1,
     ) -> None:
         self.n_rooms = n_rooms
@@ -45,6 +48,7 @@ class _ThetaLayout:
         self.identifiable_pairs = list(identifiable_pairs)
         self.identifiable_solar = list(identifiable_solar or [])
         self.identifiable_splits = list(identifiable_splits or [])
+        self.identifiable_ua = list(identifiable_ua or [])
         self.n_wall_segs = max(1, int(n_wall_segs))
 
         n = n_rooms
@@ -64,8 +68,10 @@ class _ThetaLayout:
         self.idx_c_air = (off, off + len(self.identifiable_splits))
         off = self.idx_c_air[1]
         self.idx_r_aw = (off, off + len(self.identifiable_splits))
+        off = self.idx_r_aw[1]
+        self.idx_ua_open = (off, off + len(self.identifiable_ua))
 
-        self.size = self.idx_r_aw[1]
+        self.size = self.idx_ua_open[1]
 
     def get_t_wall_seg(self, theta: np.ndarray, seg: int) -> np.ndarray:
         """Return the t_wall_init block for dataset segment ``seg``."""
@@ -97,3 +103,8 @@ class _ThetaLayout:
             log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
             log_solar, c_air, r_aw,
         )
+
+    def get_ua_open(self, theta: np.ndarray) -> np.ndarray:
+        """Return the gated UA_open block (empty when no room is identifiable)."""
+        a, b = self.idx_ua_open
+        return theta[a:b]

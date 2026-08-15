@@ -86,6 +86,7 @@ def _room_snapshot_entry(
         "thermal_mass": float(getattr(room, "thermal_mass")),
         "r_external": float(getattr(room, "r_external")),
         "internal_gain": float(getattr(room, "internal_gain", 0.0)),
+        "ua_open": float(getattr(room, "ua_open", 0.0)),
         "solar_scale": float(getattr(room, "solar_scale", 1.0)),
         "c_air_fraction": float(getattr(room, "c_air_fraction", 0.05)),
         "r_aw_fraction": float(getattr(room, "r_aw_fraction", 0.05)),
@@ -170,6 +171,7 @@ def restore_estimated_parameters(
             "thermal_mass",
             "r_external",
             "internal_gain",
+            "ua_open",
             "solar_scale",
             "c_air_fraction",
             "r_aw_fraction",
@@ -281,6 +283,7 @@ def store_identified_parameters(
     c_air_fraction: Optional[float] = None,
     r_aw_fraction: Optional[float] = None,
     heater_scales: Optional[Mapping[str, float]] = None,
+    ua_open: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Apply one room's identified parameters and persist a full snapshot."""
 
@@ -311,6 +314,8 @@ def store_identified_parameters(
         room.c_air_fraction = float(c_air_fraction)
     if r_aw_fraction is not None:
         room.r_aw_fraction = float(r_aw_fraction)
+    if ua_open is not None:
+        room.ua_open = max(0.0, float(ua_open))
     if heater_scales:
         for src in heat_sources:
             name = str(getattr(src, "name", ""))
@@ -368,6 +373,7 @@ def apply_estimated_parameters(
     estimated_inter_room_r: Optional[Mapping[str, float]] = None,
     *,
     estimated_internal_gains: Optional[Mapping[str, float]] = None,
+    estimated_ua_open: Optional[Mapping[str, float]] = None,
     estimated_heater_scales: Optional[Mapping[str, float]] = None,
     estimated_solar_scales: Optional[Mapping[str, float]] = None,
     estimated_envelope_splits: Optional[Mapping[str, Mapping[str, float]]] = None,
@@ -386,6 +392,8 @@ def apply_estimated_parameters(
             room.r_external = float(params["r_external"])
         if estimated_internal_gains and room_name in estimated_internal_gains:
             room.internal_gain = float(estimated_internal_gains[room_name])
+        if estimated_ua_open and room_name in estimated_ua_open:
+            room.ua_open = max(0.0, float(estimated_ua_open[room_name]))
         if estimated_solar_scales and room_name in estimated_solar_scales:
             room.solar_scale = float(estimated_solar_scales[room_name])
         if estimated_envelope_splits and room_name in estimated_envelope_splits:
@@ -569,6 +577,7 @@ async def async_estimate_parameters_ml(
             result["estimated_params"],
             result.get("estimated_inter_room_r", {}),
             estimated_internal_gains=result.get("estimated_internal_gains", {}),
+            estimated_ua_open=result.get("estimated_ua_open", {}),
             estimated_heater_scales=result.get("estimated_heater_scales", {}),
             estimated_solar_scales=result.get("estimated_solar_scales", {}),
             estimated_envelope_splits=result.get("estimated_envelope_splits", {}),

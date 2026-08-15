@@ -144,9 +144,12 @@ def _build_rooms_from_theta(
             windows=r.windows,
             temperature=r.temperature,
             setpoint=r.setpoint,
-            # Internal gain is applied via the θ parameter vector during
-            # the forward pass; keep the rebuilt model neutral.
+            # Internal gain and contact UA are applied via θ / the
+            # disturbance channel during the forward pass; keep the
+            # rebuilt model neutral so live Room.ua_open is not
+            # double-counted inside f().
             internal_gain=0.0,
+            ua_open=0.0,
             solar_scale=float(solar_scales[i]),
             c_air_fraction=float(c_air_full[i]),
             r_aw_fraction=float(r_aw_full[i]),

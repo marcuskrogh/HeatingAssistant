@@ -59,7 +59,7 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
             body = response.read().decode("utf-8")
 
     assert "static/js/app-hass-shim.js" in body
-    assert "ha-industrial-panel/industrial-dashboard.js?v=120" in body
+    assert "ha-industrial-panel/industrial-dashboard.js?v=124" in body
     assert "ha-industrial-panel" in body
     assert "Home Assistant custom-panel entry point" not in body
 
@@ -129,6 +129,7 @@ def test_ingress_panel_json_endpoints_and_schedule_persistence(tmp_path) -> None
         model_config = get_json(base_url, "/api/model_config")
         forecasts = get_json(base_url, "/api/forecasts")
         datasets = get_json(base_url, "/api/datasets")
+        pe_coverage = get_json(base_url, "/api/pe_coverage?room_slug=living_room")
         experiments = get_json(base_url, "/api/experiments")
         state = get_json(base_url, "/api/state")
 
@@ -151,6 +152,14 @@ def test_ingress_panel_json_endpoints_and_schedule_persistence(tmp_path) -> None
     assert "price_forecast" in forecasts
     assert forecasts["plot_forecast_hours"] is None
     assert datasets == {"datasets": []}
+    assert pe_coverage["room"] == "Living Room"
+    assert [cat["id"] for cat in pe_coverage["categories"]] == [
+        "closed_window_envelope",
+        "heater_excitation",
+        "solar_variation",
+        "open_contact",
+    ]
+    assert pe_coverage["categories"][3]["status"] == "na"
     assert experiments == {"experiments": []}
     assert "sensor.heating_assistant_controller_config" in state["hass_states"]
 

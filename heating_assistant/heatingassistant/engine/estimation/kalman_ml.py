@@ -39,12 +39,15 @@ from .constants import (
     _T_WALL_LO,
     _T_WALL_MIN_LAM,
     _T_WALL_PRIOR_STD,
+    _UA_OPEN_HI,
+    _UA_OPEN_LO,
     _nelder_mead,
 )
 from .history_std import convert_history_std
 from .identifiability import (
     _adaptive_alpha_prior_weight,
     _check_identifiable_connections,
+    _check_identifiable_open_ua,
     _check_identifiable_sources,
     _check_identifiable_solar,
     _identifiable_split_rooms,
@@ -195,6 +198,9 @@ class KalmanMLEstimator:
         # Internal-gain prior: configured value (default 0.0)
         self._q_int_prior = np.array(
             [float(getattr(r, "internal_gain", 0.0)) for r in rooms]
+        )
+        self._ua_open_prior_full = np.array(
+            [max(0.0, float(getattr(r, "ua_open", 0.0))) for r in rooms]
         )
         # Heater-scale prior: configured value (default 1.0 → log = 0)
         self._log_alpha_prior_full = np.array([
@@ -507,6 +513,9 @@ class KalmanMLEstimator:
                 "estimated_internal_gains": {
                     name: p["internal_gain"] for name, p in current.items()
                 },
+                "estimated_ua_open": {
+                    name: 0.0 for name in self._room_names
+                },
                 "estimated_heater_scales": {
                     s.name: float(getattr(s, "power_scale", 1.0))
                     for s in self._sources
@@ -552,6 +561,9 @@ class KalmanMLEstimator:
         identifiable_splits = _identifiable_split_rooms(
             excited_sources, self._sources, self._room_names,
         )
+        identifiable_ua = _check_identifiable_open_ua(
+            history, self._room_names, self._min_segment_steps,
+        )
 
         # One t_wall_init block per distinct dataset start timestamp (minimum 1).
         n_wall_segs = max(1, len(dataset_start_timestamps)) if dataset_start_timestamps else 1
@@ -562,6 +574,7 @@ class KalmanMLEstimator:
             identifiable_pairs=identifiable_pairs,
             identifiable_solar=identifiable_solar,
             identifiable_splits=identifiable_splits,
+            identifiable_ua=identifiable_ua,
             n_wall_segs=n_wall_segs,
         )
 
@@ -582,6 +595,9 @@ class KalmanMLEstimator:
         r_aw_prior = np.array([
             self._r_aw_prior_full[i] for i in identifiable_splits
         ])
+        ua_open_prior = np.array([
+            self._ua_open_prior_full[i] for i in identifiable_ua
+        ])
         # t_wall_init prior: one block per wall segment (tiled from the single prior).
         t_wall_prior_all = np.tile(self._t_wall_init_prior, n_wall_segs)
         theta_prior = np.concatenate([
@@ -594,6 +610,7 @@ class KalmanMLEstimator:
             log_solar_prior,
             c_air_prior,
             r_aw_prior,
+            ua_open_prior,
         ])
 
         # ── Build per-parameter bounds ─────────────────────────────────────
@@ -608,6 +625,7 @@ class KalmanMLEstimator:
             + [(_LOG_SOLAR_LO, _LOG_SOLAR_HI)] * len(identifiable_solar)
             + [(_C_AIR_LO, _C_AIR_HI)] * len(identifiable_splits)
             + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
+            + [(_UA_OPEN_LO, _UA_OPEN_HI)] * len(identifiable_ua)
         )
 
         # ── Apply parameter locks (equality constraints via lb = ub) ──────
@@ -735,6 +753,7 @@ class KalmanMLEstimator:
         log_solar = np.clip(log_solar, _LOG_SOLAR_LO, _LOG_SOLAR_HI)
         c_air = np.clip(c_air, _C_AIR_LO, _C_AIR_HI)
         r_aw = np.clip(r_aw, _R_AW_LO, _R_AW_HI)
+        ua_open = np.clip(layout.get_ua_open(best_theta), _UA_OPEN_LO, _UA_OPEN_HI)
 
         # Build result dict ------------------------------------------------
         estimated_params: Dict[str, Dict[str, Any]] = {}
@@ -745,6 +764,12 @@ class KalmanMLEstimator:
                 "r_external": round(float(math.exp(log_r[i])), 6),
             }
             estimated_internal_gains[name] = round(float(q_int[i]), 2)
+
+        estimated_ua_open: Dict[str, float] = {
+            name: 0.0 for name in self._room_names
+        }
+        for k, i in enumerate(identifiable_ua):
+            estimated_ua_open[self._room_names[i]] = round(float(ua_open[k]), 3)
 
         estimated_heater_scales: Dict[str, float] = {
             s.name: float(getattr(s, "power_scale", 1.0))
@@ -847,6 +872,10 @@ class KalmanMLEstimator:
             msg_parts.append(
                 f"Envelope split estimated for {len(identifiable_splits)} room(s)."
             )
+        if identifiable_ua:
+            msg_parts.append(
+                f"Open-contact UA estimated for {len(identifiable_ua)} room(s)."
+            )
 
         identifiable_source_names = [
             self._sources[s].name for s in identifiable_sources
@@ -861,6 +890,7 @@ class KalmanMLEstimator:
                 for name, p in current.items()
             },
             "estimated_internal_gains": estimated_internal_gains,
+            "estimated_ua_open": estimated_ua_open,
             "estimated_heater_scales": estimated_heater_scales,
             "estimated_inter_room_r": estimated_r_ij,
             "estimated_solar_scales": estimated_solar_scales,
@@ -874,6 +904,9 @@ class KalmanMLEstimator:
             ],
             "identifiable_split_rooms": [
                 self._room_names[i] for i in identifiable_splits
+            ],
+            "identifiable_ua_rooms": [
+                self._room_names[i] for i in identifiable_ua
             ],
             "stage2_converged": best_converged,
             "n_steps": n_steps,
@@ -1080,9 +1113,11 @@ class KalmanMLEstimator:
         d_k: np.ndarray,
         ntheta: int,
         nx: int,
+        ua_coeff: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         return _dfdtheta_step(
             self, q, layout, model, f_val, x, u_k, d_k, ntheta, nx,
+            ua_coeff=ua_coeff,
         )
 
     def _dFdtheta_const(
