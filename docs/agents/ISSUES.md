@@ -4,6 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-344 | Task | [Bug] PE simulation missing heater/disturbances, poor wall init, category copy | To Do | — | docs/agents/PLAN-pe-sim-aux-tw0.md | `/implement SWD-344` |
+| SWD-345 | Sub-task | Plot PE heater/disturbances from ID history | To Do | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
+| SWD-346 | Sub-task | Compute and apply optimal Tw0 on Simulate | To Do | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
+| SWD-347 | Sub-task | Simplify PE category descriptions | To Do | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
+| SWD-348 | Sub-task | Tests, cache-bust, CalVer, App sync | To Do | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
 | SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/615 |
 | SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | Done | — | docs/ROADMAP.md | Done — map complete (PR #612) |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | Done — SWD-335 shipped |
@@ -93,6 +98,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-15 — `/define` SWD-344: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; PLAN `docs/agents/PLAN-pe-sim-aux-tw0.md`; Sub-tasks SWD-345–348; bug/fix-fast; Relates SWD-343. Next `/implement SWD-344`.
 - 2026-08-15 — shipped SWD-343 via PR #615: clickable PE category guides, live save-window coverage preview, four-up dataset chips; review-fix CLEAN (focused); changelog skipped (none).
 - 2026-08-15 — SWD-343 copy: Heater guide states the dataset must include this room's heater command off and on.
 - 2026-08-15 — SWD-343 copy: Heater guide states heater power scale (off vs on duty) vs rated power.
