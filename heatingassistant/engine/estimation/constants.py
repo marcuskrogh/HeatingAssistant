@@ -47,6 +47,15 @@ _LOG_R_IJ_HI = math.log(5.0)    # 5 K/W (well-insulated internal wall)
 _Q_INT_LO = -2_000.0   # allow small negative to absorb model bias
 _Q_INT_HI =  5_000.0   # large internal source (server room, sauna…)
 
+#: Linear bounds for contact-gated extra outdoor UA [W/K] while a
+#: window/door override contact is open.  Cap is a numerical limit, not
+#: a physical law (MODEL-pe-contact-ua-occupancy).
+_UA_OPEN_LO = 0.0
+_UA_OPEN_HI = 50.0
+#: Prior std [W/K] for UA_open (MAP toward 0).  Same order as the
+#: assumed-UA bake-off guess (15 W/K).
+_UA_OPEN_PRIOR_STD = 15.0
+
 #: Log-space bounds for heater power-scale α (multiplicative on max_power).
 _LOG_ALPHA_LO = math.log(0.3)   # 30 % of rated
 _LOG_ALPHA_HI = math.log(3.0)   # 300 % of rated

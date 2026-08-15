@@ -71,6 +71,23 @@ export class HaConnection {
     }
   }
 
+  async getPeCoverage(opts = {}) {
+    try {
+      const msg = { type: 'heating_assistant/get_pe_coverage' };
+      if (opts.roomSlug != null) msg.room_slug = opts.roomSlug;
+      if (opts.datasetIds && opts.datasetIds.length) msg.dataset_ids = opts.datasetIds;
+      else if (opts.datasetId) msg.dataset_id = opts.datasetId;
+      if (opts.windowStart != null) msg.window_start = opts.windowStart;
+      if (opts.windowEnd != null) msg.window_end = opts.windowEnd;
+      if (opts.horizonHours != null) msg.horizon_hours = opts.horizonHours;
+      const result = await this._hass.callWS(msg);
+      return result || null;
+    } catch (e) {
+      console.warn('Failed to fetch PE coverage via WebSocket:', e);
+      return null;
+    }
+  }
+
   // Returns the experiment list, or ``null`` when the fetch fails (so callers
   // can keep the previously-rendered list instead of clearing it).
   async listExperiments() {

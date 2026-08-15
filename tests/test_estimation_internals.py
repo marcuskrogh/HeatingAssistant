@@ -97,6 +97,10 @@ def _single_room_theta(est, layout: _ThetaLayout) -> np.ndarray:
         blocks.append(
             np.array([est._r_aw_prior_full[i] for i in layout.identifiable_splits])
         )
+    if layout.identifiable_ua:
+        blocks.append(
+            np.array([est._ua_open_prior_full[i] for i in layout.identifiable_ua])
+        )
     theta = np.concatenate(blocks)
     assert len(theta) == layout.size
     return theta
@@ -168,6 +172,18 @@ class TestBuildRoomsFromTheta:
         assert built[1].r_external == pytest.approx(0.07)
         assert built[0].connections[0].r_value == pytest.approx(0.25)
         assert built[0].internal_gain == 0.0
+        assert built[0].ua_open == 0.0
+
+    def test_fit_rebuild_zeros_source_room_ua_open(self):
+        rooms = [
+            Room("a", thermal_mass=5e6, r_external=0.05, temperature=20.0, ua_open=15.0),
+        ]
+        est = make_kalman_ml_estimator(rooms, [], dt=60.0)
+        layout = _ThetaLayout(n_rooms=1, identifiable_sources=[], identifiable_pairs=[])
+        built = _build_rooms_from_theta(
+            est, layout, est._log_mass_prior, est._log_r_prior, None,
+        )
+        assert built[0].ua_open == 0.0
 
 
 class TestBuildSystem:

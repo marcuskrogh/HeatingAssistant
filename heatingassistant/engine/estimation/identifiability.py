@@ -91,6 +91,28 @@ def _check_identifiable_solar(
     return identifiable
 
 
+def _check_identifiable_open_ua(
+    history: List[Dict[str, Any]],
+    room_names: List[str],
+    min_open_steps: int,
+) -> List[int]:
+    """Return room indices with enough open-contact samples to identify UA_open.
+
+    ``min_open_steps`` is the estimator's existing segment minimum
+    (``N_min``).  Rooms below that bar keep SWD-322 exclusion and
+    ``UA_open = 0``.
+    """
+    if min_open_steps <= 0 or not history:
+        return []
+    counts = [0] * len(room_names)
+    for record in history:
+        wo = record.get("window_open") or {}
+        for i, name in enumerate(room_names):
+            if wo.get(name, False):
+                counts[i] += 1
+    return [i for i, count in enumerate(counts) if count >= min_open_steps]
+
+
 def _identifiable_split_rooms(
     identifiable_sources: List[int],
     sources: List[Any],
