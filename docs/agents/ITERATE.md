@@ -49,6 +49,7 @@
 - Task: [SWD-343](https://marcusknielsen.atlassian.net/browse/SWD-343)
 - Relates: [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
 - Branch: `cursor/swd-343-pe-category-guides-2d07`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/615
 
 ## Next
 `/review-fix SWD-343` — Review and auto-fix (single pass)

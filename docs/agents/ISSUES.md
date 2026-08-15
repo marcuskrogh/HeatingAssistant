@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-343` |
+| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-343` |
 | SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | Done | — | docs/ROADMAP.md | Done — map complete (PR #612) |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | Done — SWD-335 shipped |
 | SWD-335 | Task | [Define] Robust open-loop PE for household extras | Done | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/614 |
@@ -93,6 +93,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-15 — `/iterate` SWD-343 In Review: clickable PE category guides + live save preview; PR https://github.com/marcuskrogh/HeatingAssistant/pull/615; CalVer 2026.08.4. Next `/review-fix SWD-343`.
 - 2026-08-15 — `/iterate` SWD-343 from SWD-335: clickable PE category guides + live save-window coverage preview; comfort-first recipes; Relates SWD-335. Next `/review-fix SWD-343`.
 - 2026-08-15 — shipped SWD-329 via PR #612 into `main`: offline household PE robustness harness + report; review-fix CLEAN; changelog skipped (none). Stack also lands SWD-332 and SWD-335. Story SWD-323 Done — map complete.
 - 2026-08-15 — shipped SWD-332 via PR #613: hold-out open-loop val RMSE/MAE/R² on the household PE harness; review-fix CLEAN (PLAN seam init); changelog skipped (test/report only). Story SWD-323 stays open. Next `/review-fix SWD-329`.
