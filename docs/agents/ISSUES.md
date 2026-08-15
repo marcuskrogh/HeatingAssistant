@@ -98,7 +98,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
-- 2026-08-15 — `/implement` SWD-344 In Review: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; CalVer 2026.08.5. Next `/review-fix SWD-344`.
+- 2026-08-15 — `/implement` SWD-344 In Review: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; PR https://github.com/marcuskrogh/HeatingAssistant/pull/616; CalVer 2026.08.5. Next `/review-fix SWD-344`.
 - 2026-08-15 — `/define` SWD-344: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; PLAN `docs/agents/PLAN-pe-sim-aux-tw0.md`; Sub-tasks SWD-345–348; bug/fix-fast; Relates SWD-343. Next `/implement SWD-344`.
 - 2026-08-15 — shipped SWD-343 via PR #615: clickable PE category guides, live save-window coverage preview, four-up dataset chips; review-fix CLEAN (focused); changelog skipped (none).
 - 2026-08-15 — SWD-343 copy: Heater guide states the dataset must include this room's heater command off and on.
