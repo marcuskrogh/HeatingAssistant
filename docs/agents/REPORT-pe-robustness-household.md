@@ -1,7 +1,7 @@
 # Report: PE robustness on household-like 2R2C traces
 
-Offline synthetic factorial for SWD-329. **No product winner is declared.**
-Judge whether extras / procedures recover true θ well enough to ship.
+Offline synthetic factorial for SWD-329 + SWD-332. **No product winner is declared.**
+Primary score is **hold-out open-loop indoor-air accuracy** (MPC-relevant free-run). Relative |error| vs true θ is secondary.
 
 ## Truth
 
@@ -33,12 +33,127 @@ Judge whether extras / procedures recover true θ well enough to ship.
 
 ## Runtime caps
 
-- n_steps = 96 (24 h at 15 min).
+- n_train = 96 (24 h); n_val = 96 (next 24 h). Fits see train only.
 - maxiter = 25; physics-informed start skipped (prior only).
 - Grid size: 108 fits (3×3 scenarios × 6 procedures × 2 paths); staged procedures add extra inner fits.
 - Marker: `pytest.mark.ondemand` — not CI.
 
-## Relative |error| vs true θ
+## Validation open-loop air accuracy (primary)
+
+Fitted 2R2C free-run on the hold-out day. Air at the seam is the last train measurement; wall is rolled through train with fitted θ. Plant occupancy watts are not injected. Assumed-UA procedures apply the same assumed UA × contact on val.
+
+| Scenario | Procedure | Path | OK | RMSE °C | MAE °C | R² | notes |
+|----------|-----------|------|----|---------|--------|----|-------|
+| occ_none__win_none | today_combined | open_loop | yes | 0.451 | 0.371 | 0.904 |  |
+| occ_none__win_none | today_combined | kalman | yes | 1.779 | 1.622 | -0.490 |  |
+| occ_none__win_none | occupancy_tv | open_loop | yes | 1.288 | 0.993 | 0.218 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_none | occupancy_tv | kalman | yes | 1.389 | 1.094 | 0.091 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_none | window_ua | open_loop | yes | 0.451 | 0.371 | 0.904 | notes=['include_open_assumed_ua'] |
+| occ_none__win_none | window_ua | kalman | yes | 1.779 | 1.622 | -0.490 | notes=['include_open_assumed_ua'] |
+| occ_none__win_none | both | open_loop | yes | 1.288 | 0.993 | 0.218 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_none | both | kalman | yes | 1.389 | 1.094 | 0.091 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_none | separated_joint | open_loop | yes | 11.686 | 11.106 | -63.341 |  |
+| occ_none__win_none | separated_joint | kalman | yes | 2.163 | 1.889 | -1.204 |  |
+| occ_none__win_none | separated_staged | open_loop | yes | 1.181 | 0.978 | 0.343 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_none | separated_staged | kalman | yes | 1.282 | 1.043 | 0.226 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | today_combined | open_loop | yes | 1.782 | 1.574 | -0.354 |  |
+| occ_none__win_weak | today_combined | kalman | yes | 1.815 | 1.643 | -0.405 |  |
+| occ_none__win_weak | occupancy_tv | open_loop | yes | 6.918 | 6.670 | -19.402 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | occupancy_tv | kalman | yes | 1.716 | 1.320 | -0.256 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | window_ua | open_loop | yes | 0.734 | 0.589 | 0.770 | notes=['include_open_assumed_ua'] |
+| occ_none__win_weak | window_ua | kalman | yes | 1.479 | 1.290 | 0.068 | notes=['include_open_assumed_ua'] |
+| occ_none__win_weak | both | open_loop | yes | 1.305 | 1.056 | 0.274 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | both | kalman | yes | 1.369 | 1.053 | 0.201 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | separated_joint | open_loop | yes | 10.925 | 10.171 | -49.881 |  |
+| occ_none__win_weak | separated_joint | kalman | yes | 3.185 | 3.035 | -3.325 |  |
+| occ_none__win_weak | separated_staged | open_loop | yes | 0.650 | 0.542 | 0.820 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_weak | separated_staged | kalman | yes | 1.636 | 1.443 | -0.141 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | today_combined | open_loop | yes | 2.416 | 2.112 | -0.758 |  |
+| occ_none__win_strong | today_combined | kalman | yes | 2.208 | 1.970 | -0.468 |  |
+| occ_none__win_strong | occupancy_tv | open_loop | yes | 10.258 | 9.884 | -30.694 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | occupancy_tv | kalman | yes | 2.235 | 1.979 | -0.505 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | window_ua | open_loop | yes | 0.546 | 0.457 | 0.910 | notes=['include_open_assumed_ua'] |
+| occ_none__win_strong | window_ua | kalman | yes | 1.908 | 1.637 | -0.097 | notes=['include_open_assumed_ua'] |
+| occ_none__win_strong | both | open_loop | yes | 1.416 | 1.319 | 0.396 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | both | kalman | yes | 1.888 | 1.647 | -0.074 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | separated_joint | open_loop | yes | 6.978 | 6.374 | -13.665 |  |
+| occ_none__win_strong | separated_joint | kalman | yes | 3.768 | 3.579 | -3.276 |  |
+| occ_none__win_strong | separated_staged | open_loop | yes | 1.079 | 0.885 | 0.649 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_none__win_strong | separated_staged | kalman | yes | 1.852 | 1.613 | -0.033 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | today_combined | open_loop | yes | 0.464 | 0.371 | 0.887 |  |
+| occ_weak__win_none | today_combined | kalman | yes | 1.773 | 1.611 | -0.647 |  |
+| occ_weak__win_none | occupancy_tv | open_loop | yes | 1.232 | 1.026 | 0.205 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | occupancy_tv | kalman | yes | 1.131 | 0.925 | 0.330 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | window_ua | open_loop | yes | 0.464 | 0.371 | 0.887 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_none | window_ua | kalman | yes | 1.773 | 1.611 | -0.647 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_none | both | open_loop | yes | 1.232 | 1.026 | 0.205 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | both | kalman | yes | 1.131 | 0.925 | 0.330 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | separated_joint | open_loop | yes | 3.076 | 2.836 | -3.957 |  |
+| occ_weak__win_none | separated_joint | kalman | yes | 4.670 | 4.565 | -10.428 |  |
+| occ_weak__win_none | separated_staged | open_loop | yes | 0.516 | 0.437 | 0.860 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_none | separated_staged | kalman | yes | 1.243 | 1.014 | 0.190 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | today_combined | open_loop | yes | 2.006 | 1.901 | -0.908 |  |
+| occ_weak__win_weak | today_combined | kalman | yes | 1.514 | 1.339 | -0.087 |  |
+| occ_weak__win_weak | occupancy_tv | open_loop | yes | 6.260 | 5.984 | -17.575 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | occupancy_tv | kalman | yes | 1.649 | 1.272 | -0.289 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | window_ua | open_loop | yes | 1.807 | 1.703 | -0.548 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_weak | window_ua | kalman | yes | 1.679 | 1.510 | -0.336 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_weak | both | open_loop | yes | 1.895 | 1.683 | -0.702 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | both | kalman | yes | 1.483 | 1.170 | -0.043 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | separated_joint | open_loop | yes | 4.618 | 4.227 | -9.111 |  |
+| occ_weak__win_weak | separated_joint | kalman | yes | 3.336 | 3.209 | -4.276 |  |
+| occ_weak__win_weak | separated_staged | open_loop | yes | 0.538 | 0.473 | 0.863 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_weak | separated_staged | kalman | yes | 1.546 | 1.365 | -0.133 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | today_combined | open_loop | yes | 2.198 | 1.930 | -0.614 |  |
+| occ_weak__win_strong | today_combined | kalman | yes | 2.109 | 1.882 | -0.485 |  |
+| occ_weak__win_strong | occupancy_tv | open_loop | yes | 9.997 | 9.669 | -32.383 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | occupancy_tv | kalman | yes | 1.633 | 1.404 | 0.109 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | window_ua | open_loop | yes | 0.579 | 0.480 | 0.888 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_strong | window_ua | kalman | yes | 2.754 | 2.441 | -1.533 | notes=['include_open_assumed_ua'] |
+| occ_weak__win_strong | both | open_loop | yes | 1.759 | 1.595 | -0.034 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | both | kalman | yes | 1.727 | 1.501 | 0.004 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | separated_joint | open_loop | yes | 7.325 | 6.792 | -16.924 |  |
+| occ_weak__win_strong | separated_joint | kalman | yes | 2.609 | 2.307 | -1.273 |  |
+| occ_weak__win_strong | separated_staged | open_loop | yes | 0.929 | 0.774 | 0.712 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_weak__win_strong | separated_staged | kalman | yes | 1.987 | 1.734 | -0.319 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | today_combined | open_loop | yes | 0.992 | 0.850 | 0.422 |  |
+| occ_strong__win_none | today_combined | kalman | yes | 1.049 | 0.872 | 0.354 |  |
+| occ_strong__win_none | occupancy_tv | open_loop | yes | 0.952 | 0.883 | 0.467 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | occupancy_tv | kalman | yes | 1.561 | 1.250 | -0.431 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | window_ua | open_loop | yes | 0.992 | 0.850 | 0.422 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_none | window_ua | kalman | yes | 1.049 | 0.872 | 0.354 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_none | both | open_loop | yes | 0.952 | 0.883 | 0.467 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | both | kalman | yes | 1.561 | 1.250 | -0.431 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | separated_joint | open_loop | yes | 3.111 | 2.939 | -4.686 |  |
+| occ_strong__win_none | separated_joint | kalman | yes | 1.570 | 1.345 | -0.448 |  |
+| occ_strong__win_none | separated_staged | open_loop | yes | 1.551 | 1.439 | -0.413 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_none | separated_staged | kalman | yes | 1.086 | 0.902 | 0.307 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | today_combined | open_loop | yes | 1.098 | 0.931 | 0.352 |  |
+| occ_strong__win_weak | today_combined | kalman | yes | 1.800 | 1.639 | -0.744 |  |
+| occ_strong__win_weak | occupancy_tv | open_loop | yes | 1.543 | 1.267 | -0.280 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | occupancy_tv | kalman | yes | 1.870 | 1.521 | -0.881 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | window_ua | open_loop | yes | 1.058 | 0.892 | 0.398 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_weak | window_ua | kalman | yes | 1.706 | 1.542 | -0.565 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_weak | both | open_loop | yes | 1.701 | 1.585 | -0.557 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | both | kalman | yes | 1.730 | 1.434 | -0.609 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | separated_joint | open_loop | yes | 3.660 | 3.444 | -6.206 |  |
+| occ_strong__win_weak | separated_joint | kalman | yes | 2.339 | 2.154 | -1.944 |  |
+| occ_strong__win_weak | separated_staged | open_loop | yes | 3.630 | 3.512 | -6.090 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_weak | separated_staged | kalman | yes | 1.266 | 1.074 | 0.138 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | today_combined | open_loop | yes | 2.402 | 2.233 | -1.278 |  |
+| occ_strong__win_strong | today_combined | kalman | yes | 2.134 | 1.933 | -0.797 |  |
+| occ_strong__win_strong | occupancy_tv | open_loop | yes | 9.789 | 9.546 | -36.814 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | occupancy_tv | kalman | yes | 1.978 | 1.538 | -0.544 | notes=['stage1_night_envelope', 'stage2_day_disturbance'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | window_ua | open_loop | yes | 0.807 | 0.641 | 0.743 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_strong | window_ua | kalman | yes | 2.029 | 1.834 | -0.625 | notes=['include_open_assumed_ua'] |
+| occ_strong__win_strong | both | open_loop | yes | 0.861 | 0.766 | 0.708 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | both | kalman | yes | 1.199 | 1.001 | 0.433 | notes=['stage1_night_envelope', 'stage2_day_disturbance', 'plus_assumed_ua'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | separated_joint | open_loop | yes | 6.687 | 6.278 | -16.647 |  |
+| occ_strong__win_strong | separated_joint | kalman | yes | 2.969 | 2.771 | -2.480 |  |
+| occ_strong__win_strong | separated_staged | open_loop | yes | 3.162 | 2.947 | -2.947 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+| occ_strong__win_strong | separated_staged | kalman | yes | 2.031 | 1.832 | -0.628 | notes=['stage1_solar_off_envelope', 'stage2_skipped_short'] locked=['r_external', 'thermal_mass'] |
+
+## Relative |error| vs true θ (secondary)
 
 | Scenario | Procedure | Path | OK | C | R_ext | solar_scale | α | notes |
 |----------|-----------|------|----|---|-------|-------------|---|-------|
