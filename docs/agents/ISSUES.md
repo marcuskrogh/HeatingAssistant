@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-343` |
+| SWD-343 | Task | [Iterate] Clickable PE category guides for low-comfort identification data | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-343` — four-up dataset chips on PR #615 |
 | SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | Done | — | docs/ROADMAP.md | Done — map complete (PR #612) |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | Done — SWD-335 shipped |
 | SWD-335 | Task | [Define] Robust open-loop PE for household extras | Done | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/614 |
