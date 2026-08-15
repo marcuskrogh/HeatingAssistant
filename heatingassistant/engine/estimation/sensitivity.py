@@ -24,6 +24,7 @@ def _dfdtheta_step(
     d_k: np.ndarray,
     ntheta: int,
     nx: int,
+    ua_coeff: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """``∂f/∂θ`` at fixed state, shape (ntheta, nx), for the 2R2C drift.
 
@@ -109,6 +110,13 @@ def _dfdtheta_step(
             -(g_aw[i] / (rf[i] * C_w[i])) * (T_a[i] - T_w[i])
             + (g_we[i] / ((1.0 - rf[i]) * C_w[i])) * (T_out - T_w[i])
         )
+
+    # Contact-gated extra UA: linearized as known air-heat
+    # Q = UA_open · c · (T_out − y^m).  Coefficient is ZOH over the step.
+    if ua_coeff is not None and layout.identifiable_ua:
+        ua0, _ = layout.idx_ua_open
+        for k_ua, i in enumerate(layout.identifiable_ua):
+            D[ua0 + k_ua, i] = float(ua_coeff[i]) / C_a[i]
     return D
 
 
@@ -394,9 +402,15 @@ def _simulation_mse_and_grad(
                 # state and/or scored against an open-window measurement).
                 open_k = rec_k.get("window_open")
                 open_next = rec_next.get("window_open")
+                modelled_open = np.zeros(n, dtype=bool)
+                for i_ua in layout.identifiable_ua:
+                    modelled_open[i_ua] = True
+                pin_src = open_k
+                if pin_src is not None and modelled_open.any():
+                    pin_src = pin_src & ~modelled_open
                 pin_idx = (
-                    np.where(open_k)[0]
-                    if open_k is not None and open_k.any()
+                    np.where(pin_src)[0]
+                    if pin_src is not None and pin_src.any()
                     else _EMPTY_IDX
                 )
                 if open_k is None and open_next is None:
@@ -407,7 +421,24 @@ def _simulation_mse_and_grad(
                         drop_mask |= open_k
                     if open_next is not None:
                         drop_mask |= open_next
+                    drop_mask &= ~modelled_open
                     drop_idx = np.where(drop_mask)[0]
+
+                # Linearized contact-UA heat on the air-node channel:
+                # Q = UA · c · (T_out − y^m).  Injected into d so f() stays
+                # affine; the free-run / MPC predictor uses simulated air.
+                d_step = np.asarray(d_k, dtype=float).copy()
+                ua_coeff = np.zeros(n, dtype=float)
+                if layout.identifiable_ua:
+                    T_out_k = float(d_step[0]) if len(d_step) else 0.0
+                    ua_vals = layout.get_ua_open(theta)
+                    for k_ua, i_ua in enumerate(layout.identifiable_ua):
+                        c_open = bool(open_k[i_ua]) if open_k is not None else False
+                        coeff = (T_out_k - float(ym_k[i_ua])) if c_open else 0.0
+                        ua_coeff[i_ua] = coeff
+                        slot = 1 + n + i_ua
+                        if slot < len(d_step):
+                            d_step[slot] += float(ua_vals[k_ua]) * coeff
 
                 t_k = rec_k.get("t")
                 t_next = rec_next.get("t")
@@ -422,8 +453,8 @@ def _simulation_mse_and_grad(
                 valid = True
                 for _ in range(n_sub):
                     try:
-                        f_val = model.f(x, u_k, d_k, _p0, 0.0)
-                        F_full = model.dfdx(x, u_k, d_k, _p0, 0.0)
+                        f_val = model.f(x, u_k, d_step, _p0, 0.0)
+                        F_full = model.dfdx(x, u_k, d_step, _p0, 0.0)
                     except Exception:
                         valid = False
                         break
@@ -452,10 +483,10 @@ def _simulation_mse_and_grad(
                         # derivative of the implicit trajectory (it depends
                         # on x through f ∝ 1/C and the matrix reshaping by
                         # the envelope-split fractions).
-                        f_new = model.f(x_new, u_k, d_k, _p0, 0.0)
+                        f_new = model.f(x_new, u_k, d_step, _p0, 0.0)
                         dfdtheta_val = _dfdtheta_step(
-                            est, quants, layout, model, f_new, x_new, u_k, d_k,
-                            ntheta, nx,
+                            est, quants, layout, model, f_new, x_new, u_k, d_step,
+                            ntheta, nx, ua_coeff=ua_coeff,
                         )
                         sx = np.linalg.solve(
                             M, (sx + h_sub * dfdtheta_val).T

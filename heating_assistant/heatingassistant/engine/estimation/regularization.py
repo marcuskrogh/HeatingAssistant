@@ -10,6 +10,7 @@ from .constants import (
     _SPLIT_PRIOR_STD,
     _T_WALL_MIN_LAM,
     _T_WALL_PRIOR_STD,
+    _UA_OPEN_PRIOR_STD,
 )
 from .theta_layout import _ThetaLayout
 
@@ -82,6 +83,14 @@ def _compute_regularization_gradient(
             est._r_aw_prior_full[i] for i in layout.identifiable_splits
         ])
         grad[a:b] = 2.0 * lam * (r_aw - ra_prior) / (_SPLIT_PRIOR_STD ** 2)
+
+    a, b = layout.idx_ua_open
+    if a < b:
+        ua = layout.get_ua_open(theta)
+        ua_prior = np.array(
+            [est._ua_open_prior_full[i] for i in layout.identifiable_ua]
+        )
+        grad[a:b] = 2.0 * lam * (ua - ua_prior) / (_UA_OPEN_PRIOR_STD ** 2)
 
     return grad
 
@@ -179,4 +188,12 @@ def _compute_regularization_theta(
             np.sum((c_air - ca_prior) ** 2)
             + np.sum((r_aw - ra_prior) ** 2)
         ) / (_SPLIT_PRIOR_STD ** 2)
+    ua = layout.get_ua_open(theta)
+    if len(ua):
+        ua_prior = np.array(
+            [est._ua_open_prior_full[i] for i in layout.identifiable_ua]
+        )
+        reg += lam * float(np.sum((ua - ua_prior) ** 2)) / (
+            _UA_OPEN_PRIOR_STD ** 2
+        )
     return reg

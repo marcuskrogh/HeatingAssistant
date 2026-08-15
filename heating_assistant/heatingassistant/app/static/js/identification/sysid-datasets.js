@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=120';
-import { createCollapsible } from '../components/collapsible.js?v=120';
-import { makeDataset } from '../components/time-series-chart.js?v=120';
+import { deleteDataset, createDataset } from '../ha-services.js?v=124';
+import { createCollapsible } from '../components/collapsible.js?v=124';
+import { makeDataset } from '../components/time-series-chart.js?v=124';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -18,9 +18,44 @@ function _fmtDuration(seconds) {
   return `${Math.round(seconds / 60)} min`;
 }
 
+const PE_CATEGORIES = [
+  { id: 'closed_window_envelope', short: 'Envelope', label: 'Closed-window envelope' },
+  { id: 'heater_excitation', short: 'Heater', label: 'Heater excitation' },
+  { id: 'solar_variation', short: 'Solar', label: 'Solar variation' },
+  { id: 'open_contact', short: 'Open UA', label: 'Open-contact (extra UA)' },
+];
+
 function _toLocalInput(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function _datasetCategoryTags(dataset) {
+  const cats = Array.isArray(dataset && dataset.coverage_categories)
+    ? dataset.coverage_categories
+    : [];
+  return cats.filter((cat) => cat && cat.status === 'checked');
+}
+
+function _unionSelectedStatuses(datasets, selectedIds) {
+  const byId = {};
+  for (const spec of PE_CATEGORIES) {
+    byId[spec.id] = 'unchecked';
+  }
+  for (const ds of datasets) {
+    const cats = Array.isArray(ds.coverage_categories) ? ds.coverage_categories : [];
+    for (const cat of cats) {
+      if (cat && cat.status === 'na') byId[cat.id] = 'na';
+    }
+  }
+  for (const ds of datasets) {
+    if (!selectedIds.has(ds.id)) continue;
+    const cats = Array.isArray(ds.coverage_categories) ? ds.coverage_categories : [];
+    for (const cat of cats) {
+      if (cat && cat.status === 'checked') byId[cat.id] = 'checked';
+    }
+  }
+  return byId;
 }
 
 // Build the stored-dataset cards, append them to the container, and wire all
@@ -61,9 +96,18 @@ export function setupDatasetsAndExperiments(ctx) {
   const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
   dsCollapsible.body.innerHTML = `
     <p class="tuning-section__desc" style="margin:0 0 12px">
-      Select datasets for joint automatic parameter estimation, or load one into the
-      custom window to inspect, validate, or identify it on its own.
+      Use stored datasets for joint automatic parameter estimation. Each set
+      shows the categories it covers. Using a set lights those categories.
     </p>
+    <div class="pe-coverage" id="pe-coverage">
+      <div class="params-subsection__title">Recommended data</div>
+      <p class="pe-coverage__desc">
+        Select at least one set in each category, then run the recommended
+        estimate. These indicators are a guide — they do not exclude samples
+        from the fit.
+      </p>
+      <div class="pe-coverage-row" id="pe-coverage-list" role="list"></div>
+    </div>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
         Run Automatic Parameter Estimation (0)
@@ -85,9 +129,11 @@ export function setupDatasetsAndExperiments(ctx) {
   const dsIdStatus = dsCollapsible.body.querySelector('#ds-id-status');
   const btnIdentifySelected = dsCollapsible.body.querySelector('#btn-identify-selected');
   const btnClearSelection = dsCollapsible.body.querySelector('#btn-clear-selection');
+  const coverageListEl = dsCollapsible.body.querySelector('#pe-coverage-list');
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
+  let lastDatasets = [];
 
   function setStatus(el, text, type = '') {
     el.textContent = text;
@@ -115,11 +161,43 @@ export function setupDatasetsAndExperiments(ctx) {
   });
 
   // ---- Multi-select identification ---------------------------------------
+  function _requiredReady(statuses) {
+    return PE_CATEGORIES.every((spec) => {
+      const status = statuses[spec.id] || 'unchecked';
+      return status === 'checked' || status === 'na';
+    });
+  }
+
   function updateSelectionToolbar() {
     const n = selectedIds.size;
-    btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
+    const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
+    const ready = n > 0 && _requiredReady(statuses);
+    if (ready) {
+      btnIdentifySelected.textContent = 'Run recommended estimation';
+    } else {
+      btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
+    }
     btnIdentifySelected.disabled = n === 0;
+    btnIdentifySelected.classList.toggle('btn--accent', ready || n > 0);
     btnClearSelection.disabled = n === 0;
+    refreshCoverage();
+  }
+
+  function refreshCoverage() {
+    if (!coverageListEl) return;
+    const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
+    coverageListEl.innerHTML = PE_CATEGORIES.map((spec) => {
+      const status = statuses[spec.id] || 'unchecked';
+      const na = status === 'na';
+      const on = status === 'checked';
+      const state = na ? 'N/A' : (on ? 'Supplied' : 'Not set');
+      const aria = na ? 'not applicable' : (on ? 'supplied' : 'not supplied');
+      return `<div class="pe-coverage-tile pe-coverage-tile--${status}" role="listitem"
+        aria-label="${spec.label}: ${aria}" title="${spec.label}">
+        <span class="pe-coverage-tile__name">${spec.short}</span>
+        <span class="pe-coverage-tile__state">${state}</span>
+      </div>`;
+    }).join('');
   }
 
   function markLoadedRow() {
@@ -233,7 +311,6 @@ export function setupDatasetsAndExperiments(ctx) {
     updateSelectionToolbar();
   }
 
-  let lastDatasets = [];
   async function refreshDatasets() {
     const datasets = await connection.listDatasets(roomSlug);
     // ``null`` means the fetch failed (transient WebSocket error). Keep the
@@ -266,12 +343,17 @@ export function setupDatasetsAndExperiments(ctx) {
       const dur = _fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts));
       const recs = d.record_count != null ? `${d.record_count}` : '—';
       const notes = d.notes ? `<div class="store-row__notes">${d.notes}</div>` : '';
+      const catTags = _datasetCategoryTags(d).map((cat) => {
+        const short = cat.short_label || PE_CATEGORIES.find((s) => s.id === cat.id)?.short || cat.label || '';
+        return `<span class="store-row__tag store-row__tag--cat">${short}</span>`;
+      }).join('');
       return `
         <div class="store-row store-row--dataset ${sel ? 'store-row--selected' : ''} ${isLoaded ? 'store-row--loaded' : ''}" data-id="${d.id}">
           <div class="store-row__main">
             <div class="store-row__name">
               <span class="store-row__title">${d.name || '(unnamed)'}</span>
               <span class="store-row__tag store-row__tag--${source.toLowerCase() === 'experiment' ? 'accent' : ''}">${source}</span>
+              ${catTags}
             </div>
             <div class="store-row__meta">
               ${stat('Room', roomLabel)}${stat('Window', span)}${stat('Length', dur)}${stat('Points', recs)}
@@ -321,6 +403,7 @@ export function setupDatasetsAndExperiments(ctx) {
 
   return {
     destroy() { clearInterval(timer); },
+    refreshCoverage,
   };
 }
 

@@ -156,6 +156,7 @@ class Room:
         setpoint: float = 21.0,
         comfort_offset: Optional[float] = None,
         internal_gain: float = 0.0,
+        ua_open: float = 0.0,
         infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION,
         sky_radiative_ua: float = DEFAULT_SKY_RADIATIVE_UA,
         facade_absorptance: float = DEFAULT_FACADE_ABSORPTANCE,
@@ -186,6 +187,10 @@ class Room:
             DEFAULT_COMFORT_OFFSET if comfort_offset is None else comfort_offset
         )
         self.internal_gain = float(internal_gain)
+        # Extra outdoor conductance [W/K] applied on the air node while the
+        # room's window/door override contact is open.  Identified by PE;
+        # 0 means closed-window SWD-322 exclusion still applies.
+        self.ua_open = max(0.0, float(ua_open))
         self.infiltration_fraction = float(infiltration_fraction)
 
         # 2R2C split fractions (bounded; see module docstring).
@@ -571,6 +576,7 @@ class HouseModel:
         solar_gains: Dict[str, float],
         wind_speed: Optional[float] = None,
         ground_temp: Optional[float] = None,
+        window_open: Optional[Dict[str, bool]] = None,
     ) -> Dict[str, float]:
         """
         Advance the thermal model by one time step using implicit (backward)
@@ -615,6 +621,13 @@ class HouseModel:
         for i in range(n):
             A_eff[i, i] -= delta_ua[i]
             B_eff_ext[i] += delta_ua[i]
+            if window_open and window_open.get(self._room_list[i], False):
+                extra_ua = float(
+                    getattr(self._rooms[self._room_list[i]], "ua_open", 0.0) or 0.0
+                )
+                if extra_ua > 0.0:
+                    A_eff[i, i] -= extra_ua
+                    B_eff_ext[i] += extra_ua
 
         inv_C = 1.0 / self._C
         F = A_eff * inv_C[:, None]

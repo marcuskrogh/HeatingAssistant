@@ -257,6 +257,9 @@ def _merge_ml_result(runtime: Any, result: Mapping[str, Any], horizon_hours: flo
             existing["r_external"] = params.get("r_external")
         if room_name in internal_gains:
             existing["internal_gain"] = internal_gains[room_name]
+        ua_open = result.get("estimated_ua_open", {}) or {}
+        if room_name in ua_open:
+            existing["ua_open"] = ua_open[room_name]
         if room_name in solar_scales:
             existing["solar_scale"] = solar_scales[room_name]
         if room_name in envelope_splits and isinstance(envelope_splits[room_name], Mapping):
@@ -530,6 +533,93 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     return dict(result)
 
 
+def _pe_coverage_kwargs(runtime: Any, room_name: str) -> dict[str, Any]:
+    dt = _dt(runtime)
+    from heatingassistant.engine.estimation.constants import _MIN_HISTORY_TIME_S
+
+    min_steps = max(10, int((_MIN_HISTORY_TIME_S / dt) + 0.999)) if dt > 0 else 10
+    return {
+        "room_name": room_name,
+        "room_names": _room_names(runtime),
+        "sources": _heat_sources(runtime),
+        "dt": dt,
+        "has_contact_entity": _room_has_contact(runtime, room_name),
+        "min_history_steps": min_steps,
+    }
+
+
+def _categorise_records(runtime: Any, records: Sequence[Mapping[str, Any]], room_name: str) -> dict[str, Any]:
+    from heatingassistant.engine.estimation.coverage import categorise_pe_coverage
+
+    return categorise_pe_coverage(list(records or []), **_pe_coverage_kwargs(runtime, room_name))
+
+
+def annotate_datasets_with_coverage(runtime: Any, metas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Attach per-dataset PE category tags for the stored-dataset summary."""
+    from heatingassistant.engine.estimation.coverage import coverage_tags
+
+    out: list[dict[str, Any]] = []
+    engine = getattr(runtime, "control_engine", None)
+    can_categorise = engine is not None and getattr(engine, "model", None) is not None
+    for meta in metas:
+        item = dict(meta)
+        if not can_categorise:
+            out.append(item)
+            continue
+        dataset_id = item.get("id")
+        records = records_for_dataset(runtime, str(dataset_id)) if dataset_id else None
+        room_value = item.get("room_name") or item.get("room_slug")
+        try:
+            room_name = _resolve_room(runtime, str(room_value or ""))
+            cov = _categorise_records(runtime, records or [], room_name)
+            item["coverage_categories"] = coverage_tags(cov)
+        except Exception:
+            _LOGGER.debug("PE coverage tags skipped for dataset %s", dataset_id, exc_info=True)
+        out.append(item)
+    return out
+
+
+async def handle_get_pe_coverage(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return recommended-data coverage for selected datasets or the live window."""
+    values = _payload(data)
+    room_name = _resolve_room(runtime, str(values.get("room_name") or values.get("room_slug") or ""))
+    dataset_ids = _dataset_id_list(values.get("dataset_ids"))
+    from heatingassistant.engine.estimation.coverage import union_pe_coverage
+
+    if dataset_ids:
+        coverages = []
+        for dataset_id in dataset_ids:
+            records = await asyncio.to_thread(records_for_dataset, runtime, dataset_id)
+            coverages.append(_categorise_records(runtime, records or [], room_name))
+        return union_pe_coverage(coverages, room_name=room_name)
+
+    horizon_hours = values.get("horizon_hours")
+    history = await resolve_history(
+        runtime,
+        dataset_id=values.get("dataset_id"),
+        window_start=values.get("window_start"),
+        window_end=values.get("window_end"),
+        horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
+    )
+    return _categorise_records(runtime, history, room_name)
+
+
+def _room_has_contact(runtime: Any, room_name: str) -> bool:
+    rooms = getattr(runtime, "options", {}).get("rooms") or []
+    slug = _slug(runtime, room_name)
+    for room in rooms:
+        if not isinstance(room, Mapping):
+            continue
+        name = str(room.get("name") or "")
+        if name != room_name and _slug(runtime, name) != slug:
+            continue
+        sensors = room.get("window_sensors") or []
+        if isinstance(sensors, str):
+            return bool(sensors.strip())
+        return bool(sensors)
+    return False
+
+
 async def handle_store_identified_parameters(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
     values = _payload(data)
     room_name = _resolve_room(runtime, str(values.get("room_name") or ""))
@@ -547,6 +637,7 @@ async def handle_store_identified_parameters(runtime: Any, data: Mapping[str, An
         c_air_fraction=float(values["c_air_fraction"]) if values.get("c_air_fraction") is not None else None,
         r_aw_fraction=float(values["r_aw_fraction"]) if values.get("r_aw_fraction") is not None else None,
         heater_scales=dict(values["heater_scales"]) if isinstance(values.get("heater_scales"), Mapping) else None,
+        ua_open=float(values["ua_open"]) if values.get("ua_open") not in (None, "") else None,
     )
     _persist_runtime_config(runtime)
     return {"stored": True, "estimated_params": snapshot}
@@ -647,6 +738,7 @@ def sysid_sensor_attrs(runtime: Any, room_name: str) -> dict[str, Any]:
         "thermal_mass": room_data.get("thermal_mass"),
         "r_external": room_data.get("r_external"),
         "internal_gain": room_data.get("internal_gain"),
+        "ua_open": room_data.get("ua_open"),
         "solar_scale": room_data.get("solar_scale"),
         "c_air_fraction": room_data.get("c_air_fraction"),
         "r_aw_fraction": room_data.get("r_aw_fraction"),
@@ -833,6 +925,7 @@ def parameter_confidence_sensor(runtime: Any, room_name: str) -> tuple[Any, dict
             "thermal_mass": validation.thermal_mass,
             "r_external": validation.r_external,
             "internal_gain": round(float(getattr(room, "internal_gain", 0.0) or 0.0), 2),
+            "ua_open": round(float(getattr(room, "ua_open", 0.0) or 0.0), 3),
             "time_constant_hours": round(float(validation.time_constant_hours), 2),
             "mass_valid": validation.mass_valid,
             "r_external_valid": validation.r_external_valid,
@@ -857,6 +950,8 @@ __all__ = [
     "handle_delete_dataset",
     "handle_delete_parameter_history",
     "handle_estimate_parameters_ml",
+    "annotate_datasets_with_coverage",
+    "handle_get_pe_coverage",
     "handle_run_open_loop_simulation",
     "handle_run_sysid_simulation",
     "handle_store_identified_parameters",
