@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | To Do | — | docs/ROADMAP.md | `/review-fix SWD-329` |
+| SWD-323 | Story | [Explore] Parameter estimation effectiveness and guidance | Done | — | docs/ROADMAP.md | Done — map complete (PR #612) |
 | SWD-334 | Task | [Model] Contact-gated UA + occupancy disturbance (no envelope lock) | Done | SWD-323 | docs/agents/MODEL-pe-contact-ua-occupancy.md | Done — SWD-335 shipped |
 | SWD-335 | Task | [Define] Robust open-loop PE for household extras | Done | SWD-323 | docs/agents/PLAN-pe-robust-open-loop.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/614 |
 | SWD-336 | Sub-task | Identified contact-gated UA in production open-loop PE | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
@@ -13,8 +13,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-339 | Sub-task | Tests, val bar, version bump, App sync | Done | SWD-335 | docs/agents/PLAN-pe-robust-open-loop.md | — |
 | SWD-332 | Task | [Tweak] Offline PE validation open-loop prediction accuracy | Done | SWD-323 | docs/agents/PLAN-pe-validation-accuracy.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/613 |
 | SWD-333 | Sub-task | Harness train/val open-loop score + report | Done | SWD-332 | docs/agents/REPORT-pe-robustness-household.md | — |
-| SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | `/review-fix SWD-329` |
-| SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | In Review | SWD-323 | docs/agents/PLAN-pe-robustness-household.md | `/review-fix SWD-329` |
+| SWD-328 | Task | [Research] Synthesise household-like single-room traces and identify robust PE approaches | Done | SWD-323 | docs/agents/RESEARCH-pe-robustness-household.md | Done — SWD-329 shipped |
+| SWD-329 | Task | [Define] Offline PE robustness analysis on synthetic household-like data | Done | SWD-323 | docs/agents/PLAN-pe-robustness-household.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/612 |
 | SWD-330 | Sub-task | Offline PE robustness harness + on-demand factorial + report | Done | SWD-329 | docs/agents/REPORT-pe-robustness-household.md | — |
 | SWD-326 | Task | [Define] Offline PE combined vs separated/staged benchmark | Done | SWD-323 | docs/agents/PLAN-pe-split-benchmark.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/611 (`9b1e380`) |
 | SWD-327 | Sub-task | Offline PE split/staging benchmark harness + report | Done | SWD-326 | docs/agents/REPORT-pe-dataset-separation.md | — |
@@ -92,6 +92,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-15 — shipped SWD-329 via PR #612 into `main`: offline household PE robustness harness + report; review-fix CLEAN; changelog skipped (none). Stack also lands SWD-332 and SWD-335. Story SWD-323 Done — map complete.
 - 2026-08-15 — shipped SWD-332 via PR #613: hold-out open-loop val RMSE/MAE/R² on the household PE harness; review-fix CLEAN (PLAN seam init); changelog skipped (test/report only). Story SWD-323 stays open. Next `/review-fix SWD-329`.
 - 2026-08-15 — shipped SWD-335 via PR #614: identified contact-gated UA_open + grey/teal PE category tiles; review-fix CLEAN; changelog skipped (none). Story SWD-323 stays open. Next `/review-fix SWD-332`.
 - 2026-08-14 — `/review-fix` SWD-335 CLEAN (focused): 0 blockers / 3 should-fix addressed (Apply persists UA_open, pe_coverage 400, on-demand val bar). Next `/ship SWD-335`.
