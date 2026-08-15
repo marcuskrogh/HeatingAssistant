@@ -17,6 +17,8 @@
   windows, existing heater cycling, a daytime stretch, a short planned airing).
   Do not instruct large comfort-band violations or long winter openings.
 - Guides are short operational recipes, not PE essays.
+- Heater means heater power scale: this room's heater output (off vs on)
+  must change so the estimator can fit delivered heat versus rated power.
 
 ## Acceptance criteria
 - Category tiles are clickable and keyboard-accessible. Clicking a tile opens

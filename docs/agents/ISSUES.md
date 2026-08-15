@@ -93,6 +93,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-15 — SWD-343 copy: Heater guide states heater power scale (off vs on duty) vs rated power.
 - 2026-08-15 — `/iterate` SWD-343 In Review: clickable PE category guides + live save preview; PR https://github.com/marcuskrogh/HeatingAssistant/pull/615; CalVer 2026.08.4. Next `/review-fix SWD-343`.
 - 2026-08-15 — `/iterate` SWD-343 from SWD-335: clickable PE category guides + live save-window coverage preview; comfort-first recipes; Relates SWD-335. Next `/review-fix SWD-343`.
 - 2026-08-15 — shipped SWD-329 via PR #612 into `main`: offline household PE robustness harness + report; review-fix CLEAN; changelog skipped (none). Stack also lands SWD-332 and SWD-335. Story SWD-323 Done — map complete.

@@ -356,7 +356,9 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "Scroll to Save Current Window" in datasets
     assert "low-comfort" in datasets
     assert "Keep windows and doors closed" in datasets
-    assert "Piggyback on cycling you already have" in datasets
+    assert "heater power scale" in datasets
+    assert "rated power" in datasets
+    assert "always off, always full" in datasets
     assert "Record a clear or mixed day" in datasets
     assert "planned airing" in datasets
     assert "no window or door contact configured" in datasets

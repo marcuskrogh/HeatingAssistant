@@ -154,7 +154,7 @@ def categorise_pe_coverage(
             status=heater_status,
             have_s=total_s,
             recommend_s=float(min_steps) * float(dt) if dt > 0 else _MIN_HISTORY_TIME_S,
-            hint="On/off variation so heater scale and envelope splits are identifiable",
+            hint="This room's heater output must change (typically off and on) so heater power scale can be identified",
         ),
         _category(
             cat_id="solar_variation",

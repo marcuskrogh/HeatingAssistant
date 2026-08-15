@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=125';
-import { createCollapsible } from '../components/collapsible.js?v=125';
-import { makeDataset } from '../components/time-series-chart.js?v=125';
+import { deleteDataset, createDataset } from '../ha-services.js?v=126';
+import { createCollapsible } from '../components/collapsible.js?v=126';
+import { makeDataset } from '../components/time-series-chart.js?v=126';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -20,7 +20,7 @@ function _fmtDuration(seconds) {
 
 const PE_CATEGORIES = [
   { id: 'closed_window_envelope', short: 'Envelope', label: 'Closed-window envelope' },
-  { id: 'heater_excitation', short: 'Heater', label: 'Heater excitation' },
+  { id: 'heater_excitation', short: 'Heater', label: 'Heater power scale' },
   { id: 'solar_variation', short: 'Solar', label: 'Solar variation' },
   { id: 'open_contact', short: 'Open UA', label: 'Open-contact (extra UA)' },
 ];
@@ -35,12 +35,12 @@ const PE_GUIDES = {
     store: 'Set the estimation window to that closed period, Save Current Window, then Use the new set.',
   },
   heater_excitation: {
-    title: 'Heater excitation',
-    target: 'A few on/off cycles in the saved window. Constant-off or always-on will not cover it.',
-    why: 'Heater scale is only visible when the heater actually cycles.',
-    do: 'Piggyback on cycling you already have: price-driven control, a scheduled setback, or a small setpoint change while you are out. A couple of on/off cycles is enough.',
-    avoid: 'Do not force large comfort-band violations. A modest, existing cycle is better than a long override.',
-    store: 'Save a window that includes those cycles, then Use the set.',
+    title: 'Heater power scale',
+    target: 'This room\'s heater must change output in the saved window — typically off and on — for at least about an hour. Stuck at one level will not cover it.',
+    why: 'Heater means the estimator can fit this room\'s heater power scale: how much heat the heater actually delivers versus its rated power (the × factor on Heater Power Scales). If output never changes, that scale cannot be separated from insulation and thermal mass — a strong heater in a leaky room looks like a weak heater in a tight room. The same on/off change also reveals how heat splits between air and walls.',
+    do: 'Save a window where this room\'s heater turns on and later turns off, or the reverse. Existing controller behaviour is enough: price-driven on/off, a scheduled setback, or morning recovery. If the heater sits at a constant output, change the setpoint by about 1–2 °C while you are out so it goes from off to on, then back.',
+    avoid: 'A window that is always off, always full, or nearly constant mid-output will not cover Heater. One clear on/off change is enough; do not force large comfort-band violations.',
+    store: 'Save a window that includes both the lower and higher heater output, then Use the set.',
   },
   solar_variation: {
     title: 'Solar variation',
