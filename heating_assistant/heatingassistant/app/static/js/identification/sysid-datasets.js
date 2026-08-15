@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=124';
-import { createCollapsible } from '../components/collapsible.js?v=124';
-import { makeDataset } from '../components/time-series-chart.js?v=124';
+import { deleteDataset, createDataset } from '../ha-services.js?v=125';
+import { createCollapsible } from '../components/collapsible.js?v=125';
+import { makeDataset } from '../components/time-series-chart.js?v=125';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -24,6 +24,42 @@ const PE_CATEGORIES = [
   { id: 'solar_variation', short: 'Solar', label: 'Solar variation' },
   { id: 'open_contact', short: 'Open UA', label: 'Open-contact (extra UA)' },
 ];
+
+const PE_GUIDES = {
+  closed_window_envelope: {
+    title: 'Closed-window envelope',
+    target: 'At least 12 hours closed. A full day is better.',
+    why: 'This is how the room holds heat when windows and doors stay shut — the core thermal-mass and insulation fit.',
+    do: 'Keep windows and doors closed and let heating run as usual. Overnight, or while you are out, is ideal: no extra discomfort, and the house stays quiet.',
+    avoid: 'Do not leave a window ajar during this period. You do not need to change setpoints.',
+    store: 'Set the estimation window to that closed period, Save Current Window, then Use the new set.',
+  },
+  heater_excitation: {
+    title: 'Heater excitation',
+    target: 'A few on/off cycles in the saved window. Constant-off or always-on will not cover it.',
+    why: 'Heater scale is only visible when the heater actually cycles.',
+    do: 'Piggyback on cycling you already have: price-driven control, a scheduled setback, or a small setpoint change while you are out. A couple of on/off cycles is enough.',
+    avoid: 'Do not force large comfort-band violations. A modest, existing cycle is better than a long override.',
+    store: 'Save a window that includes those cycles, then Use the set.',
+  },
+  solar_variation: {
+    title: 'Solar variation',
+    target: 'A daytime stretch with changing sunlight. Night-only windows will not cover it.',
+    why: 'The solar scale needs sunlight that actually changes during the window.',
+    do: 'Record a clear or mixed day with curtains as usual. No heating change is required.',
+    avoid: 'Do not stay up to run a night-only experiment. Wait for daylight.',
+    store: 'Save that daytime window, then Use the set.',
+  },
+  open_contact: {
+    title: 'Open-contact (extra UA)',
+    target: 'About 30 minutes with a window or door open.',
+    why: 'Extra outdoor exchange is only visible while a contact is actually open.',
+    do: 'Piggyback on a planned airing you already do. Thirty minutes is enough; close afterwards. Prefer mild outdoor weather.',
+    avoid: 'Do not leave a window open overnight in cold weather. Short and intentional beats long and uncomfortable.',
+    store: 'Include the open period in the saved window, then Use the set.',
+    na: 'This room has no window or door contact configured. Open UA is not required for recommended estimation.',
+  },
+};
 
 function _toLocalInput(date) {
   const pad = (n) => String(n).padStart(2, '0');
@@ -58,6 +94,13 @@ function _unionSelectedStatuses(datasets, selectedIds) {
   return byId;
 }
 
+function _datasetCovers(dataset, catId) {
+  const cats = Array.isArray(dataset && dataset.coverage_categories)
+    ? dataset.coverage_categories
+    : [];
+  return cats.some((cat) => cat && cat.id === catId && cat.status === 'checked');
+}
+
 // Build the stored-dataset cards, append them to the container, and wire all
 // their interactions.  Returns a handle with a ``destroy`` method that tears
 // down the periodic refresh timer.
@@ -73,6 +116,7 @@ export function setupDatasetsAndExperiments(ctx) {
     <div class="params-subsection__title">Save Current Window</div>
     <p class="params-subsection__desc">
       Store the parameter-estimation window configured above as a named, permanent dataset.
+      After saving, Use the set in Stored Datasets so matching category tiles turn teal.
     </p>
     <div class="ds-save-row ds-save-row--compact">
       <div class="form-group ds-save-row__name">
@@ -88,12 +132,19 @@ export function setupDatasetsAndExperiments(ctx) {
         <span class="tuning-actions__status" id="ds-status"></span>
       </div>
     </div>
+    <div class="pe-save-coverage" id="pe-save-coverage">
+      <div class="pe-save-coverage__title">This window would cover</div>
+      <div class="pe-save-coverage__chips" id="pe-save-coverage-chips"></div>
+      <p class="pe-save-coverage__hint">
+        Tap a category tile below for a low-comfort way to collect any missing data.
+      </p>
+    </div>
     <div id="ds-selected-note" class="ds-loaded-note"></div>
   `;
 
   const dsListSection = document.createElement('div');
   dsListSection.className = 'card tuning-section';
-  const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
+  const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: true });
   dsCollapsible.body.innerHTML = `
     <p class="tuning-section__desc" style="margin:0 0 12px">
       Use stored datasets for joint automatic parameter estimation. Each set
@@ -102,11 +153,14 @@ export function setupDatasetsAndExperiments(ctx) {
     <div class="pe-coverage" id="pe-coverage">
       <div class="params-subsection__title">Recommended data</div>
       <p class="pe-coverage__desc">
-        Select at least one set in each category, then run the recommended
-        estimate. These indicators are a guide — they do not exclude samples
-        from the fit.
+        Tap a category for a low-comfort recipe, then save that window and Use
+        the set. Select at least one set in each category, then run the
+        recommended estimate. These indicators are a guide — they do not
+        exclude samples from the fit.
       </p>
-      <div class="pe-coverage-row" id="pe-coverage-list" role="list"></div>
+      <div class="pe-coverage-row" id="pe-coverage-list" role="group"
+        aria-label="Recommended data categories"></div>
+      <div class="pe-coverage-guide" id="pe-coverage-guide" hidden></div>
     </div>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
@@ -130,10 +184,14 @@ export function setupDatasetsAndExperiments(ctx) {
   const btnIdentifySelected = dsCollapsible.body.querySelector('#btn-identify-selected');
   const btnClearSelection = dsCollapsible.body.querySelector('#btn-clear-selection');
   const coverageListEl = dsCollapsible.body.querySelector('#pe-coverage-list');
+  const coverageGuideEl = dsCollapsible.body.querySelector('#pe-coverage-guide');
+  const saveCoverageChipsEl = saveMount.querySelector('#pe-save-coverage-chips');
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
   let lastDatasets = [];
+  let openGuideId = null;
+  let previewSeq = 0;
 
   function setStatus(el, text, type = '') {
     el.textContent = text;
@@ -183,6 +241,108 @@ export function setupDatasetsAndExperiments(ctx) {
     refreshCoverage();
   }
 
+  function _matchingDatasetNames(catId) {
+    return lastDatasets
+      .filter((ds) => _datasetCovers(ds, catId))
+      .map((ds) => ds.name || '(unnamed)');
+  }
+
+  function applyGuideHighlight() {
+    dsListEl.querySelectorAll('.store-row').forEach((row) => {
+      const ds = lastDatasets.find((item) => item.id === row.dataset.id);
+      const match = Boolean(openGuideId && ds && _datasetCovers(ds, openGuideId));
+      row.classList.toggle('store-row--guide-match', match);
+    });
+  }
+
+  function renderGuide(statuses) {
+    if (!coverageGuideEl) return;
+    const spec = PE_CATEGORIES.find((item) => item.id === openGuideId);
+    const guide = spec ? PE_GUIDES[spec.id] : null;
+    if (!spec || !guide) {
+      coverageGuideEl.hidden = true;
+      coverageGuideEl.innerHTML = '';
+      applyGuideHighlight();
+      return;
+    }
+    const status = (statuses && statuses[spec.id]) || 'unchecked';
+    const supplied = status === 'checked';
+    const na = status === 'na';
+    const kicker = na ? 'N/A' : (supplied ? 'Supplied' : 'Not set');
+    const matching = _matchingDatasetNames(spec.id);
+    const matchLine = na
+      ? ''
+      : (matching.length
+        ? `<p class="pe-coverage-guide__match">Already covering: ${matching.join(', ')}</p>`
+        : '<p class="pe-coverage-guide__match">No stored set covers this yet.</p>');
+    coverageGuideEl.hidden = false;
+    coverageGuideEl.innerHTML = na
+      ? `
+        <div class="pe-coverage-guide__kicker">${kicker}</div>
+        <h3 class="pe-coverage-guide__title">${guide.title}</h3>
+        <p class="pe-coverage-guide__why">${guide.na}</p>`
+      : `
+        <div class="pe-coverage-guide__kicker">${kicker} · ${guide.target}</div>
+        <h3 class="pe-coverage-guide__title">${guide.title}</h3>
+        <p class="pe-coverage-guide__why">${guide.why}</p>
+        <ol class="pe-coverage-guide__steps">
+          <li>${guide.do}</li>
+          <li>${guide.avoid}</li>
+          <li>${guide.store}</li>
+        </ol>
+        ${matchLine}
+        <button type="button" class="btn btn--ghost btn--sm" id="pe-guide-scroll-save">
+          Scroll to Save Current Window
+        </button>`;
+    const scrollBtn = coverageGuideEl.querySelector('#pe-guide-scroll-save');
+    if (scrollBtn) {
+      scrollBtn.addEventListener('click', () => {
+        saveMount.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    applyGuideHighlight();
+  }
+
+  function toggleGuide(catId) {
+    openGuideId = openGuideId === catId ? null : catId;
+    refreshCoverage();
+  }
+
+  function _coverageOpts() {
+    const { startTs, endTs } = currentWindowBounds();
+    if (getWindowMode() === 'custom') {
+      return { roomSlug, windowStart: startTs, windowEnd: endTs };
+    }
+    const hrs = horizonInput ? parseFloat(horizonInput.value) : 6;
+    return { roomSlug, horizonHours: isFinite(hrs) ? hrs : 6 };
+  }
+
+  async function refreshSavePreview() {
+    if (!saveCoverageChipsEl || !connection || typeof connection.getPeCoverage !== 'function') {
+      return;
+    }
+    const seq = ++previewSeq;
+    const result = await connection.getPeCoverage(_coverageOpts());
+    if (seq !== previewSeq) return;
+    const byId = {};
+    const categories = (result && Array.isArray(result.categories)) ? result.categories : [];
+    for (const cat of categories) {
+      if (cat && cat.id) byId[cat.id] = cat.status || 'unchecked';
+    }
+    const coveredShorts = [];
+    saveCoverageChipsEl.innerHTML = PE_CATEGORIES.map((spec) => {
+      const status = byId[spec.id] || 'unchecked';
+      const na = status === 'na';
+      const on = status === 'checked';
+      if (on) coveredShorts.push(spec.short);
+      const state = na ? 'N/A' : (on ? 'Yes' : 'No');
+      return `<span class="pe-save-chip pe-save-chip--${status}">${spec.short}: ${state}</span>`;
+    }).join('');
+    if (!(dsNameInput.value || '').trim() && coveredShorts.length) {
+      dsNameInput.placeholder = `${coveredShorts.join(' + ')} — ${room.name}`;
+    }
+  }
+
   function refreshCoverage() {
     if (!coverageListEl) return;
     const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
@@ -190,14 +350,23 @@ export function setupDatasetsAndExperiments(ctx) {
       const status = statuses[spec.id] || 'unchecked';
       const na = status === 'na';
       const on = status === 'checked';
+      const open = openGuideId === spec.id;
       const state = na ? 'N/A' : (on ? 'Supplied' : 'Not set');
       const aria = na ? 'not applicable' : (on ? 'supplied' : 'not supplied');
-      return `<div class="pe-coverage-tile pe-coverage-tile--${status}" role="listitem"
-        aria-label="${spec.label}: ${aria}" title="${spec.label}">
+      const openClass = open ? ' pe-coverage-tile--open' : '';
+      return `<button type="button" class="pe-coverage-tile pe-coverage-tile--${status}${openClass}"
+        data-pe-cat="${spec.id}" aria-pressed="${open ? 'true' : 'false'}"
+        aria-expanded="${open ? 'true' : 'false'}" aria-controls="pe-coverage-guide"
+        aria-label="${spec.label}: ${aria}. Open how to collect." title="${spec.label}">
         <span class="pe-coverage-tile__name">${spec.short}</span>
         <span class="pe-coverage-tile__state">${state}</span>
-      </div>`;
+      </button>`;
     }).join('');
+    coverageListEl.querySelectorAll('[data-pe-cat]').forEach((btn) => {
+      btn.addEventListener('click', () => toggleGuide(btn.dataset.peCat));
+    });
+    renderGuide(statuses);
+    refreshSavePreview();
   }
 
   function markLoadedRow() {

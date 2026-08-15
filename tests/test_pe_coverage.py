@@ -349,6 +349,21 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "Run recommended estimation" in datasets
     assert "pe-coverage-row" in datasets
     assert "pe-coverage-tile" in datasets
+    assert 'type="button" class="pe-coverage-tile' in datasets
+    assert "PE_GUIDES" in datasets
+    assert "pe-coverage-guide" in datasets
+    assert "pe-save-coverage" in datasets
+    assert "Scroll to Save Current Window" in datasets
+    assert "low-comfort" in datasets
+    assert "Keep windows and doors closed" in datasets
+    assert "Piggyback on cycling you already have" in datasets
+    assert "Record a clear or mixed day" in datasets
+    assert "planned airing" in datasets
+    assert "no window or door contact configured" in datasets
+    assert "This window would cover" in datasets
+    assert "getPeCoverage" in datasets
+    assert "store-row--guide-match" in datasets
+    assert "createCollapsible({ title: 'Stored Datasets', open: true })" in datasets
     assert "pe-coverage-chip" not in datasets
     assert 'type="checkbox"' not in datasets
     assert "coverage_categories" in datasets
@@ -359,4 +374,10 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert ".pe-coverage-row" in css
     assert ".pe-coverage-tile" in css
     assert ".pe-coverage-tile--checked" in css
+    assert ".pe-coverage-guide" in css
+    assert ".pe-save-chip" in css
+    assert ".store-row--guide-match" in css
     assert ".pe-coverage-chip" not in css
+    tile_rule = css.split(".pe-coverage-tile {", 1)[1].split("}", 1)[0]
+    assert "pointer-events: none" not in tile_rule
+    assert "cursor: pointer" in tile_rule
