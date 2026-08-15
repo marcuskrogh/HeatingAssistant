@@ -22,7 +22,7 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 | 6 | Offline PE validation open-loop prediction accuracy | tweak | SWD-329 | In Review | [SWD-332](https://marcusknielsen.atlassian.net/browse/SWD-332) |
 | 7 | Survey PE method families for grey-box 2R2C | research | — | Done | [SWD-331](https://marcusknielsen.atlassian.net/browse/SWD-331) |
 | 8 | Contact-gated extra UA + occupancy disturbance (no envelope lock) | model | — | Done | [SWD-334](https://marcusknielsen.atlassian.net/browse/SWD-334) |
-| 9 | Robust open-loop PE for household extras | define | SWD-334 | To Do | [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335) |
+| 9 | Robust open-loop PE for household extras | define | SWD-334 | Done | [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335) |
 
 ## Cleared so far
 - [SWD-324 research](https://marcusknielsen.atlassian.net/browse/SWD-324) — joint \(T_w\) in \(\theta\); unused leading-window PE; literature on hidden state, regimes, excitation. Artifact `docs/agents/RESEARCH-pe-effectiveness.md`.
@@ -32,11 +32,10 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - [SWD-331 research](https://marcusknielsen.atlassian.net/browse/SWD-331) — stochastic ML for physical \(\theta\); this destination scores open-loop fit, so keep OE. Artifact `docs/agents/RESEARCH-pe-methods.md`.
 - [SWD-332 analysis](https://marcusknielsen.atlassian.net/browse/SWD-332) — val open-loop RMSE. Best harness: `window_ua`+open_loop (mean 0.83 °C, −46% vs `today_combined` 1.53 °C). Night-lock occupancy and Kalman/PED are regressions. Report `docs/agents/REPORT-pe-robustness-household.md`.
 - [SWD-334 model](https://marcusknielsen.atlassian.net/browse/SWD-334) — identify contact-gated \(UA_{\mathrm{open}}\) (one scalar/room); replace 24 h `internal_gain` with day-gated \(q_{\mathrm{day}}\) under the existing MAP prior; keep OE; no \(C,R\) lock. Artifact `docs/agents/MODEL-pe-contact-ua-occupancy.md`.
+- [SWD-335 define](https://marcusknielsen.atlassian.net/browse/SWD-335) — identified contact-gated \(UA_{\mathrm{open}}\) in production open-loop PE; Parameter Estimation grey/teal category tiles from Use-selected sets. PR https://github.com/marcuskrogh/HeatingAssistant/pull/614. Artifact `docs/agents/PLAN-pe-robust-open-loop.md`.
 
 ## Not yet specified
-- Product vs harness-only for the first robust estimator — decided: product (SWD-335).
 - Your home recordings as a later check.
-- In-app PE guidance.
 - A different RC structure if extras still miss the val bar (1R1C estimator already checked: worse free-run, not a PE shortcut).
 - Numerical \(\Delta t_{\min}\) for interior gaps.
 - Estimator-family bake-off (collocation OE, full CTSM) — parked; OE stays unless the val bar fails.
@@ -57,4 +56,4 @@ A per-room 2R2C estimator that is **robust and reliable** on household-like room
 - Reports: `docs/agents/REPORT-pe-dataset-separation.md`, `docs/agents/REPORT-pe-robustness-household.md`
 
 ## Next
-`/implement SWD-335` — identified contact-gated UA + PE data-coverage checklist.
+`/review-fix SWD-332` — remaining Story work: SWD-332 and SWD-329 still In Review.

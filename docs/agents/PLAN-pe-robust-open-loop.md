@@ -147,4 +147,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/ship SWD-335` — review-fix CLEAN; merge and close out
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/614
