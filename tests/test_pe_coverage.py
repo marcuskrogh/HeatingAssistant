@@ -365,6 +365,9 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert "no window or door contact configured" in datasets
     assert "This window would cover" in datasets
     assert "getPeCoverage" in datasets
+    assert "function _esc(value)" in datasets
+    assert ".map(_esc)" in datasets
+    assert "Could not check this window" in datasets
     assert "store-row--guide-match" in datasets
     assert "createCollapsible({ title: 'Stored Datasets', open: true })" in datasets
     assert "pe-coverage-chip" not in datasets

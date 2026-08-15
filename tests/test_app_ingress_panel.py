@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 import json
+from pathlib import Path
+import re
 from threading import Thread
 from typing import Iterator
 from urllib.request import Request, urlopen
@@ -59,7 +61,16 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
             body = response.read().decode("utf-8")
 
     assert "static/js/app-hass-shim.js" in body
-    assert "ha-industrial-panel/industrial-dashboard.js?v=124" in body
+    token_match = re.search(r"ha-industrial-panel/industrial-dashboard\.js\?v=(\d+)", body)
+    assert token_match, "ingress index must cache-bust the panel entry script"
+    dashboard = (
+        Path(__file__).resolve().parents[1]
+        / "heatingassistant"
+        / "app"
+        / "static"
+        / "industrial-dashboard.js"
+    ).read_text(encoding="utf-8")
+    assert f"return '{token_match.group(1)}'" in dashboard
     assert "ha-industrial-panel" in body
     assert "Home Assistant custom-panel entry point" not in body
 

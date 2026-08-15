@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=128';
-import { createCollapsible } from '../components/collapsible.js?v=128';
-import { makeDataset } from '../components/time-series-chart.js?v=128';
+import { deleteDataset, createDataset } from '../ha-services.js?v=129';
+import { createCollapsible } from '../components/collapsible.js?v=129';
+import { makeDataset } from '../components/time-series-chart.js?v=129';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -9,6 +9,14 @@ function _fmtTs(ts) {
   return d.toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
+}
+
+function _esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function _fmtDuration(seconds) {
@@ -208,6 +216,9 @@ export function setupDatasetsAndExperiments(ctx) {
   const coverageListEl = dsCollapsible.body.querySelector('#pe-coverage-list');
   const coverageGuideEl = dsCollapsible.body.querySelector('#pe-coverage-guide');
   const saveCoverageChipsEl = saveMount.querySelector('#pe-save-coverage-chips');
+  const saveCoverageHintEl = saveMount.querySelector('.pe-save-coverage__hint');
+  const saveCoverageHintDefault =
+    'Tap a category tile below for a low-comfort way to collect any missing data.';
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
@@ -291,7 +302,7 @@ export function setupDatasetsAndExperiments(ctx) {
     const supplied = status === 'checked';
     const na = status === 'na';
     const kicker = na ? 'N/A' : (supplied ? 'Supplied' : 'Not set');
-    const matching = _matchingDatasetNames(spec.id);
+    const matching = _matchingDatasetNames(spec.id).map(_esc);
     const matchLine = na
       ? ''
       : (matching.length
@@ -346,8 +357,16 @@ export function setupDatasetsAndExperiments(ctx) {
     const seq = ++previewSeq;
     const result = await connection.getPeCoverage(_coverageOpts());
     if (seq !== previewSeq) return;
+    if (result == null) {
+      if (saveCoverageHintEl) {
+        saveCoverageHintEl.textContent =
+          'Could not check this window. Try again after the connection recovers.';
+      }
+      return;
+    }
+    if (saveCoverageHintEl) saveCoverageHintEl.textContent = saveCoverageHintDefault;
     const byId = {};
-    const categories = (result && Array.isArray(result.categories)) ? result.categories : [];
+    const categories = Array.isArray(result.categories) ? result.categories : [];
     for (const cat of categories) {
       if (cat && cat.id) byId[cat.id] = cat.status || 'unchecked';
     }
