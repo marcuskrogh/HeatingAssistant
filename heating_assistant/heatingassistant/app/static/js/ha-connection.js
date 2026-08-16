@@ -92,10 +92,12 @@ export class HaConnection {
     try {
       const msg = { type: 'heating_assistant/get_pe_inputs' };
       if (opts.roomSlug != null) msg.room_slug = opts.roomSlug;
-      if (opts.datasetId) msg.dataset_id = opts.datasetId;
+      if (opts.datasetIds && opts.datasetIds.length) msg.dataset_ids = opts.datasetIds;
+      else if (opts.datasetId) msg.dataset_id = opts.datasetId;
       if (opts.windowStart != null) msg.window_start = opts.windowStart;
       if (opts.windowEnd != null) msg.window_end = opts.windowEnd;
       if (opts.horizonHours != null) msg.horizon_hours = opts.horizonHours;
+      if (opts.heaterScales) msg.heater_scales = opts.heaterScales;
       const result = await this._hass.callWS(msg);
       return result || null;
     } catch (e) {

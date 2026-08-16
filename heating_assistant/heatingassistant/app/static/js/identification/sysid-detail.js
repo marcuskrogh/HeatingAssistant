@@ -14,7 +14,7 @@ import {
   updateEstimationParams,
 } from '../ha-services.js?v=124';
 import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=130';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=131';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -930,11 +930,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
   function renderIdentifiedExtras(slug, st) {
     const sysidAttrs = st[sysidEntityId(slug)]?.attributes || {};
-    if (sysidAttrs.t_wall_initial != null && !lockedParams.has('t_wall_initial')) {
-      tWallInitialInput.value = formatNumber(sysidAttrs.t_wall_initial, 2);
-    } else if (sysidAttrs.t_wall_initial == null && !lockedParams.has('t_wall_initial')) {
-      tWallInitialInput.value = '—';
-    }
+    // Tw0 is owned by applySimulatedTw0 after EKF / open-loop Simulate. Do not
+    // clear it here when sysid attrs lack a value (open-loop-only runs).
     if (sysidAttrs.ua_open != null) {
       uaOpenInput.value = formatNumber(sysidAttrs.ua_open, 2);
     } else {
@@ -1045,16 +1042,23 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   }
 
   function peInputOpts() {
-    if (selectedDatasetId) return { roomSlug, datasetId: selectedDatasetId };
+    const heaterScales = {};
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const val = parseFloat(inp.value);
+      if (isFinite(val)) heaterScales[srcName] = val;
+    }
+    const base = { roomSlug };
+    if (Object.keys(heaterScales).length) base.heaterScales = heaterScales;
+    if (selectedDatasetId) return { ...base, datasetId: selectedDatasetId };
     if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
       const startTs = new Date(windowStartInput.value).getTime() / 1000;
       const endTs = new Date(windowEndInput.value).getTime() / 1000;
       if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
-        return { roomSlug, windowStart: startTs, windowEnd: endTs };
+        return { ...base, windowStart: startTs, windowEnd: endTs };
       }
     }
     const hrs = parseFloat(horizonInput.value);
-    return { roomSlug, horizonHours: isFinite(hrs) ? hrs : DEFAULTS.horizon_hours };
+    return { ...base, horizonHours: isFinite(hrs) ? hrs : DEFAULTS.horizon_hours };
   }
 
   function paintAuxCharts(inputsChart, disturbChart, series, xRange) {
@@ -1088,7 +1092,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
           return;
         }
       } catch (err) {
-        // Fall through to HA recorder history.
+        console.warn('Failed to fetch PE input series; falling back to recorder:', err);
       }
     }
 
@@ -1406,7 +1410,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     onDatasetSelectionRenderer: (fn) => { renderDatasetSelection = fn; },
     getSelectedDatasetId: () => selectedDatasetId,
     runAutoIdentification,
-    onAuxRefresh: refreshAuxFromWindow,
   });
   const refreshCoverage = () => {
     if (refreshHandles && typeof refreshHandles.refreshCoverage === 'function') {
@@ -1436,10 +1439,9 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   renderEkfResults(roomSlug, state);
   renderOlResults(roomSlug, state);
   renderParamHistory(state);
-  // Populate the input/disturbance plots from existing results (if any) without
-  // blocking the initial render.
-  renderEkfAux();
-  renderOlAux();
+  // Plot heater/disturbances from the current window or dataset, not leftover
+  // simulate attrs from a previous run.
+  refreshAuxFromWindow();
 
   return {
     update(newState) {

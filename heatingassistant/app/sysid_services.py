@@ -638,9 +638,13 @@ async def handle_get_pe_inputs(runtime: Any, data: Mapping[str, Any]) -> dict[st
         window_end=values.get("window_end"),
         horizon_hours=float(horizon_hours) if horizon_hours is not None else None,
     )
+    heater_scales = effective_heater_scales(
+        values, getattr(runtime, "_last_identified_heater_scales", {})
+    )
+    sources = patched_heat_sources(_heat_sources(runtime), heater_scales)
     return identification_aux_series(
         history,
-        _heat_sources(runtime),
+        sources,
         room_name,
         iso_time=_iso_time,
     )

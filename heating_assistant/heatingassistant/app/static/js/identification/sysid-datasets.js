@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=130';
-import { createCollapsible } from '../components/collapsible.js?v=130';
-import { makeDataset } from '../components/time-series-chart.js?v=130';
+import { deleteDataset, createDataset } from '../ha-services.js?v=131';
+import { createCollapsible } from '../components/collapsible.js?v=131';
+import { makeDataset } from '../components/time-series-chart.js?v=131';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
