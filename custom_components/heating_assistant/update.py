@@ -1,8 +1,8 @@
 """Update entity showing when a restart is required after bundle sync.
 
-Settings Restart required is published by the App over MQTT so it appears
-before Core loads this module. This platform is kept for loaded-vs-disk
-diagnostics and is not forwarded from async_setup_entry.
+Settings Restart required is a Repairs issue from restart_issue.py so it
+appears in the Settings Repairs card, not Updates. This platform is kept for
+loaded-vs-disk diagnostics and is not forwarded from async_setup_entry.
 """
 
 from __future__ import annotations

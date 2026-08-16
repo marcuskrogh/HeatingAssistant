@@ -183,7 +183,7 @@ install_thin_integration() {
   rm -rf "${bak}" "${INTEGRATION_DST}/__pycache__"
 
   echo "HeatingAssistant: integration installed/updated at ${INTEGRATION_DST}"
-  echo "HeatingAssistant: Settings will show Restart required until Home Assistant Core restarts and loads the synced integration."
+  echo "HeatingAssistant: restart Home Assistant Core to load the synced integration."
   printf '%s\n' "${to_ver}" > "${INTEGRATION_STAMP}" || \
     echo "HeatingAssistant: warning: could not write ${INTEGRATION_STAMP}" >&2
   if write_core_restart_stamp "${from_ver}" "${to_ver}"; then

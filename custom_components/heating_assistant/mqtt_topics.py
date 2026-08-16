@@ -60,6 +60,11 @@ def entities(instance_id: str) -> str:
     return f"{TOPIC_ROOT}/{instance_id}/entities"
 
 
+def status(instance_id: str) -> str:
+    _validate_part(instance_id, "instance_id")
+    return f"{TOPIC_ROOT}/{instance_id}/status"
+
+
 # Domains the Ingress entity pickers can select from.
 PICKER_DOMAINS = frozenset(
     {

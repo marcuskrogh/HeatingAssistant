@@ -15,5 +15,19 @@
     "abort": {
       "already_configured": "This Heating Assistant App instance is already configured."
     }
+  },
+  "issues": {
+    "restart_required": {
+      "title": "Restart required",
+      "description": "HeatingAssistant installed a new thin integration ({version}). Restart Home Assistant to load it.",
+      "fix_flow": {
+        "step": {
+          "confirm_restart": {
+            "title": "Restart Home Assistant",
+            "description": "Restart now to load the synced {name} integration."
+          }
+        }
+      }
+    }
   }
 }

@@ -40,8 +40,9 @@ entities over MQTT.
    ```
 
 3. Install **HeatingAssistant** from the Apps store and start it.
-4. After the App syncs the thin integration, **Settings** shows
-   **Restart required**. Restart Home Assistant Core from that card.
+4. After the App syncs the thin integration, **Settings** shows a
+   **Restart required** repair (separate from the Updates list). Open it and
+   restart Home Assistant Core.
 5. Go to **Settings → Devices & services → Add integration**, search for
    **Heating Assistant**, and set the **App instance ID** to match the App
    options (default: `default`).
