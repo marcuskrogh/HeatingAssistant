@@ -285,6 +285,8 @@
           return requestJson(`api/datasets/${encodeURIComponent(msg.dataset_id || '')}`);
         case 'heating_assistant/get_pe_coverage':
           return requestJson(`api/pe_coverage${queryFromMessage(msg)}`);
+        case 'heating_assistant/get_pe_inputs':
+          return requestJson(`api/pe_inputs${queryFromMessage(msg)}`);
         case 'heating_assistant/list_experiments':
           return requestJson('api/experiments');
         case 'history/history_during_period':

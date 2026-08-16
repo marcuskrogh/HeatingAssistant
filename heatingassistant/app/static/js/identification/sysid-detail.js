@@ -14,7 +14,7 @@ import {
   updateEstimationParams,
 } from '../ha-services.js?v=124';
 import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=129';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=131';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -650,11 +650,13 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const setSelectedDataset = (id, label) => {
     selectedDatasetId = id;
     renderDatasetSelection(label || '');
+    refreshAuxFromWindow();
   };
   const clearSelectedDataset = () => {
     if (selectedDatasetId) {
       selectedDatasetId = null;
       renderDatasetSelection('');
+      refreshAuxFromWindow();
     }
   };
 
@@ -791,9 +793,14 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     }
 
     if (Object.keys(heaterScales).length) params.heater_scales = heaterScales;
-    // A selected stored dataset overrides the window: the backend reconstructs
-    // over the dataset's snapshotted records.
     if (selectedDatasetId) params.dataset_id = selectedDatasetId;
+    if (lockedParams.has('t_wall_initial')) {
+      const twVal = parseFloat(tWallInitialInput.value);
+      if (isFinite(twVal)) {
+        params[`t_wall_initial_${roomSlug}`] = twVal;
+        params.t_wall_locked = true;
+      }
+    }
     return params;
   }
 
@@ -923,11 +930,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
   function renderIdentifiedExtras(slug, st) {
     const sysidAttrs = st[sysidEntityId(slug)]?.attributes || {};
-    if (sysidAttrs.t_wall_initial != null && !lockedParams.has('t_wall_initial')) {
-      tWallInitialInput.value = formatNumber(sysidAttrs.t_wall_initial, 2);
-    } else if (sysidAttrs.t_wall_initial == null && !lockedParams.has('t_wall_initial')) {
-      tWallInitialInput.value = '—';
-    }
+    // Tw0 is owned by applySimulatedTw0 after EKF / open-loop Simulate. Do not
+    // clear it here when sysid attrs lack a value (open-loop-only runs).
     if (sysidAttrs.ua_open != null) {
       uaOpenInput.value = formatNumber(sysidAttrs.ua_open, 2);
     } else {
@@ -990,6 +994,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     updateKpiCard(kpiCompareEkfRmse, { value: rmseStr });
     updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' °C' : '—' });
     buildEkfChart(ekfChart, attrs.simulation);
+    applySimulatedTw0(attrs);
   }
 
   function renderOlResults(slug, st) {
@@ -999,10 +1004,15 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     updateKpiCard(kpiCompareOlRmse, { value: rmseStr });
     updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
+    applySimulatedTw0(attrs);
   }
 
-  // Compute the [min, max] timestamp (ms) spanned by a simulation series so the
-  // input/disturbance plots can be locked to the same x-range as the fit plot.
+  function applySimulatedTw0(attrs) {
+    if (lockedParams.has('t_wall_initial')) return;
+    if (attrs?.t_wall_initial == null) return;
+    tWallInitialInput.value = formatNumber(attrs.t_wall_initial, 2);
+  }
+
   function simTimeRange(simulation) {
     if (!Array.isArray(simulation) || simulation.length === 0) return null;
     let xMin = Infinity;
@@ -1017,11 +1027,75 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     return { xMin, xMax };
   }
 
-  // Fetch the recorded heating input and disturbances for this room over the
-  // given horizon and render them below the corresponding fit plot.  These come
-  // straight from the recorder — the same source the buffer is rebuilt from —
-  // so they show exactly the signals that drove the reconstruction/open-loop.
-  async function renderAuxPlots(inputsChart, disturbChart, horizonHours, xRange) {
+  // Plot heater power and disturbances from identification history (dataset or
+  // selected window). Simulation attributes are used only after a completed
+  // run; window/dataset changes fetch getPeInputs so stale sim series cannot
+  // hide the current window.
+  function isoSeriesToPoints(series) {
+    if (!Array.isArray(series)) return [];
+    return series.map((entry) => {
+      const t = new Date(entry.time).getTime();
+      const y = Number(entry.value);
+      if (!isFinite(t) || !isFinite(y)) return null;
+      return { x: t, y };
+    }).filter(Boolean);
+  }
+
+  function peInputOpts() {
+    const heaterScales = {};
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const val = parseFloat(inp.value);
+      if (isFinite(val)) heaterScales[srcName] = val;
+    }
+    const base = { roomSlug };
+    if (Object.keys(heaterScales).length) base.heaterScales = heaterScales;
+    if (selectedDatasetId) return { ...base, datasetId: selectedDatasetId };
+    if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+      const startTs = new Date(windowStartInput.value).getTime() / 1000;
+      const endTs = new Date(windowEndInput.value).getTime() / 1000;
+      if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
+        return { ...base, windowStart: startTs, windowEnd: endTs };
+      }
+    }
+    const hrs = parseFloat(horizonInput.value);
+    return { ...base, horizonHours: isFinite(hrs) ? hrs : DEFAULTS.horizon_hours };
+  }
+
+  function paintAuxCharts(inputsChart, disturbChart, series, xRange) {
+    const powerPts = isoSeriesToPoints(series?.heating_power);
+    const outdoorPts = isoSeriesToPoints(series?.outdoor_temp);
+    const solarPts = isoSeriesToPoints(series?.solar_gain);
+    const xLimits = xRange || {};
+    inputsChart.render(
+      [makeDataset('Heating Power', powerPts, '#ffb74d', { borderWidth: 2, stepped: true })],
+      { ...xLimits },
+    );
+    disturbChart.render(
+      [
+        makeDataset('Outdoor Temp', outdoorPts, '#90a4ae', { borderWidth: 2, yAxisID: 'y' }),
+        makeDataset('Solar Gain', solarPts, '#fff176', { borderWidth: 2, yAxisID: 'y2' }),
+      ],
+      { ...xLimits },
+    );
+  }
+
+  async function renderAuxPlots(inputsChart, disturbChart, horizonHours, xRange, simAttrs) {
+    if (simAttrs && Array.isArray(simAttrs.heating_power) && simAttrs.heating_power.length) {
+      paintAuxCharts(inputsChart, disturbChart, simAttrs, xRange);
+      return;
+    }
+    if (connection && typeof connection.getPeInputs === 'function') {
+      try {
+        const series = await connection.getPeInputs(peInputOpts());
+        if (series && Array.isArray(series.heating_power) && series.heating_power.length) {
+          paintAuxCharts(inputsChart, disturbChart, series, xRange);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch PE input series; falling back to recorder:', err);
+      }
+    }
+
     const powerEntity = room.entities?.['heating_power_measured'];
     const solarEntity = room.entities?.['solar_gain_measured'];
     const outdoorEntity = 'sensor.heating_assistant_outdoor_temperature_measured';
@@ -1040,22 +1114,20 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       return;
     }
 
-    const powerPts = historyToDataPoints(hist[powerEntity] || []);
-    const solarPts = historyToDataPoints(hist[solarEntity] || []);
-    const outdoorPts = historyToDataPoints(hist[outdoorEntity] || []);
-    const xLimits = xRange || {};
-
-    inputsChart.render(
-      [makeDataset('Heating Power', powerPts, '#ffb74d', { borderWidth: 2, stepped: true })],
-      { ...xLimits },
-    );
-    disturbChart.render(
-      [
-        makeDataset('Outdoor Temp', outdoorPts, '#90a4ae', { borderWidth: 2, yAxisID: 'y' }),
-        makeDataset('Solar Gain', solarPts, '#fff176', { borderWidth: 2, yAxisID: 'y2' }),
-      ],
-      { ...xLimits },
-    );
+    paintAuxCharts(inputsChart, disturbChart, {
+      heating_power: (hist[powerEntity] || []).map((entry) => ({
+        time: entry.last_changed || entry.last_updated,
+        value: entry.s !== undefined ? entry.s : entry.state,
+      })),
+      outdoor_temp: (hist[outdoorEntity] || []).map((entry) => ({
+        time: entry.last_changed || entry.last_updated,
+        value: entry.s !== undefined ? entry.s : entry.state,
+      })),
+      solar_gain: (hist[solarEntity] || []).map((entry) => ({
+        time: entry.last_changed || entry.last_updated,
+        value: entry.s !== undefined ? entry.s : entry.state,
+      })),
+    }, xRange);
   }
 
   // Derive the xRange to pass to renderAuxPlots based on the current window
@@ -1081,18 +1153,31 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     return parseFloat(horizonInput.value);
   }
 
-  function renderEkfAux() {
+  function renderEkfAux(useSimAttrs = true) {
     const attrs = latestState[sysidEntityId(roomSlug)]?.attributes || {};
     return renderAuxPlots(
-      ekfInputsChart, ekfDisturbChart, _effectiveHorizon(attrs), _effectiveXRange(attrs),
+      ekfInputsChart,
+      ekfDisturbChart,
+      _effectiveHorizon(attrs),
+      _effectiveXRange(useSimAttrs ? attrs : null),
+      useSimAttrs ? attrs : null,
     );
   }
 
-  function renderOlAux() {
+  function renderOlAux(useSimAttrs = true) {
     const attrs = latestState[openLoopEntityId(roomSlug)]?.attributes || {};
     return renderAuxPlots(
-      olInputsChart, olDisturbChart, _effectiveHorizon(attrs), _effectiveXRange(attrs),
+      olInputsChart,
+      olDisturbChart,
+      _effectiveHorizon(attrs),
+      _effectiveXRange(useSimAttrs ? attrs : null),
+      useSimAttrs ? attrs : null,
     );
+  }
+
+  function refreshAuxFromWindow() {
+    renderEkfAux(false);
+    renderOlAux(false);
   }
 
   // Populate the editable parameter fields from a stored history entry's room
@@ -1336,6 +1421,11 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   horizonInput.addEventListener('change', refreshCoverage);
   windowModeRecentBtn.addEventListener('click', refreshCoverage);
   windowModeCustomBtn.addEventListener('click', refreshCoverage);
+  windowStartInput.addEventListener('change', refreshAuxFromWindow);
+  windowEndInput.addEventListener('change', refreshAuxFromWindow);
+  horizonInput.addEventListener('change', refreshAuxFromWindow);
+  windowModeRecentBtn.addEventListener('click', refreshAuxFromWindow);
+  windowModeCustomBtn.addEventListener('click', refreshAuxFromWindow);
 
   // Stored Datasets section is already appended inside setupDatasetsAndExperiments();
   // append Applied Model History here so it appears below Stored Datasets.
@@ -1349,10 +1439,9 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   renderEkfResults(roomSlug, state);
   renderOlResults(roomSlug, state);
   renderParamHistory(state);
-  // Populate the input/disturbance plots from existing results (if any) without
-  // blocking the initial render.
-  renderEkfAux();
-  renderOlAux();
+  // Plot heater/disturbances from the current window or dataset, not leftover
+  // simulate attrs from a previous run.
+  refreshAuxFromWindow();
 
   return {
     update(newState) {

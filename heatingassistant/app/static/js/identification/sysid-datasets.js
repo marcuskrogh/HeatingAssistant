@@ -1,6 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=129';
-import { createCollapsible } from '../components/collapsible.js?v=129';
-import { makeDataset } from '../components/time-series-chart.js?v=129';
+import { deleteDataset, createDataset } from '../ha-services.js?v=131';
+import { createCollapsible } from '../components/collapsible.js?v=131';
+import { makeDataset } from '../components/time-series-chart.js?v=131';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -36,36 +36,20 @@ const PE_CATEGORIES = [
 const PE_GUIDES = {
   closed_window_envelope: {
     title: 'Closed-window envelope',
-    target: 'At least 12 hours closed. A full day is better.',
-    why: 'This is how the room holds heat when windows and doors stay shut — the core thermal-mass and insulation fit.',
-    do: 'Keep windows and doors closed and let heating run as usual. Overnight, or while you are out, is ideal: no extra discomfort, and the house stays quiet.',
-    avoid: 'Do not leave a window ajar during this period. You do not need to change setpoints.',
-    store: 'Set the estimation window to that closed period, Save Current Window, then Use the new set.',
+    body: 'Needs a stretch of at least 12 hours (a full day is better) with windows and doors kept shut while heating runs as usual. Overnight or while you are out is enough.',
   },
   heater_excitation: {
     title: 'Heater command variation',
-    target: 'The dataset must include this room\'s heater command both off (0) and on, for at least about an hour.',
-    why: 'Each identification sample stores this room\'s commanded heater output as a fraction from 0 (off) to 1 (full). Coverage uses that series for heaters assigned to this room only. Another room\'s heater does not count. Always off, always full, or a flat mid command does not count.',
-    do: 'Save a window that contains off samples and on samples for this room. Existing controller on/off is enough (price-driven, a setback, or morning recovery). If the command never moves, shift the setpoint about 1–2 °C while you are out so it goes off then on.',
-    avoid: 'Do not save a window of only off, only full, or a constant mid output.',
-    store: 'Save that mixed-command window, then Use the set.',
+    body: 'Needs this room\'s heater both off and on in the same window, for about an hour in each state. Another room\'s heater does not count. Always off, always full, or a flat mid command will not cover it.',
   },
   solar_variation: {
     title: 'Solar variation',
-    target: 'A daytime stretch with changing sunlight. Night-only windows will not cover it.',
-    why: 'The solar scale needs sunlight that actually changes during the window.',
-    do: 'Record a clear or mixed day with curtains as usual. No heating change is required.',
-    avoid: 'Do not stay up to run a night-only experiment. Wait for daylight.',
-    store: 'Save that daytime window, then Use the set.',
+    body: 'Needs a daytime stretch with changing sunlight. Night-only data cannot identify the solar scale.',
   },
   open_contact: {
     title: 'Open-contact (extra UA)',
-    target: 'About 30 minutes with a window or door open.',
-    why: 'Extra outdoor exchange is only visible while a contact is actually open.',
-    do: 'Piggyback on a planned airing you already do. Thirty minutes is enough; close afterwards. Prefer mild outdoor weather.',
-    avoid: 'Do not leave a window open overnight in cold weather. Short and intentional beats long and uncomfortable.',
-    store: 'Include the open period in the saved window, then Use the set.',
-    na: 'This room has no window or door contact configured. Open UA is not required for recommended estimation.',
+    body: 'Needs about 30 minutes with a window or door actually open, then closed again. A short planned airing in mild weather is enough.',
+    na: 'This room has no window or door contact configured, so Open UA is not required.',
   },
 };
 
@@ -145,8 +129,7 @@ export function setupDatasetsAndExperiments(ctx) {
   saveMount.innerHTML = `
     <div class="params-subsection__title">Save Current Window</div>
     <p class="params-subsection__desc">
-      Store the parameter-estimation window configured above as a named, permanent dataset.
-      After saving, Use the set in Stored Datasets so matching category tiles turn teal.
+      Store the parameter-estimation window configured above as a named dataset.
     </p>
     <div class="ds-save-row ds-save-row--compact">
       <div class="form-group ds-save-row__name">
@@ -166,7 +149,7 @@ export function setupDatasetsAndExperiments(ctx) {
       <div class="pe-save-coverage__title">This window would cover</div>
       <div class="pe-save-coverage__chips" id="pe-save-coverage-chips"></div>
       <p class="pe-save-coverage__hint">
-        Tap a category tile below for a low-comfort way to collect any missing data.
+        Tap a category below to see what that kind of dataset needs.
       </p>
     </div>
     <div id="ds-selected-note" class="ds-loaded-note"></div>
@@ -183,10 +166,8 @@ export function setupDatasetsAndExperiments(ctx) {
     <div class="pe-coverage" id="pe-coverage">
       <div class="params-subsection__title">Recommended data</div>
       <p class="pe-coverage__desc">
-        Tap a category for a low-comfort recipe, then save that window and Use
-        the set. Select at least one set in each category, then run the
-        recommended estimate. These indicators are a guide — they do not
-        exclude samples from the fit.
+        Each category needs a stored dataset with that kind of data. Tap a
+        category to see what the window should contain.
       </p>
       <div class="pe-coverage-row" id="pe-coverage-list" role="group"
         aria-label="Recommended data categories"></div>
@@ -218,7 +199,7 @@ export function setupDatasetsAndExperiments(ctx) {
   const saveCoverageChipsEl = saveMount.querySelector('#pe-save-coverage-chips');
   const saveCoverageHintEl = saveMount.querySelector('.pe-save-coverage__hint');
   const saveCoverageHintDefault =
-    'Tap a category tile below for a low-comfort way to collect any missing data.';
+    'Tap a category below to see what that kind of dataset needs.';
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
@@ -315,24 +296,10 @@ export function setupDatasetsAndExperiments(ctx) {
         <h3 class="pe-coverage-guide__title">${guide.title}</h3>
         <p class="pe-coverage-guide__why">${guide.na}</p>`
       : `
-        <div class="pe-coverage-guide__kicker">${kicker} · ${guide.target}</div>
+        <div class="pe-coverage-guide__kicker">${kicker}</div>
         <h3 class="pe-coverage-guide__title">${guide.title}</h3>
-        <p class="pe-coverage-guide__why">${guide.why}</p>
-        <ol class="pe-coverage-guide__steps">
-          <li>${guide.do}</li>
-          <li>${guide.avoid}</li>
-          <li>${guide.store}</li>
-        </ol>
-        ${matchLine}
-        <button type="button" class="btn btn--ghost btn--sm" id="pe-guide-scroll-save">
-          Scroll to Save Current Window
-        </button>`;
-    const scrollBtn = coverageGuideEl.querySelector('#pe-guide-scroll-save');
-    if (scrollBtn) {
-      scrollBtn.addEventListener('click', () => {
-        saveMount.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    }
+        <p class="pe-coverage-guide__why">${guide.body}</p>
+        ${matchLine}`;
     applyGuideHighlight();
   }
 

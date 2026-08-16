@@ -144,11 +144,9 @@ async def test_simulation_services_populate_caches_and_sensors(
     class FakeSystem:
         pass
 
-    async def fake_initial_state(*args, **kwargs):
-        return {"t_wall": {"Living Room": 20.9}, "method": "fake"}
-
     def fake_sysid(history, model, heat_sources, room_names, dt, horizon_steps, room_params, sigma_w, sigma_v, window_spec):
         assert len(history) >= 40
+        assert room_params["Living Room"]["t_wall_initial"] == pytest.approx(20.9)
         return {
             "horizon_steps": horizon_steps,
             "per_room": {
@@ -174,6 +172,7 @@ async def test_simulation_services_populate_caches_and_sensors(
 
     def fake_open_loop(history, system, room_names, n_rooms, dt, segment_length, t_wall_initial):
         assert len(history) >= 40
+        assert t_wall_initial["Living Room"] == pytest.approx(20.9)
         return {
             "per_room": {
                 "Living Room": {
@@ -193,8 +192,11 @@ async def test_simulation_services_populate_caches_and_sensors(
     async def fake_rmse_by_horizon(*args, **kwargs):
         return {"Living Room": {"4h": 0.2, "12h": 0.3}}
 
+    def fake_opt_t_wall(*args, **kwargs):
+        return {"Living Room": 20.9}
+
     monkeypatch.setattr(sysid_services, "HouseThermalSDE", lambda *args, **kwargs: FakeSystem())
-    monkeypatch.setattr(sysid_services, "estimate_simulation_initial_state", fake_initial_state)
+    monkeypatch.setattr(sysid_services, "optimal_t_wall_for_window", fake_opt_t_wall)
     monkeypatch.setattr(sysid_services, "run_sysid_simulation", fake_sysid)
     monkeypatch.setattr(sysid_services, "compute_open_loop_predictions", fake_open_loop)
     monkeypatch.setattr(sysid_services, "compute_open_loop_rmse_by_horizon", fake_rmse_by_horizon)
@@ -217,8 +219,14 @@ async def test_simulation_services_populate_caches_and_sensors(
     ol_sensor = states["sensor.heating_assistant_living_room_open_loop_rmse"]
     assert sysid_sensor["state"] == "0.1"
     assert sysid_sensor["attributes"]["simulation"][0]["time"].startswith("2027-")
+    assert sysid_sensor["attributes"]["t_wall_initial"] == pytest.approx(20.9)
+    assert sysid_sensor["attributes"]["heating_power"]
+    assert sysid_sensor["attributes"]["outdoor_temp"]
+    assert sysid_sensor["attributes"]["solar_gain"]
     assert ol_sensor["state"] == "0.15"
+    assert ol_sensor["attributes"]["t_wall_initial"] == pytest.approx(20.9)
     assert ol_sensor["attributes"]["rmse_by_horizon"] == {"4h": 0.2, "12h": 0.3}
+    assert ol_sensor["attributes"]["heating_power"]
 
 
 @pytest.mark.asyncio
