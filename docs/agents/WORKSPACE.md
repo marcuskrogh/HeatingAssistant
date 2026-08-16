@@ -29,6 +29,7 @@ Agreed agent workspace setup for this repository.
 | Continuity mirror | docs/agents/ISSUES.md |
 | Roadmap | docs/ROADMAP.md |
 | Plan | docs/agents/PLAN-<slug>.md |
+| Changelog | heating_assistant/CHANGELOG.md |
 | Bug | docs/agents/BUG.md (when present) |
 | Iterate | docs/agents/ITERATE.md (when present) |
 | Model | docs/MODEL.md (when present) |
