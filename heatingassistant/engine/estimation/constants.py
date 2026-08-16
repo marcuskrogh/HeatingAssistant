@@ -36,6 +36,44 @@ _EMPTY_IDX: np.ndarray = np.array([], dtype=int)
 #: Log-space parameter bounds (hard limits).
 _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
 _LOG_MASS_HI = math.log(5e8)    # ~500 MJ/K
+
+#: Multiplicative PE *upper* box around the configured thermal mass C0
+#: (size preset / initial room size).  A living-room prior of 9 MJ/K
+#: is capped at 45 MJ/K instead of the global 500 MJ/K — enough to
+#: move about two size-preset steps up, not 55× along the C/R ridge.
+#: The lower bound stays the global floor: a symmetric C0/5 floor
+#: pins the C/α degeneracy and blocks legitimate downward corrections.
+_MASS_BOUND_FACTOR = 5.0
+
+#: Extra MAP weight on log C toward the configured prior when heater
+#: duty is unexcited.  Default lambda=0.01 leaves log C almost
+#: unconstrained against summed open-loop SSE, so the joint optimum
+#: rides "C huge / R huge" to the bound.  Weight 16 sits between
+#: excited-alpha (4) and unexcited-alpha (25).
+_MASS_PRIOR_WEIGHT = 16.0
+
+#: Reduced log-C prior weight when heater duty varies enough that C
+#: and alpha are jointly identifiable.  Matches excited-alpha so
+#: identification stays responsive on well-excited windows.
+_MASS_PRIOR_WEIGHT_EXCITED = 4.0
+
+
+def _log_mass_bounds(log_c_prior: float) -> tuple[float, float]:
+    """Return the per-room log-C box around the configured prior.
+
+    Linear C is capped at ``_MASS_BOUND_FACTOR`` times the (clipped)
+    prior, then intersected with ``[_LOG_MASS_LO, _LOG_MASS_HI]``.
+    The floor stays the global ``_LOG_MASS_LO`` so downward corrections
+    remain free.
+    """
+    center = min(_LOG_MASS_HI, max(_LOG_MASS_LO, float(log_c_prior)))
+    hi = min(_LOG_MASS_HI, center + math.log(_MASS_BOUND_FACTOR))
+    lo = _LOG_MASS_LO
+    if lo >= hi:
+        return (_LOG_MASS_LO, _LOG_MASS_HI)
+    return (lo, hi)
+
+
 _LOG_R_LO = math.log(1e-5)      # 0.00001 K/W
 _LOG_R_HI = math.log(10.0)      # 10 K/W
 

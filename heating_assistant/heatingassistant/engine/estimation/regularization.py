@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 
 from .constants import (
+    _MASS_PRIOR_WEIGHT,
     _SPLIT_PRIOR_STD,
     _T_WALL_MIN_LAM,
     _T_WALL_PRIOR_STD,
@@ -31,7 +32,8 @@ def _compute_regularization_gradient(
     grad = np.zeros_like(theta)
 
     a, b = layout.idx_log_mass
-    grad[a:b] = 2.0 * lam * (log_mass - est._log_mass_prior)
+    w_mass = float(getattr(est, "_mass_prior_weight", _MASS_PRIOR_WEIGHT))
+    grad[a:b] = 2.0 * lam * w_mass * (log_mass - est._log_mass_prior)
 
     a, b = layout.idx_log_r
     grad[a:b] = 2.0 * lam * (log_r - est._log_r_prior)
@@ -125,8 +127,9 @@ def _compute_regularization(
         for p in identifiable_pairs
     ]) if identifiable_pairs else np.array([])
 
+    w_mass = float(getattr(est, "_mass_prior_weight", _MASS_PRIOR_WEIGHT))
     reg = est._regularization * (
-        float(np.sum((log_mass - est._log_mass_prior) ** 2))
+        w_mass * float(np.sum((log_mass - est._log_mass_prior) ** 2))
         + float(np.sum((log_r - est._log_r_prior) ** 2))
         + float(np.sum((q_int - est._q_int_prior) ** 2)) / (100.0 ** 2)
     )

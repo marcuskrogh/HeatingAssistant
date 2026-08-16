@@ -21,14 +21,13 @@ from .constants import (
     _C_AIR_LO,
     _LOG_ALPHA_HI,
     _LOG_ALPHA_LO,
-    _LOG_MASS_HI,
-    _LOG_MASS_LO,
     _LOG_R_HI,
     _LOG_R_IJ_HI,
     _LOG_R_IJ_LO,
     _LOG_R_LO,
     _LOG_SOLAR_HI,
     _LOG_SOLAR_LO,
+    _MASS_PRIOR_WEIGHT,
     _MIN_HISTORY_TIME_S,
     _MIN_SEGMENT_TIME_S,
     _Q_INT_HI,
@@ -41,11 +40,13 @@ from .constants import (
     _T_WALL_PRIOR_STD,
     _UA_OPEN_HI,
     _UA_OPEN_LO,
+    _log_mass_bounds,
     _nelder_mead,
 )
 from .history_std import convert_history_std
 from .identifiability import (
     _adaptive_alpha_prior_weight,
+    _adaptive_mass_prior_weight,
     _check_identifiable_connections,
     _check_identifiable_open_ua,
     _check_identifiable_sources,
@@ -225,6 +226,7 @@ class KalmanMLEstimator:
         self._t_wall_init_prior = np.full(len(rooms), 20.0)
         # Adaptive heater-scale prior weight; updated per estimate() call.
         self._alpha_prior_weight: float = _ALPHA_PRIOR_WEIGHT
+        self._mass_prior_weight: float = _MASS_PRIOR_WEIGHT
 
         # Build unique inter-room connection pairs (i, j) with i < j.
         room_idx = {r.name: k for k, r in enumerate(rooms)}
@@ -487,6 +489,9 @@ class KalmanMLEstimator:
         self._alpha_prior_weight = _adaptive_alpha_prior_weight(
             history, self._n_u, self._min_history_steps,
         )
+        self._mass_prior_weight = _adaptive_mass_prior_weight(
+            history, self._n_u, self._min_history_steps,
+        )
 
         current = {
             r.name: {
@@ -616,7 +621,7 @@ class KalmanMLEstimator:
         # ── Build per-parameter bounds ─────────────────────────────────────
         n = self._n
         bounds: List[Tuple[float, float]] = (
-            [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
+            [_log_mass_bounds(float(self._log_mass_prior[i])) for i in range(n)]
             + [(_LOG_R_LO, _LOG_R_HI)] * n
             + [(_Q_INT_LO, _Q_INT_HI)] * n
             + [(_T_WALL_LO, _T_WALL_HI)] * (n * n_wall_segs)
@@ -700,8 +705,9 @@ class KalmanMLEstimator:
         # coarse least-squares 1R1C fit) and from the configured prior, then
         # keep whichever finisher has the lower regularised objective.  The
         # MAP prior (see _compute_regularization_theta) — tight on the heater
-        # scale, whose rated power is genuinely known a priori — is what keeps
-        # the chosen optimum off the degenerate ridge; the second start simply
+        # scale, whose rated power is genuinely known a priori, and on log C
+        # toward the selected room size — is what keeps the chosen optimum
+        # off the degenerate ridge; the second start simply
         # guards against the physics-informed seed landing in a bad basin.
         phys_theta = self._physics_informed_theta(
             std_history, layout, theta_prior, lb, ub,
@@ -744,7 +750,10 @@ class KalmanMLEstimator:
         # ── Unpack and clip the best solution ──────────────────────────────
         (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(best_theta)
-        log_mass = np.clip(log_mass, _LOG_MASS_LO, _LOG_MASS_HI)
+        log_mass = np.array([
+            float(np.clip(log_mass[i], bounds[i][0], bounds[i][1]))
+            for i in range(self._n)
+        ], dtype=float)
         log_r = np.clip(log_r, _LOG_R_LO, _LOG_R_HI)
         q_int = np.clip(q_int, _Q_INT_LO, _Q_INT_HI)
         t_wall_init = np.clip(t_wall_init, _T_WALL_LO, _T_WALL_HI)
