@@ -101,4 +101,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-352` — Focused review then fix-forward on the same PR
+`/ship SWD-352` — review-fix CLEAN on PR #618
