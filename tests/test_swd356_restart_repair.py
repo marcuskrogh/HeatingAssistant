@@ -70,6 +70,20 @@ def test_sync_restart_issue_defaults_to_version_sync() -> None:
     assert restart_issue.sync_restart_issue(object()) is True
     fake_ir.async_create_issue.assert_called_once()
     fake_ir.async_delete_issue.assert_not_called()
+
+
+def test_sync_restart_issue_defaults_to_delete_when_not_needed() -> None:
+    restart_issue = _load_restart_issue()
+    fake_ir = MagicMock()
+    restart_issue._issue_registry = lambda: fake_ir  # type: ignore[method-assign]
+    restart_issue.restart_required = lambda: False  # type: ignore[method-assign]
+
+    assert restart_issue.sync_restart_issue(object()) is False
+    fake_ir.async_delete_issue.assert_called_once()
+    fake_ir.async_create_issue.assert_not_called()
+
+
+def test_sync_restart_issue_deletes_when_not_needed() -> None:
     restart_issue = _load_restart_issue()
     fake_ir = MagicMock()
     restart_issue._issue_registry = lambda: fake_ir  # type: ignore[method-assign]

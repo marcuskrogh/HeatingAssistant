@@ -20,6 +20,11 @@
 - SWD-352 published an MQTT Update entity, so the prompt landed in Updates and
   looked like another HeatingAssistant software update. Retained MQTT discovery
   plus a stamp that is not cleared on a normal Core restart kept it there.
+- First hop onto this version: App tombstone clears the Updates card immediately.
+  Loaded 2026.08.7 cannot create a repair. After Core restart, disk and loaded
+  versions match, so no repair appears for this hop. Later App updates (with
+  this code already loaded) show Restart required under Repairs before Core
+  restart.
 
 ## Acceptance criteria
 - App start tombstones `homeassistant/update/heatingassistant_restart/config`
