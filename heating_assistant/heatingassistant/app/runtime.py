@@ -244,12 +244,6 @@ class HeatingRuntime:
                 self._handle_entities_catalog_message,
             )
         )
-        self._subscriptions.append(
-            self.bus.subscribe(
-                core_restart.command_topic(self.instance_id),
-                self._handle_core_restart_command,
-            )
-        )
         # Replay retained catalog for in-memory bus / late subscribers.
         replay = getattr(self.bus, "replay_retained", None)
         if callable(replay):
@@ -475,7 +469,7 @@ class HeatingRuntime:
             await self.publish_core_restart_required()
         except Exception:
             _logger.exception(
-                "Failed to publish restart-required MQTT update; will retry on connect"
+                "Failed to tombstone leftover MQTT Update discovery; will retry on connect"
             )
 
     async def stop(self) -> None:
@@ -519,62 +513,22 @@ class HeatingRuntime:
         )
 
     async def publish_core_restart_required(self) -> None:
-        """Publish or clear the Settings Restart required MQTT Update entity."""
+        """Tombstone leftover MQTT Update discovery from SWD-352.
 
-        stamp = core_restart.read_stamp(self.data_dir)
-        discovery = core_restart.discovery_topic()
-        if stamp is None:
-            await self.bus.publish(discovery, "", qos=DEFAULT_QOS, retain=True)
-            await self.bus.publish(
-                core_restart.state_topic(self.instance_id),
-                "",
-                qos=DEFAULT_QOS,
-                retain=True,
-            )
-            return
+        Restart required is a Settings **repair** on the thin integration
+        (HACS path), not an Update entity. Empty retained discovery removes
+        any card still sitting under Updates.
+        """
+
         await self.bus.publish(
-            discovery,
-            json.dumps(core_restart.discovery_payload(self.instance_id), sort_keys=True),
-            qos=DEFAULT_QOS,
-            retain=True,
+            core_restart.discovery_topic(), "", qos=DEFAULT_QOS, retain=True
         )
         await self.bus.publish(
             core_restart.state_topic(self.instance_id),
-            json.dumps(
-                core_restart.state_payload(
-                    from_version=stamp["from_version"],
-                    to_version=stamp["to_version"],
-                ),
-                sort_keys=True,
-            ),
+            "",
             qos=DEFAULT_QOS,
             retain=True,
         )
-
-    async def _handle_core_restart_command(
-        self,
-        topic: str,
-        payload: str | bytes,
-        qos: int,
-        retain: bool,
-    ) -> None:
-        """Restart Home Assistant Core when Settings Install is pressed."""
-
-        del qos, retain
-        if topic != core_restart.command_topic(self.instance_id):
-            return
-        text = payload.decode("utf-8") if isinstance(payload, bytes) else str(payload)
-        if text.strip() != core_restart.PAYLOAD_INSTALL:
-            return
-        if core_restart.read_stamp(self.data_dir) is None:
-            return
-        _logger.info("Settings requested Home Assistant Core restart after thin-bridge sync")
-        if not core_restart.request_core_restart():
-            _logger.warning("Core restart request failed; leave Restart required on Settings")
-            return
-        # Core restart does not restart this App. Clear the Settings card now.
-        core_restart.clear_stamp(self.data_dir)
-        await self.publish_core_restart_required()
 
     async def publish_actuator_outputs(self) -> None:
         """Publish the latest App -> HA actuator tag values.

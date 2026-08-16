@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
 
 from heatingassistant.app.core_restart import (
     DISCOVERY_OBJECT_ID,
-    PAYLOAD_INSTALL,
-    command_topic,
     discovery_payload,
     discovery_topic,
     previous_version_for_stamp,
     read_stamp,
     request_core_restart,
-    state_payload,
     state_topic,
     write_stamp,
 )
@@ -126,20 +121,13 @@ def test_legacy_timestamp_stamp_is_readable(tmp_path: Path) -> None:
     }
 
 
-def test_mqtt_discovery_payload_is_settings_update_entity() -> None:
-    payload = discovery_payload("default")
-    assert payload["name"] == "Restart required"
-    assert payload["title"] == "HeatingAssistant"
-    assert payload["object_id"] == DISCOVERY_OBJECT_ID
-    assert payload["payload_install"] == PAYLOAD_INSTALL
-    assert payload["command_topic"] == command_topic("default")
-    state = state_payload(from_version="2026.08.6", to_version="2026.08.7")
-    assert state["installed_version"] != state["latest_version"]
-    assert state["release_summary"] == "Restart of Home Assistant required"
+def test_mqtt_discovery_helpers_still_exist_for_tombstone() -> None:
+    assert discovery_topic().endswith("/heatingassistant_restart/config")
+    assert discovery_payload("default")["object_id"] == DISCOVERY_OBJECT_ID
 
 
 @pytest.mark.asyncio
-async def test_runtime_publishes_restart_required_when_stamp_present(
+async def test_runtime_tombstones_mqtt_update_even_when_stamp_present(
     tmp_path: Path,
 ) -> None:
     write_stamp(tmp_path, from_version="2026.08.6", to_version="2026.08.7")
@@ -147,11 +135,8 @@ async def test_runtime_publishes_restart_required_when_stamp_present(
     runtime = HeatingRuntime(tmp_path, bus=bus, options={"instance_id": "default"})
     await runtime.start()
     retained = {topic: payload for topic, payload, _qos, retain in bus.published if retain}
-    discovery = json.loads(retained[discovery_topic()])
-    assert discovery["name"] == "Restart required"
-    state = json.loads(retained["heatingassistant/default/restart/state"])
-    assert state["installed_version"] == "2026.08.6"
-    assert state["latest_version"] == "2026.08.7"
+    assert retained.get(discovery_topic()) == ""
+    assert retained.get(state_topic("default")) == ""
     await runtime.stop()
 
 
@@ -165,56 +150,6 @@ async def test_runtime_clears_restart_discovery_when_stamp_absent(
     retained = {topic: payload for topic, payload, _qos, retain in bus.published if retain}
     assert retained.get(discovery_topic()) == ""
     assert retained.get(state_topic("default")) == ""
-    await runtime.stop()
-
-
-@pytest.mark.asyncio
-async def test_install_payload_requests_core_restart(tmp_path: Path) -> None:
-    write_stamp(tmp_path, from_version="2026.08.6", to_version="2026.08.7")
-    bus = InMemoryMqttBus()
-    runtime = HeatingRuntime(tmp_path, bus=bus, options={"instance_id": "default"})
-    await runtime.start()
-    with patch(
-        "heatingassistant.app.runtime.core_restart.request_core_restart",
-        return_value=True,
-    ) as restart:
-        await runtime._handle_core_restart_command(
-            command_topic("default"),
-            PAYLOAD_INSTALL,
-            1,
-            False,
-        )
-    restart.assert_called_once_with()
-    assert read_stamp(tmp_path) is None
-    retained = {topic: payload for topic, payload, _qos, retain in bus.published if retain}
-    assert retained.get(discovery_topic()) == ""
-    assert retained.get(state_topic("default")) == ""
-    await runtime.stop()
-
-
-@pytest.mark.asyncio
-async def test_failed_core_restart_leaves_restart_required(tmp_path: Path) -> None:
-    write_stamp(tmp_path, from_version="2026.08.6", to_version="2026.08.7")
-    bus = InMemoryMqttBus()
-    runtime = HeatingRuntime(tmp_path, bus=bus, options={"instance_id": "default"})
-    await runtime.start()
-    with patch(
-        "heatingassistant.app.runtime.core_restart.request_core_restart",
-        return_value=False,
-    ):
-        await runtime._handle_core_restart_command(
-            command_topic("default"),
-            PAYLOAD_INSTALL,
-            1,
-            False,
-        )
-    assert read_stamp(tmp_path) == {
-        "from_version": "2026.08.6",
-        "to_version": "2026.08.7",
-    }
-    retained = {topic: payload for topic, payload, _qos, retain in bus.published if retain}
-    state = json.loads(retained[state_topic("default")])
-    assert state["installed_version"] != state["latest_version"]
     await runtime.stop()
 
 

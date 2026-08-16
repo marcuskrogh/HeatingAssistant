@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any, Callable
 
 from homeassistant.components import mqtt
@@ -20,7 +21,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, HomeAssistant, State, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 
 from .const import CONF_INSTANCE_ID, DATA_MANAGERS, DEFAULT_INSTANCE_ID, DOMAIN, QOS
 from .forecast_publish import forecast_attributes_for_publish
@@ -29,9 +30,11 @@ from .mqtt_topics import (
     MqttTagPayload,
     bindings as bindings_topic,
     entities as entities_topic,
+    status as status_topic,
     tag_in,
     tag_out,
 )
+from .restart_issue import RESTART_POLL_SECONDS, sync_restart_issue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ class _BridgeManager:
         self._binding_subs: list[Callable[[], None]] = []
         self._event_unsubs: list[Callable[[], None]] = []
         self._catalog_task: asyncio.Task[None] | None = None
+        self._status_unsub: Callable[[], None] | None = None
+        self._restart_poll_unsub: Callable[[], None] | None = None
 
     async def async_start(self) -> None:
         self._binding_unsub = await _maybe_await(
@@ -85,6 +90,20 @@ class _BridgeManager:
                 self._async_schedule_catalog_publish,
             )
         )
+        self._status_unsub = await _maybe_await(
+            mqtt.async_subscribe(
+                self.hass,
+                status_topic(self.instance_id),
+                self._async_app_status_message,
+                qos=QOS,
+            )
+        )
+        self._restart_poll_unsub = async_track_time_interval(
+            self.hass,
+            self._async_poll_restart_issue,
+            timedelta(seconds=RESTART_POLL_SECONDS),
+        )
+        sync_restart_issue(self.hass)
         if self.hass.is_running:
             await self._async_publish_entity_catalog()
 
@@ -92,6 +111,12 @@ class _BridgeManager:
         if self._catalog_task is not None and not self._catalog_task.done():
             self._catalog_task.cancel()
             self._catalog_task = None
+        if self._restart_poll_unsub is not None:
+            self._restart_poll_unsub()
+            self._restart_poll_unsub = None
+        if self._status_unsub is not None:
+            self._status_unsub()
+            self._status_unsub = None
         while self._event_unsubs:
             self._event_unsubs.pop()()
         if self._binding_unsub is not None:
@@ -100,7 +125,14 @@ class _BridgeManager:
         self._clear_binding_subscriptions()
 
     async def _async_homeassistant_started(self, _event: Event) -> None:
+        sync_restart_issue(self.hass)
         await self._async_publish_entity_catalog()
+
+    async def _async_app_status_message(self, _msg: Any) -> None:
+        sync_restart_issue(self.hass)
+
+    async def _async_poll_restart_issue(self, _now: Any) -> None:
+        sync_restart_issue(self.hass)
 
     @callback
     def _async_schedule_catalog_publish(self, _event: Event) -> None:

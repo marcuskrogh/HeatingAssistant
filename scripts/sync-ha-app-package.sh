@@ -18,6 +18,8 @@ THIN_FILES=(
   config_flow.py
   version_sync.py
   update.py
+  repairs.py
+  restart_issue.py
   strings.json
 )
 
@@ -155,6 +157,8 @@ for name in (
     "version_sync.py",
     "update.py",
     "strings.json",
+    "repairs.py",
+    "restart_issue.py",
 ):
     shutil.copy2(
         root / "custom_components" / "heating_assistant" / name,
