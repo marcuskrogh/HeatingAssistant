@@ -96,9 +96,9 @@
 - Task: SWD-352
 - Sub-tasks: SWD-353, SWD-354, SWD-355
 - Branch: `cursor/swd-352-update-path-51f5`
-- PR: (draft; filled on open)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/618
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-352` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-352` — Focused review then fix-forward on the same PR
