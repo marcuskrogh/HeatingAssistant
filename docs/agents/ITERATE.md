@@ -41,9 +41,11 @@
 2. Tests, CalVer, App sync (SWD-358)
 
 ## Tracker
-- Task: SWD-356
-- Relates: SWD-352
+- Task: [SWD-356](https://marcusknielsen.atlassian.net/browse/SWD-356)
+- Relates: [SWD-352](https://marcusknielsen.atlassian.net/browse/SWD-352)
 - Sub-tasks: SWD-357, SWD-358
+- Branch: `cursor/swd-356-restart-repair-51f5`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/619
 
 ## Next
 `/review-fix SWD-356` — Review and auto-fix (single pass)
