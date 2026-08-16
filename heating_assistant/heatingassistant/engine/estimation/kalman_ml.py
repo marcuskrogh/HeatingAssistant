@@ -46,6 +46,7 @@ from .constants import (
 from .history_std import convert_history_std
 from .identifiability import (
     _adaptive_alpha_prior_weight,
+    _adaptive_mass_prior_weight,
     _check_identifiable_connections,
     _check_identifiable_open_ua,
     _check_identifiable_sources,
@@ -488,6 +489,9 @@ class KalmanMLEstimator:
         self._alpha_prior_weight = _adaptive_alpha_prior_weight(
             history, self._n_u, self._min_history_steps,
         )
+        self._mass_prior_weight = _adaptive_mass_prior_weight(
+            history, self._n_u, self._min_history_steps,
+        )
 
         current = {
             r.name: {
@@ -747,7 +751,7 @@ class KalmanMLEstimator:
         (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(best_theta)
         log_mass = np.array([
-            float(np.clip(log_mass[i], *_log_mass_bounds(float(self._log_mass_prior[i]))))
+            float(np.clip(log_mass[i], bounds[i][0], bounds[i][1]))
             for i in range(self._n)
         ], dtype=float)
         log_r = np.clip(log_r, _LOG_R_LO, _LOG_R_HI)

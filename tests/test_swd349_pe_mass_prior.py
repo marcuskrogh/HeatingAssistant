@@ -11,7 +11,11 @@ from heatingassistant.engine.estimation.constants import (
     _LOG_MASS_HI,
     _MASS_BOUND_FACTOR,
     _MASS_PRIOR_WEIGHT,
+    _MASS_PRIOR_WEIGHT_EXCITED,
     _log_mass_bounds,
+)
+from heatingassistant.engine.estimation.identifiability import (
+    _adaptive_mass_prior_weight,
 )
 from heatingassistant.engine.estimation.regularization import (
     _compute_regularization_theta,
@@ -43,7 +47,7 @@ def _living_room(**kwargs) -> Room:
 def test_living_room_log_mass_hi_is_five_times_prior_not_global_cap():
     lo, hi = _log_mass_bounds(math.log(LIVING_ROOM_C0))
     assert math.exp(hi) == pytest.approx(LIVING_ROOM_C0 * _MASS_BOUND_FACTOR)
-    assert math.exp(lo) == pytest.approx(LIVING_ROOM_C0 / _MASS_BOUND_FACTOR)
+    assert lo == pytest.approx(math.log(1e4))
     assert hi < _LOG_MASS_HI
     assert math.exp(hi) < 5e8
 
@@ -54,7 +58,26 @@ def test_log_mass_bounds_clip_tiny_prior_to_global_floor():
     assert hi > lo
 
 
-def test_mass_prior_weight_scales_log_c_penalty():
+def test_mass_prior_weight_is_heavier_when_heater_is_unexcited():
+    rooms = [_living_room()]
+    sources = [ElectricHeater("living_room_heater", "living_room", max_power=2000.0)]
+    constant = generate_history(
+        rooms, sources, dt=900.0, n_steps=48, heating_fraction=0.5,
+    )
+    assert _adaptive_mass_prior_weight(constant, 1, min_history_steps=10) == (
+        _MASS_PRIOR_WEIGHT
+    )
+    excited = []
+    t0 = 1_700_000_000.0
+    for k in range(48):
+        u = 0.8 if (k // 4) % 2 == 0 else 0.0
+        rec = dict(constant[k])
+        rec["u"] = [u]
+        rec["timestamp"] = t0 + 900.0 * k
+        excited.append(rec)
+    assert _adaptive_mass_prior_weight(excited, 1, min_history_steps=10) == (
+        _MASS_PRIOR_WEIGHT_EXCITED
+    )
     rooms = [_living_room()]
     sources = [ElectricHeater("living_room_heater", "living_room", max_power=2000.0)]
     est = KalmanMLEstimator(rooms, sources, dt=900.0)
@@ -97,7 +120,7 @@ def test_weak_window_does_not_return_global_mass_cap():
     assert result["success"] is True
     mass = result["estimated_params"]["living_room"]["thermal_mass"]
     lo, hi = _log_mass_bounds(math.log(LIVING_ROOM_C0))
-    assert math.exp(lo) <= mass <= math.exp(hi) + 1.0
+    assert mass <= math.exp(hi) + 1.0
     assert mass < 5e8 * 0.5
 
 

@@ -10,6 +10,8 @@ from .constants import (
     MIN_HISTORY_STEPS,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
+    _MASS_PRIOR_WEIGHT,
+    _MASS_PRIOR_WEIGHT_EXCITED,
     _MIN_HEATER_USAGE_STD,
     _MIN_SOLAR_STD,
     _MIN_TEMP_DIFF_STD,
@@ -165,3 +167,15 @@ def _adaptive_alpha_prior_weight(
     if score >= _MIN_HEATER_USAGE_STD:
         return _ALPHA_PRIOR_WEIGHT_EXCITED
     return _ALPHA_PRIOR_WEIGHT
+
+
+def _adaptive_mass_prior_weight(
+    history: List[Dict[str, Any]],
+    n_u: int,
+    min_history_steps: int = MIN_HISTORY_STEPS,
+) -> float:
+    """Heavier log-C prior when heater duty is unexcited (C/α ridge)."""
+    score = _heater_excitation_score(history, n_u, min_history_steps)
+    if score >= _MIN_HEATER_USAGE_STD:
+        return _MASS_PRIOR_WEIGHT_EXCITED
+    return _MASS_PRIOR_WEIGHT

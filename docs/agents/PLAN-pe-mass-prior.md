@@ -6,21 +6,24 @@
   category coverage (SWD-335 / SWD-343 / SWD-344). The global box is ~55×
   the large-room size preset (9 MJ/K), and the default log-\(C\) MAP
   (\(\lambda=0.01\)) cannot compete with summed simulation SSE.
-- Box each room’s \(C\) around the **initially selected** thermal mass
-  (config / size preset) and add a MAP weight on \(\log C\) toward that
-  prior, in the same family as the heater-scale prior that already fights
-  the “C huge / R huge” ridge.
+- Box each room’s \(C\) with a factor-5 **upper** cap around the
+  **initially selected** thermal mass (config / size preset) and add a
+  MAP weight on \(\log C\) toward that prior, in the same family as the
+  heater-scale prior that already fights the “C huge / R huge” ridge.
 
 ## Scope / Decisions / Constraints
 **In**
-- Production `KalmanMLEstimator.estimate()` log-mass bounds: per room,
-  \(C \in [C_0 / 5,\; 5 C_0]\) intersected with the global
-  \([10\,\mathrm{kJ/K},\; 500\,\mathrm{MJ/K}]\) safety box. \(C_0\) is the
-  configured room `thermal_mass` (size preset or override) already used as
+- Boxes each room’s \(C\) around the **initially selected** thermal mass
+  (config / size preset) with a **factor-5 upper cap** (\(C \le 5 C_0\)),
+  intersected with the global
+  \([10\,\mathrm{kJ/K},\; 500\,\mathrm{MJ/K}]\) safety box. The floor stays
+  the global 10 kJ/K (a symmetric \(C_0/5\) floor pins the C/α ridge).
+  \(C_0\) is the configured room `thermal_mass` already used as
   `_log_mass_prior`.
-- MAP term on \(\log C\): extra weight `_MASS_PRIOR_WEIGHT` (same structure
-  as `_ALPHA_PRIOR_WEIGHT`) so a weakly identified window stays near the
-  selected size instead of walking the ridge to the cap.
+- MAP term on \(\log C\): extra weight `_MASS_PRIOR_WEIGHT` (16 when
+  heater duty is unexcited; `_MASS_PRIOR_WEIGHT_EXCITED` = 4 when
+  duty varies — same split as α) so a weakly identified window stays
+  near the selected size instead of walking the ridge to the cap.
 - Physics-informed warm start clips \(C\) into that same per-room box.
 - Tests: helper bounds; degenerate / weakly excited window does not return
   the global 500 MJ/K cap; existing excited-data “moves off a wrong prior”
@@ -37,14 +40,16 @@
 **Decisions**
 - **Yes, regularise toward the initially selected room size.** That prior
   already exists; it is too weak. Do not replace it with a new mean.
-- **Yes, tighten PE limits for \(C\).** Relative factor 5 covers two size
-  presets either way (living-room 9 MJ/K → 1.8–45 MJ/K) and blocks the
-  55× run to 500 MJ/K. Global box remains the last-resort clip.
+- **Yes, tighten PE limits for \(C\).** Relative **upper** factor 5
+  covers two size presets up (living-room 9 MJ/K → 45 MJ/K) and blocks
+  the 55× run to 500 MJ/K. Do not raise the floor: degenerate windows
+  already walk C down, and a \(C_0/5\) floor pins heater scale. Global
+  box remains the last-resort clip.
 - Keep default \(\lambda=0.01\). Do not raise `_T_WALL_MIN_LAM`-style floor
   on \(C\) (that re-pins identification on excited windows). Extra MAP
   weight + relative box is the pair.
-- Factor 5 and weight 16 are the production numbers (weight between
-  excited-\(\alpha\) 4 and unexcited-\(\alpha\) 25).
+- Factor 5 relative box. MAP weight 16 on unexcited windows, 4 when
+  the heater is excited (keep identification responsive).
 
 **Constraints**
 - Open-loop simulation MSE stays the objective. 2R2C unchanged.
@@ -84,7 +89,7 @@
 1. For a living-room prior \(C_0=9\times10^6\,\mathrm{J/K}\), PE log-mass
    upper bound is \(5 C_0\) (45 MJ/K), not 500 MJ/K.
 2. On a weakly excited / degenerate window, estimated \(C\) does not return
-   the global 500 MJ/K cap and stays inside \([C_0/5,\; 5 C_0]\).
+   the global 500 MJ/K cap and stays \(\le 5 C_0\).
 3. On an excited window with a wrong prior, estimated \(C\) still moves a
    meaningful fraction off the prior (existing
    `test_default_prior_is_responsive_to_excited_data`).
@@ -106,9 +111,9 @@
 - Task: SWD-349
 - Sub-tasks: SWD-350, SWD-351
 - Branch: `cursor/swd-349-pe-mass-prior-6368`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/617
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-349` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-349` — PR https://github.com/marcuskrogh/HeatingAssistant/pull/617 In Review
