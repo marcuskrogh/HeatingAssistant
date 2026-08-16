@@ -101,4 +101,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/ship SWD-352` — review-fix CLEAN on PR #618
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/618
