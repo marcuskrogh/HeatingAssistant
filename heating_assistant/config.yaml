@@ -15,13 +15,13 @@ ingress: true
 ingress_port: 8100
 panel_icon: mdi:radiator
 panel_title: HeatingAssistant
-# hassio_api injects SUPERVISOR_TOKEN so the App can call /services/mqtt.
+# hassio_api injects SUPERVISOR_TOKEN so the App can call Supervisor APIs
+# (MQTT service discovery and Core restart after Settings Restart required).
 # mqtt:need provisions Mosquitto credentials for this App. Without both,
 # discovery is skipped and Mosquitto returns CONNACK rc=5 (not authorised).
 hassio_api: true
 hassio_role: default
-# homeassistant_api lets the App request Core restart when Settings shows
-# Restart required after a thin-integration sync.
+# homeassistant_api is for HA REST from the App, not the Supervisor restart path.
 homeassistant_api: true
 services:
   - mqtt:need

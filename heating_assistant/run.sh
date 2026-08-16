@@ -67,26 +67,18 @@ PY
 }
 
 previous_integration_version() {
-  if [ -f "${INTEGRATION_STAMP}" ]; then
-    tr -d '[:space:]' < "${INTEGRATION_STAMP}"
-    return 0
-  fi
-  if [ -f "${INTEGRATION_DST}/manifest.json" ]; then
-    python3 - "${INTEGRATION_DST}/manifest.json" <<'PY'
-import json
+  python3 - "${INTEGRATION_STAMP}" "${INTEGRATION_DST}/manifest.json" "$(app_version)" <<'PY'
+from heatingassistant.app.core_restart import previous_version_for_stamp
 import sys
 
-try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, json.JSONDecodeError):
-    print("previous")
-else:
-    version = data.get("version")
-    print(version if isinstance(version, str) and version.strip() else "previous")
+print(
+    previous_version_for_stamp(
+        integration_stamp_path=sys.argv[1],
+        dest_manifest=sys.argv[2],
+        to_version=sys.argv[3],
+    )
+)
 PY
-    return 0
-  fi
-  printf '%s\n' "previous"
 }
 
 integration_up_to_date() {
@@ -137,6 +129,18 @@ install_thin_integration() {
     return 0
   fi
 
+  if integration_up_to_date; then
+    echo "HeatingAssistant: integration files already match at ${INTEGRATION_DST}; recording App version stamp."
+    printf '%s\n' "$(app_version)" > "${INTEGRATION_STAMP}" || \
+      echo "HeatingAssistant: warning: could not write ${INTEGRATION_STAMP}" >&2
+    rm -f "${DATA_DIR}/integration_needs_core_restart"
+    return 0
+  fi
+
+  # Capture before dest is replaced so from_version is not the new manifest.
+  from_ver="$(previous_integration_version)"
+  to_ver="$(app_version)"
+
   mkdir -p "${HA_CONFIG}/custom_components" || {
     echo "HeatingAssistant: failed to create ${HA_CONFIG}/custom_components" >&2
     return 1
@@ -180,8 +184,6 @@ install_thin_integration() {
 
   echo "HeatingAssistant: integration installed/updated at ${INTEGRATION_DST}"
   echo "HeatingAssistant: Settings will show Restart required until Home Assistant Core restarts and loads the synced integration."
-  from_ver="$(previous_integration_version)"
-  to_ver="$(app_version)"
   printf '%s\n' "${to_ver}" > "${INTEGRATION_STAMP}" || \
     echo "HeatingAssistant: warning: could not write ${INTEGRATION_STAMP}" >&2
   if write_core_restart_stamp "${from_ver}" "${to_ver}"; then

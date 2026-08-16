@@ -525,6 +525,12 @@ class HeatingRuntime:
         discovery = core_restart.discovery_topic()
         if stamp is None:
             await self.bus.publish(discovery, "", qos=DEFAULT_QOS, retain=True)
+            await self.bus.publish(
+                core_restart.state_topic(self.instance_id),
+                "",
+                qos=DEFAULT_QOS,
+                retain=True,
+            )
             return
         await self.bus.publish(
             discovery,
@@ -565,6 +571,10 @@ class HeatingRuntime:
         _logger.info("Settings requested Home Assistant Core restart after thin-bridge sync")
         if not core_restart.request_core_restart():
             _logger.warning("Core restart request failed; leave Restart required on Settings")
+            return
+        # Core restart does not restart this App. Clear the Settings card now.
+        core_restart.clear_stamp(self.data_dir)
+        await self.publish_core_restart_required()
 
     async def publish_actuator_outputs(self) -> None:
         """Publish the latest App -> HA actuator tag values.

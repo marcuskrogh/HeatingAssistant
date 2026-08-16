@@ -51,6 +51,47 @@ def read_stamp(data_dir: str | Path) -> dict[str, str] | None:
     return {"from_version": from_version.strip(), "to_version": to_version.strip()}
 
 
+def _manifest_version(path: str | Path) -> str | None:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    version = data.get("version")
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+    return None
+
+
+def previous_version_for_stamp(
+    *,
+    integration_stamp_path: str | Path,
+    dest_manifest: str | Path,
+    to_version: str,
+) -> str:
+    """Installed version to record before dest is replaced.
+
+    Prefer the dest manifest (files Core actually has). Fall back to the App
+    version stamp, then ``previous``. Collapse equal from/to so the MQTT Update
+    entity stays ON (HA hides it when installed_version == latest_version).
+    """
+
+    dest_version = _manifest_version(dest_manifest)
+    stamp_version: str | None = None
+    try:
+        text = Path(integration_stamp_path).read_text(encoding="utf-8").strip()
+    except OSError:
+        text = ""
+    if text:
+        stamp_version = text
+    from_version = dest_version or stamp_version or "previous"
+    latest = (to_version or "").strip() or "unknown"
+    if from_version == latest:
+        return "previous"
+    return from_version
+
+
 def write_stamp(
     data_dir: str | Path, *, from_version: str, to_version: str
 ) -> Path:
@@ -86,7 +127,7 @@ def discovery_payload(instance_id: str) -> dict[str, Any]:
     return {
         "name": "Restart required",
         "unique_id": "heatingassistant_core_restart",
-        "object_id": "heatingassistant_restart_required",
+        "object_id": DISCOVERY_OBJECT_ID,
         "title": "HeatingAssistant",
         "state_topic": state_topic(instance_id),
         "command_topic": command_topic(instance_id),
