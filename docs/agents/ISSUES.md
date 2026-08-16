@@ -4,6 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-352 | Task | [Tweak] App update changelog, restart-required Settings card | Done | — | docs/agents/PLAN-app-update-path.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/618 |
+| SWD-353 | Sub-task | App CHANGELOG.md for Supervisor update dialog | Done | SWD-352 | docs/agents/PLAN-app-update-path.md | — |
+| SWD-354 | Sub-task | Restart-required Settings update entity | Done | SWD-352 | docs/agents/PLAN-app-update-path.md | — |
+| SWD-355 | Sub-task | Tests, CalVer, App sync | Done | SWD-352 | docs/agents/PLAN-app-update-path.md | — |
 | SWD-349 | Task | [Tweak] PE thermal-mass bounds and prior toward selected room size | Done | — | docs/agents/PLAN-pe-mass-prior.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/617 |
 | SWD-350 | Sub-task | Relative C bounds + MAP toward selected room size | Done | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
 | SWD-351 | Sub-task | Tests, CalVer, App sync | Done | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
@@ -101,6 +105,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-16 — shipped SWD-352 via PR #618: App changelog on the update dialog + Restart required on Settings (no persistent notification); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.7`. Next Done.
+- 2026-08-16 — `/review-fix` SWD-352 CLEAN (focused): 1 blocker / 6 should-fix addressed (stamp capture before dest replace; clear Restart required after Core restart). Deferred notes: native `update.py` stays unregistered; dual-tree CI. Fast suite 871 passed, 88 skipped. Next `/ship SWD-352`.
+- 2026-08-16 — `/implement` SWD-352 In Review: App CHANGELOG.md + MQTT Restart required on Settings; no persistent notification / auto Core restart; PR https://github.com/marcuskrogh/HeatingAssistant/pull/618; CalVer 2026.08.7. Next `/review-fix SWD-352`.
+- 2026-08-16 — `/define` SWD-352: App changelog on Supervisor update dialog + MQTT Restart required on Settings (no persistent notification, no auto Core restart); download % out (local Docker build); PLAN `docs/agents/PLAN-app-update-path.md`; Sub-tasks SWD-353–355; tweak/delta-fast. Next `/implement SWD-352`.
 - 2026-08-16 — shipped SWD-349 via PR #617: PE \(C\) factor-5 upper box around selected room size + adaptive MAP toward that prior; review-fix CLEAN (focused; `gh` review API 403, posted comment); changelog skipped (none). Next Done.
 - 2026-08-16 — `/review-fix` SWD-349 CLEAN (focused): 0 blockers / 0 should-fix / 5 non-actionable notes. Next `/ship SWD-349`.
 - 2026-08-16 — `/implement` SWD-349 In Review: PE \(C\) factor-5 upper box around selected room size + MAP toward that prior; PR https://github.com/marcuskrogh/HeatingAssistant/pull/617; CalVer 2026.08.6. Next `/review-fix SWD-349`.

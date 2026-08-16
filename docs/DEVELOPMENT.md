@@ -50,7 +50,9 @@ Keep the lock in sync, then run the sync script:
 1. `heating_assistant/config.yaml` → `version`
 2. `heating_assistant/Dockerfile` → `BUILD_VERSION`
 3. Root `pyproject.toml` → `project.version`
-4. `scripts/sync-ha-app-package.sh` (aligns integration / `__version__` strings)
+4. `heating_assistant/CHANGELOG.md` → `# YYYY.MM.PATCH` heading (Supervisor
+   update dialog; ship appends here)
+5. `scripts/sync-ha-app-package.sh` (aligns integration / `__version__` strings)
 
 ## Local development
 

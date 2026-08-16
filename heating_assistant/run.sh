@@ -48,42 +48,37 @@ app_version() {
   fi
 }
 
-notify_core_restart_needed() {
-  if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
-    return 1
-  fi
-  curl -fsS -X POST \
-    -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{"notification_id":"heatingassistant_core_restart","title":"HeatingAssistant needs Core restart","message":"Bundled integration updated. Restart Home Assistant Core so HeatingAssistant can load the synced integration."}' \
-    http://supervisor/core/api/services/persistent_notification/create
+write_core_restart_stamp() {
+  from_ver="$1"
+  to_ver="$2"
+  python3 - "$DATA_DIR" "$from_ver" "$to_ver" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data_dir, from_version, to_version = sys.argv[1], sys.argv[2], sys.argv[3]
+path = Path(data_dir) / "integration_needs_core_restart"
+path.write_text(
+    json.dumps({"from_version": from_version, "to_version": to_version}, sort_keys=True)
+    + "\n",
+    encoding="utf-8",
+)
+PY
 }
 
-request_core_restart_after_sync() {
-  auto="${HEATINGASSISTANT_AUTO_CORE_RESTART:-1}"
-  case "${auto}" in
-    0|false|no|NO|False)
-      echo "HeatingAssistant: auto Core restart disabled (HEATINGASSISTANT_AUTO_CORE_RESTART=${auto}); restart Core manually so the synced integration loads."
-      notify_core_restart_needed || true
-      return 0
-      ;;
-  esac
-  if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
-    echo "HeatingAssistant: SUPERVISOR_TOKEN missing; cannot auto-restart Core. Restart Home Assistant Core manually so the synced integration loads." >&2
-    return 0
-  fi
-  echo "HeatingAssistant: requesting Home Assistant Core restart so the synced integration loads..."
-  if curl -fsS -X POST \
-    -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-    -H "Content-Type: application/json" \
-    http://supervisor/core/restart; then
-    echo "HeatingAssistant: Core restart requested."
-  else
-    echo "HeatingAssistant: Core restart request failed; creating HA notification." >&2
-    notify_core_restart_needed || \
-      echo "HeatingAssistant: could not create persistent notification either; restart Core manually." >&2
-  fi
-  return 0
+previous_integration_version() {
+  python3 - "${INTEGRATION_STAMP}" "${INTEGRATION_DST}/manifest.json" "$(app_version)" <<'PY'
+from heatingassistant.app.core_restart import previous_version_for_stamp
+import sys
+
+print(
+    previous_version_for_stamp(
+        integration_stamp_path=sys.argv[1],
+        dest_manifest=sys.argv[2],
+        to_version=sys.argv[3],
+    )
+)
+PY
 }
 
 integration_up_to_date() {
@@ -134,6 +129,18 @@ install_thin_integration() {
     return 0
   fi
 
+  if integration_up_to_date; then
+    echo "HeatingAssistant: integration files already match at ${INTEGRATION_DST}; recording App version stamp."
+    printf '%s\n' "$(app_version)" > "${INTEGRATION_STAMP}" || \
+      echo "HeatingAssistant: warning: could not write ${INTEGRATION_STAMP}" >&2
+    rm -f "${DATA_DIR}/integration_needs_core_restart"
+    return 0
+  fi
+
+  # Capture before dest is replaced so from_version is not the new manifest.
+  from_ver="$(previous_integration_version)"
+  to_ver="$(app_version)"
+
   mkdir -p "${HA_CONFIG}/custom_components" || {
     echo "HeatingAssistant: failed to create ${HA_CONFIG}/custom_components" >&2
     return 1
@@ -176,12 +183,14 @@ install_thin_integration() {
   rm -rf "${bak}" "${INTEGRATION_DST}/__pycache__"
 
   echo "HeatingAssistant: integration installed/updated at ${INTEGRATION_DST}"
-  echo "HeatingAssistant: Restart Home Assistant Core, then add HeatingAssistant under Devices & services when the thin integration is ready."
-  printf '%s\n' "$(app_version)" > "${INTEGRATION_STAMP}" || \
+  echo "HeatingAssistant: Settings will show Restart required until Home Assistant Core restarts and loads the synced integration."
+  printf '%s\n' "${to_ver}" > "${INTEGRATION_STAMP}" || \
     echo "HeatingAssistant: warning: could not write ${INTEGRATION_STAMP}" >&2
-  date -u +"%Y-%m-%dT%H:%M:%SZ" > "${DATA_DIR}/integration_needs_core_restart" || \
+  if write_core_restart_stamp "${from_ver}" "${to_ver}"; then
+    echo "HeatingAssistant: wrote Core restart stamp ${from_ver} -> ${to_ver}."
+  else
     echo "HeatingAssistant: warning: could not write integration_needs_core_restart" >&2
-  request_core_restart_after_sync || true
+  fi
   return 0
 }
 

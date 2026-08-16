@@ -28,6 +28,7 @@ from heatingassistant.app.actuation import (
 )
 from heatingassistant.app import sysid_services
 from heatingassistant.app.plot_history import PlotHistoryStore
+from heatingassistant.app import core_restart
 from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
@@ -241,6 +242,12 @@ class HeatingRuntime:
             self.bus.subscribe(
                 entities_topic(self.instance_id),
                 self._handle_entities_catalog_message,
+            )
+        )
+        self._subscriptions.append(
+            self.bus.subscribe(
+                core_restart.command_topic(self.instance_id),
+                self._handle_core_restart_command,
             )
         )
         # Replay retained catalog for in-memory bus / late subscribers.
@@ -464,6 +471,12 @@ class HeatingRuntime:
             await self.publish_status()
         except Exception:
             _logger.exception("Failed to publish MQTT status; will retry on connect")
+        try:
+            await self.publish_core_restart_required()
+        except Exception:
+            _logger.exception(
+                "Failed to publish restart-required MQTT update; will retry on connect"
+            )
 
     async def stop(self) -> None:
         """Unsubscribe from MQTT topics and stop background workers."""
@@ -504,6 +517,64 @@ class HeatingRuntime:
             qos=DEFAULT_QOS,
             retain=True,
         )
+
+    async def publish_core_restart_required(self) -> None:
+        """Publish or clear the Settings Restart required MQTT Update entity."""
+
+        stamp = core_restart.read_stamp(self.data_dir)
+        discovery = core_restart.discovery_topic()
+        if stamp is None:
+            await self.bus.publish(discovery, "", qos=DEFAULT_QOS, retain=True)
+            await self.bus.publish(
+                core_restart.state_topic(self.instance_id),
+                "",
+                qos=DEFAULT_QOS,
+                retain=True,
+            )
+            return
+        await self.bus.publish(
+            discovery,
+            json.dumps(core_restart.discovery_payload(self.instance_id), sort_keys=True),
+            qos=DEFAULT_QOS,
+            retain=True,
+        )
+        await self.bus.publish(
+            core_restart.state_topic(self.instance_id),
+            json.dumps(
+                core_restart.state_payload(
+                    from_version=stamp["from_version"],
+                    to_version=stamp["to_version"],
+                ),
+                sort_keys=True,
+            ),
+            qos=DEFAULT_QOS,
+            retain=True,
+        )
+
+    async def _handle_core_restart_command(
+        self,
+        topic: str,
+        payload: str | bytes,
+        qos: int,
+        retain: bool,
+    ) -> None:
+        """Restart Home Assistant Core when Settings Install is pressed."""
+
+        del qos, retain
+        if topic != core_restart.command_topic(self.instance_id):
+            return
+        text = payload.decode("utf-8") if isinstance(payload, bytes) else str(payload)
+        if text.strip() != core_restart.PAYLOAD_INSTALL:
+            return
+        if core_restart.read_stamp(self.data_dir) is None:
+            return
+        _logger.info("Settings requested Home Assistant Core restart after thin-bridge sync")
+        if not core_restart.request_core_restart():
+            _logger.warning("Core restart request failed; leave Restart required on Settings")
+            return
+        # Core restart does not restart this App. Clear the Settings card now.
+        core_restart.clear_stamp(self.data_dir)
+        await self.publish_core_restart_required()
 
     async def publish_actuator_outputs(self) -> None:
         """Publish the latest App -> HA actuator tag values.

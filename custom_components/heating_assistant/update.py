@@ -1,4 +1,9 @@
-"""Update entity showing when a restart is required after bundle sync."""
+"""Update entity showing when a restart is required after bundle sync.
+
+Settings Restart required is published by the App over MQTT so it appears
+before Core loads this module. This platform is kept for loaded-vs-disk
+diagnostics and is not forwarded from async_setup_entry.
+"""
 
 from __future__ import annotations
 
