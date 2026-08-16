@@ -1,5 +1,5 @@
 name: "HeatingAssistant"
-version: "2026.08.6"
+version: "2026.08.7"
 slug: heatingassistant
 description: "Heating control App for Home Assistant OS"
 url: "https://github.com/marcuskrogh/HeatingAssistant"
@@ -20,8 +20,8 @@ panel_title: HeatingAssistant
 # discovery is skipped and Mosquitto returns CONNACK rc=5 (not authorised).
 hassio_api: true
 hassio_role: default
-# homeassistant_api lets run.sh request Core restart / persistent notifications
-# after syncing the thin integration into /homeassistant.
+# homeassistant_api lets the App request Core restart when Settings shows
+# Restart required after a thin-integration sync.
 homeassistant_api: true
 services:
   - mqtt:need

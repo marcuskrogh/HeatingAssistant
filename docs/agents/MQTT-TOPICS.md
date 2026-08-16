@@ -15,7 +15,10 @@ All tag payloads use QoS 1 and JSON:
 |---|---:|---|---|---|
 | `heatingassistant/{instance_id}/tag/{tag}/in` | No | HA thin bridge | App | HA entity state telemetry for a bound tag. |
 | `heatingassistant/{instance_id}/tag/{tag}/out` | No | App | HA thin bridge | App command/value for a bound HA entity. |
-| `heatingassistant/{instance_id}/cmd/{name}` | No | App or operator | App | Instance command channel such as reload. |
+| `heatingassistant/{instance_id}/cmd/{name}` | No | App or operator | App | Instance command channel such as reload or Core restart. |
+| `heatingassistant/{instance_id}/cmd/core_restart` | No | HA MQTT Update | App | Settings **Restart required** Install → Supervisor Core restart. |
+| `heatingassistant/{instance_id}/restart/state` | Yes | App | HA MQTT Update | Installed vs disk versions while a Core restart is pending. |
+| `homeassistant/update/heatingassistant_restart/config` | Yes | App | HA MQTT discovery | Restart required card on the Settings updates list. |
 | `heatingassistant/{instance_id}/status` | Yes | App | HA bridge/operator | Runtime health and current room summary. |
 | `heatingassistant/{instance_id}/bindings` | Yes | App | HA thin bridge | Binding map for HA entity/tag bridge setup. |
 | `heatingassistant/{instance_id}/entities` | Yes | HA thin bridge | App | Searchable HA entity catalog for Ingress pickers. |
