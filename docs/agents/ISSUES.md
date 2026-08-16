@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-349 | Task | [Tweak] PE thermal-mass bounds and prior toward selected room size | To Do | — | docs/agents/PLAN-pe-mass-prior.md | `/implement SWD-349` |
+| SWD-350 | Sub-task | Relative C bounds + MAP toward selected room size | To Do | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
+| SWD-351 | Sub-task | Tests, CalVer, App sync | To Do | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
 | SWD-344 | Task | [Bug] PE simulation missing heater/disturbances, poor wall init, category copy | Done | — | docs/agents/PLAN-pe-sim-aux-tw0.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/616 |
 | SWD-345 | Sub-task | Plot PE heater/disturbances from ID history | Done | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
 | SWD-346 | Sub-task | Compute and apply optimal Tw0 on Simulate | Done | SWD-344 | docs/agents/PLAN-pe-sim-aux-tw0.md | — |
@@ -98,6 +101,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-16 — `/define` SWD-349: PE \(C\) relative box ×5 around selected room size + MAP toward that prior; PLAN `docs/agents/PLAN-pe-mass-prior.md`; Sub-tasks SWD-350–351; tweak/delta-fast; Relates SWD-335, SWD-344. Next `/implement SWD-349`.
 - 2026-08-16 — shipped SWD-344 via PR #616: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; review-fix CLEAN (focused); changelog skipped (none). Next Done.
 - 2026-08-15 — `/implement` SWD-344 In Review: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; PR https://github.com/marcuskrogh/HeatingAssistant/pull/616; CalVer 2026.08.5. Next `/review-fix SWD-344`.
 - 2026-08-15 — `/define` SWD-344: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; PLAN `docs/agents/PLAN-pe-sim-aux-tw0.md`; Sub-tasks SWD-345–348; bug/fix-fast; Relates SWD-343. Next `/implement SWD-344`.

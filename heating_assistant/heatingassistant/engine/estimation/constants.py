@@ -36,6 +36,36 @@ _EMPTY_IDX: np.ndarray = np.array([], dtype=int)
 #: Log-space parameter bounds (hard limits).
 _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
 _LOG_MASS_HI = math.log(5e8)    # ~500 MJ/K
+
+#: Multiplicative PE box around the configured thermal mass \(C_0\)
+#: (size preset / initial room size).  A living-room prior of 9 MJ/K
+#: becomes [1.8, 45] MJ/K instead of the global 500 MJ/K cap — enough
+#: to move about two size-preset steps, not 55× along the C/R ridge.
+_MASS_BOUND_FACTOR = 5.0
+
+#: Extra MAP weight on log C toward the configured prior.  Default
+#: \(\lambda=0.01\) leaves \(\log C\) almost unconstrained against summed
+#: open-loop SSE, so the joint optimum rides "C huge / R huge" to the
+#: bound.  Weight 16 sits between excited-α (4) and unexcited-α (25).
+_MASS_PRIOR_WEIGHT = 16.0
+
+
+def _log_mass_bounds(log_c_prior: float) -> tuple[float, float]:
+    """Return the per-room log-C box around the configured prior.
+
+    Linear \(C\) is limited to a factor ``_MASS_BOUND_FACTOR`` of the
+    (clipped) prior, then intersected with
+    ``[_LOG_MASS_LO, _LOG_MASS_HI]``.
+    """
+    center = min(_LOG_MASS_HI, max(_LOG_MASS_LO, float(log_c_prior)))
+    span = math.log(_MASS_BOUND_FACTOR)
+    lo = max(_LOG_MASS_LO, center - span)
+    hi = min(_LOG_MASS_HI, center + span)
+    if lo >= hi:
+        return (_LOG_MASS_LO, _LOG_MASS_HI)
+    return (lo, hi)
+
+
 _LOG_R_LO = math.log(1e-5)      # 0.00001 K/W
 _LOG_R_HI = math.log(10.0)      # 10 K/W
 

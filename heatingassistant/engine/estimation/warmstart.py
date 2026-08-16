@@ -23,6 +23,7 @@ from .constants import (
     _Q_INT_LO,
     _R_AW_HI,
     _R_AW_LO,
+    _log_mass_bounds,
     _T_WALL_HI,
     _T_WALL_LO,
 )
@@ -275,7 +276,9 @@ def _physics_informed_theta(
         C_i, g_i, q_i = float(sol[0]), float(sol[1]), float(sol[2])
         if not (C_i > 0.0 and g_i > 0.0):
             continue  # unphysical — keep the prior for this room
-        log_mass = float(np.clip(math.log(C_i), _LOG_MASS_LO, _LOG_MASS_HI))
+        log_mass = float(np.clip(
+            math.log(C_i), *_log_mass_bounds(float(est._log_mass_prior[i]))
+        ))
         log_r = float(np.clip(math.log(1.0 / g_i), _LOG_R_LO, _LOG_R_HI))
         q_int = float(np.clip(q_i, _Q_INT_LO, _Q_INT_HI))
         theta[i] = log_mass
