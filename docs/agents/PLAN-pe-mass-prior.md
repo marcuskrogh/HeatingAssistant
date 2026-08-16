@@ -116,4 +116,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-349` — PR https://github.com/marcuskrogh/HeatingAssistant/pull/617 In Review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/617

@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-349 | Task | [Tweak] PE thermal-mass bounds and prior toward selected room size | In Review | — | docs/agents/PLAN-pe-mass-prior.md | `/review-fix SWD-349` |
+| SWD-349 | Task | [Tweak] PE thermal-mass bounds and prior toward selected room size | Done | — | docs/agents/PLAN-pe-mass-prior.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/617 |
 | SWD-350 | Sub-task | Relative C bounds + MAP toward selected room size | Done | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
 | SWD-351 | Sub-task | Tests, CalVer, App sync | Done | SWD-349 | docs/agents/PLAN-pe-mass-prior.md | — |
 | SWD-344 | Task | [Bug] PE simulation missing heater/disturbances, poor wall init, category copy | Done | — | docs/agents/PLAN-pe-sim-aux-tw0.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/616 |
@@ -101,6 +101,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-16 — shipped SWD-349 via PR #617: PE \(C\) factor-5 upper box around selected room size + adaptive MAP toward that prior; review-fix CLEAN (focused; `gh` review API 403, posted comment); changelog skipped (none). Next Done.
+- 2026-08-16 — `/review-fix` SWD-349 CLEAN (focused): 0 blockers / 0 should-fix / 5 non-actionable notes. Next `/ship SWD-349`.
 - 2026-08-16 — `/implement` SWD-349 In Review: PE \(C\) factor-5 upper box around selected room size + MAP toward that prior; PR https://github.com/marcuskrogh/HeatingAssistant/pull/617; CalVer 2026.08.6. Next `/review-fix SWD-349`.
 - 2026-08-16 — `/define` SWD-349: PE \(C\) relative box ×5 around selected room size + MAP toward that prior; PLAN `docs/agents/PLAN-pe-mass-prior.md`; Sub-tasks SWD-350–351; tweak/delta-fast; Relates SWD-335, SWD-344. Next `/implement SWD-349`.
 - 2026-08-16 — shipped SWD-344 via PR #616: PE aux charts from ID history, optimal Tw0 on Simulate, shorter category guides; review-fix CLEAN (focused); changelog skipped (none). Next Done.
