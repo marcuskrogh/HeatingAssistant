@@ -1,58 +1,49 @@
-# Iterate: Clickable PE category guides for low-comfort identification data
+# Iterate: Restart required as Settings repair, not an Update card
 
 ## Prior work
-- Task: [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/614
-- Spec context: `docs/agents/PLAN-pe-robust-open-loop.md`
+- Task: [SWD-352](https://marcusknielsen.atlassian.net/browse/SWD-352)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/618
+- Spec context: `docs/agents/PLAN-app-update-path.md`
 
 ## Problem
-- The Parameter Estimation room page shows Envelope / Heater / Solar / Open UA
-  tiles (grey Not set → teal Supplied) but they are not interactive.
-- Nothing explains how to generate data for each category, or how to operate
-  Save Current Window → stored dataset → Use so a tile can turn teal.
-- Users therefore cannot collect covering datasets without guessing.
+- After updating the App to 2026.08.7, Settings still shows HeatingAssistant
+  under **Updates** (`1 update`) with restart-required text.
+- The card stays after a normal Home Assistant Core restart.
+- The user wants the same separate top-of-Settings section other apps use.
 
 ## Clarifications
-- Comfort-first: piggyback on ordinary household behaviour (overnight closed
-  windows, existing heater cycling, a daytime stretch, a short planned airing).
-  Do not instruct large comfort-band violations or long winter openings.
-- Guides are short operational recipes, not PE essays.
-- Heater coverage requires the dataset to include this room's heater command
-  both off (0) and on, for about an hour. Another room's heater does not count.
+- Home Assistant Settings has two dashboard cards: **Repairs**
+  (`ha-config-repairs`) and **Updates** (`ha-config-updates`).
+- HACS (and other integrations) create a fixable `restart_required` repair via
+  `issue_registry.async_create_issue` plus `repairs.py` (`homeassistant.restart`).
+  That is the separate section.
+- SWD-352 published an MQTT Update entity, so the prompt landed in Updates and
+  looked like another HeatingAssistant software update. Retained MQTT discovery
+  plus a stamp that is not cleared on a normal Core restart kept it there.
 
 ## Acceptance criteria
-- Category tiles are clickable and keyboard-accessible. Clicking a tile opens
-  (or closes) a short inline how-to for that category; one guide is open at a
-  time.
-- Each guide states why the category matters, a low-comfort recipe, the
-  duration / identifiability target, and the store path: set the estimation
-  window to that period → Save Current Window → Use the new set.
-- Open UA N/A still explains that no window/door contact is configured and the
-  category is not required for recommended estimation.
-- Save Current Window previews which categories the configured live window
-  would cover, using the existing coverage API.
-- Clicking a tile highlights stored datasets that already cover that category.
-- Each stored-dataset row shows all four categories (Envelope, Heater, Solar, Open UA) as chips: teal if that set covers it, grey if not, dashed N/A. Manual/Experiment stays on the title line.
-- Stored Datasets starts open so the category row is visible without hunting.
-- Focused tests cover the new UI seams; existing coverage tests stay green.
-- CalVer bump + App package sync.
+- App start tombstones `homeassistant/update/heatingassistant_restart/config`
+  (empty retained payload) so leftover Update cards disappear.
+- The thin integration creates a fixable **Restart required** repair when the
+  on-disk `manifest.json` version differs from the loaded `VERSION`.
+- The repair is deleted when versions match (after Core restart).
+- Repair fix flow calls `homeassistant.restart` (HACS path).
+- Native `update.py` stays unregistered (would put a card back in Updates).
+- Tests cover create/delete and the MQTT tombstone. CalVer bump + App sync.
 
 ## Out of scope
-- PE algorithm, category thresholds, or which samples enter the fit.
-- Automated experiments / forced setpoint ramps.
-- Occupancy day-gate / day-q.
-- A separate docs page or long in-app essays.
+- Prebuilt registry images / dynamic download percent.
+- Persistent notifications.
+- Auto Core restart from `run.sh`.
 
 ## Work packages
-1. Clickable tiles, comfort-first inline guides, dataset highlight, open Stored Datasets by default.
-2. Live-window coverage preview on Save Current Window.
-3. Tests, cache-bust, CalVer, App package sync.
+1. Settings repair + tombstone MQTT update (SWD-357)
+2. Tests, CalVer, App sync (SWD-358)
 
 ## Tracker
-- Task: [SWD-343](https://marcusknielsen.atlassian.net/browse/SWD-343)
-- Relates: [SWD-335](https://marcusknielsen.atlassian.net/browse/SWD-335)
-- Branch: `cursor/swd-343-pe-category-guides-2d07`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/615
+- Task: SWD-356
+- Relates: SWD-352
+- Sub-tasks: SWD-357, SWD-358
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/615
+`/review-fix SWD-356` — Review and auto-fix (single pass)

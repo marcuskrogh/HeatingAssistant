@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-356 | Task | [Iterate] Restart required as Settings repair, not an Update card | In Progress | — | docs/agents/ITERATE.md | `/implement SWD-356` |
+| SWD-357 | Sub-task | Settings Restart required repair + tombstone MQTT update | To Do | SWD-356 | docs/agents/ITERATE.md | — |
+| SWD-358 | Sub-task | Tests, CalVer, App sync | To Do | SWD-356 | docs/agents/ITERATE.md | — |
 | SWD-352 | Task | [Tweak] App update changelog, restart-required Settings card | Done | — | docs/agents/PLAN-app-update-path.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/618 |
 | SWD-353 | Sub-task | App CHANGELOG.md for Supervisor update dialog | Done | SWD-352 | docs/agents/PLAN-app-update-path.md | — |
 | SWD-354 | Sub-task | Restart-required Settings update entity | Done | SWD-352 | docs/agents/PLAN-app-update-path.md | — |
@@ -105,6 +108,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-16 — `/iterate` SWD-356 from SWD-352: Restart required as Settings repair (HACS path), not MQTT Update card; Relates SWD-352; Sub-tasks SWD-357–358. Next `/implement SWD-356`.
 - 2026-08-16 — shipped SWD-352 via PR #618: App changelog on the update dialog + Restart required on Settings (no persistent notification); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.7`. Next Done.
 - 2026-08-16 — `/review-fix` SWD-352 CLEAN (focused): 1 blocker / 6 should-fix addressed (stamp capture before dest replace; clear Restart required after Core restart). Deferred notes: native `update.py` stays unregistered; dual-tree CI. Fast suite 871 passed, 88 skipped. Next `/ship SWD-352`.
 - 2026-08-16 — `/implement` SWD-352 In Review: App CHANGELOG.md + MQTT Restart required on Settings; no persistent notification / auto Core restart; PR https://github.com/marcuskrogh/HeatingAssistant/pull/618; CalVer 2026.08.7. Next `/review-fix SWD-352`.
