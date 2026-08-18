@@ -139,6 +139,12 @@ class HeatingRuntime:
         save_config(self.data_dir, self.options)
         self.tag_values: dict[str, Any] = dict(self.state.get("tag_values") or {})
         self.tag_statuses: dict[str, str] = dict(self.state.get("tag_statuses") or {})
+        self.tag_timestamps: dict[str, float] = {}
+        for key, raw in dict(self.state.get("tag_timestamps") or {}).items():
+            try:
+                self.tag_timestamps[str(key)] = float(raw)
+            except (TypeError, ValueError):
+                continue
         self.tag_attributes: dict[str, dict[str, Any]] = {
             str(key): dict(value)
             for key, value in dict(self.state.get("tag_attributes") or {}).items()
@@ -156,6 +162,8 @@ class HeatingRuntime:
         # HA entity catalog published by the thin bridge for Ingress pickers
         # (SWD-271). Not persisted — refreshed over MQTT when the bridge starts.
         self._ha_entity_catalog: list[dict[str, str]] = []
+        self._ha_entity_catalog_ts: float | None = None
+        self._prune_unbound_tag_quality()
         self._subscriptions: list[Unsubscribe] = []
         self._started = False
         self._started_monotonic: float | None = None
@@ -566,6 +574,8 @@ class HeatingRuntime:
         if parsed is None or parsed.instance_id != self.instance_id or parsed.direction != "in":
             return
         tag_payload = MqttTagPayload.decode(payload)
+        if self._is_stale_unavailable_payload(parsed.tag, tag_payload, retain=retain):
+            return
         previous_value = self.tag_values.get(parsed.tag)
         self.update_tag(parsed.tag, tag_payload)
         # Climate heater feedback tags only refresh anchoring inputs. Re-running
@@ -598,6 +608,9 @@ class HeatingRuntime:
             raw = data.get("entities", data) if isinstance(data, dict) else data
             if not isinstance(raw, list):
                 raise ValueError("entities catalog must be a list")
+            catalog_ts = None
+            if isinstance(data, dict) and isinstance(data.get("ts"), (int, float)):
+                catalog_ts = float(data["ts"])
         except (TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
             _logger.warning("Ignoring invalid HA entity catalog payload")
             return
@@ -622,6 +635,8 @@ class HeatingRuntime:
                 entry["unit"] = unit
             catalog.append(entry)
         self._ha_entity_catalog = catalog
+        self._ha_entity_catalog_ts = catalog_ts if catalog_ts is not None else time.time()
+        self._apply_catalog_to_inbound_tags()
         _logger.debug("Loaded HA entity catalog (%d entities)", len(catalog))
 
     def update_tag(self, tag: str, payload: MqttTagPayload) -> None:
@@ -629,6 +644,10 @@ class HeatingRuntime:
 
         self.tag_values[tag] = payload.value
         self.tag_statuses[tag] = payload.status
+        if payload.ts is not None:
+            self.tag_timestamps[tag] = float(payload.ts)
+        else:
+            self.tag_timestamps[tag] = time.time()
         if payload.status == "BAD":
             self.tag_attributes.pop(tag, None)
         elif payload.attributes is not None:
@@ -1595,6 +1614,11 @@ class HeatingRuntime:
                     attrs["friendly_name"] = item["name"]
                 if item.get("unit") and not attrs.get("unit_of_measurement"):
                     attrs["unit_of_measurement"] = item["unit"]
+                current_state = states[entity_id].get("state")
+                if current_state in {None, "", "unknown", "unavailable"}:
+                    catalog_state = item.get("state")
+                    if self._usable_catalog_value(catalog_state) is not None:
+                        states[entity_id]["state"] = str(catalog_state)
                 continue
             attrs = {
                 "friendly_name": item["name"],
@@ -1654,12 +1678,17 @@ class HeatingRuntime:
         update_interval = float(
             self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
         )
+        inbound = self._inbound_tag_names()
         return evaluate_system_health(
             mqtt_connected=self._mqtt_connected(),
             mqtt_last_error=self._mqtt_last_error(),
             mqtt_discovery_error=get_last_discovery_error(),
             api_reachable=True,
-            tag_statuses=self.tag_statuses,
+            tag_statuses={
+                tag: status
+                for tag, status in self.tag_statuses.items()
+                if tag in inbound
+            },
             control_mode=self.control_engine.mode,
             fallback_reason=self.control_engine.fallback_reason,
             bindings_count=len(self.bindings),
@@ -2863,10 +2892,128 @@ class HeatingRuntime:
             return float(value)
         return None
 
+    def _inbound_tag_names(self) -> set[str]:
+        """Return tags that represent live inbound HA telemetry."""
+
+        tags = {binding.tag for binding in self.bindings if binding.direction == "in"}
+        for room in self._rooms():
+            tags.update(self._room_temp_tags(room))
+            tags.update(self._string_list(room.get("window_tags")))
+        for key in (
+            "outdoor_temp_tag",
+            "weather_tag",
+            "solar_radiation_tag",
+            "price_tag",
+        ):
+            value = self.options.get(key)
+            if isinstance(value, str) and value:
+                tags.add(value)
+        return tags
+
+    def _prune_unbound_tag_quality(self) -> None:
+        """Drop quality rows for tags that are no longer wired."""
+
+        keep = self._inbound_tag_names()
+        keep.update(binding.tag for binding in self.bindings)
+        self.tag_statuses = {
+            tag: status for tag, status in self.tag_statuses.items() if tag in keep
+        }
+        self.tag_timestamps = {
+            tag: ts for tag, ts in self.tag_timestamps.items() if tag in keep
+        }
+
+    def _catalog_item(self, entity_id: str) -> dict[str, str] | None:
+        for item in self._ha_entity_catalog:
+            if item.get("entity_id") == entity_id:
+                return item
+        return None
+
+    def _inbound_entity_for_tag(self, tag: str) -> str | None:
+        for binding in self.bindings:
+            if binding.tag == tag and binding.direction == "in":
+                return binding.entity_id
+        return None
+
+    @staticmethod
+    def _usable_catalog_value(raw: Any) -> Any | None:
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        if not text or text.lower() in {"unknown", "unavailable", "none"}:
+            return None
+        lower = text.lower()
+        if lower == "on":
+            return True
+        if lower == "off":
+            return False
+        try:
+            return float(text)
+        except ValueError:
+            return text
+
+    def _is_stale_unavailable_payload(
+        self,
+        tag: str,
+        payload: MqttTagPayload,
+        *,
+        retain: bool,
+    ) -> bool:
+        """Return True for bind-time BAD that the catalog already superseded.
+
+        Live (non-retained) ``BAD`` without a timestamp still applies. Retained
+        null-``ts`` payloads and ``entity_unavailable`` stamps at or before the
+        catalog snapshot are ignored when that catalog row is usable.
+        """
+
+        if payload.status != "BAD":
+            return False
+        if payload.reason not in (None, "entity_unavailable"):
+            return False
+        catalog_ts = self._ha_entity_catalog_ts
+        if catalog_ts is None:
+            return False
+        entity_id = self._inbound_entity_for_tag(tag)
+        if entity_id is None:
+            return False
+        item = self._catalog_item(entity_id)
+        if item is None or self._usable_catalog_value(item.get("state")) is None:
+            return False
+        if payload.ts is None:
+            return bool(retain)
+        return float(payload.ts) <= float(catalog_ts)
+
+    def _apply_catalog_to_inbound_tags(self) -> None:
+        """Adopt usable catalog states when they are newer than stored tag quality."""
+
+        catalog_ts = self._ha_entity_catalog_ts
+        if catalog_ts is None or not self._ha_entity_catalog:
+            return
+        for binding in self.bindings:
+            if binding.direction != "in":
+                continue
+            item = self._catalog_item(binding.entity_id)
+            if item is None:
+                continue
+            value = self._usable_catalog_value(item.get("state"))
+            if value is None:
+                continue
+            tag_ts = self.tag_timestamps.get(binding.tag)
+            if tag_ts is not None and tag_ts > catalog_ts:
+                continue
+            status = self.tag_statuses.get(binding.tag)
+            if status == "GOOD" and tag_ts is not None and tag_ts >= catalog_ts:
+                continue
+            self.update_tag(
+                binding.tag,
+                MqttTagPayload(value=value, status="GOOD", ts=catalog_ts),
+            )
+
     def _save_runtime_state(self) -> None:
         self.state["bindings"] = self.binding_dicts()
         self.state["tag_values"] = dict(self.tag_values)
+        self._prune_unbound_tag_quality()
         self.state["tag_statuses"] = dict(self.tag_statuses)
+        self.state["tag_timestamps"] = dict(self.tag_timestamps)
         self.state["tag_attributes"] = {
             key: dict(value) for key, value in self.tag_attributes.items()
         }
@@ -3167,6 +3314,7 @@ async def publish_tag_in(
     status: str = "GOOD",
     reason: str | None = None,
     ts: float | None = None,
+    retain: bool = False,
 ) -> None:
     """Test helper that publishes a tag/in payload through the runtime bus."""
 
@@ -3174,4 +3322,5 @@ async def publish_tag_in(
         tag_in(runtime.instance_id, tag),
         MqttTagPayload(value=value, status=status, reason=reason, ts=ts).encode(),
         qos=DEFAULT_QOS,
+        retain=retain,
     )

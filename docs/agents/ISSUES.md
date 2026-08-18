@@ -4,6 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-385 | Task | [Bug] System Status BAD tag quality despite fine HA sensor measurements | Done | — | docs/agents/PLAN-tag-quality-stale-bad.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/620 |
+| SWD-386 | Sub-task | Catalog overlay + prune persisted BAD tag quality | Done | SWD-385 | docs/agents/PLAN-tag-quality-stale-bad.md | — |
+| SWD-387 | Sub-task | Republish inbound tags when HA has started | Done | SWD-385 | docs/agents/PLAN-tag-quality-stale-bad.md | — |
+| SWD-388 | Sub-task | Tests, CalVer, App sync | Done | SWD-385 | docs/agents/PLAN-tag-quality-stale-bad.md | — |
 | SWD-356 | Task | [Iterate] Restart required as Settings repair, not an Update card | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/619 |
 | SWD-357 | Sub-task | Settings Restart required repair + tombstone MQTT update | Done | SWD-356 | docs/agents/ITERATE.md | — |
 | SWD-358 | Sub-task | Tests, CalVer, App sync | Done | SWD-356 | docs/agents/ITERATE.md | — |
@@ -108,6 +112,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-18 — shipped SWD-385 via PR #620: System Status clears stale BAD tag quality when HA sensors already measure; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.9`. Next Done.
+- 2026-08-18 — `/review-fix` SWD-385 CLEAN (focused): 0 blockers / 3 should-fix (retain/null-ts; HA-running republish; shared catalog/inbound snapshot timestamp). Focused tests 10 passed. Fast suite 885 passed, 88 skipped. Next `/ship SWD-385`.
+- 2026-08-18 — `/implement` SWD-385 In Review: catalog overlay + ignore stale retained BAD + HA-started republish; PR https://github.com/marcuskrogh/HeatingAssistant/pull/620; CalVer 2026.08.9. Fast suite 881 passed, 88 skipped. Next `/review-fix SWD-385`.
+- 2026-08-18 — `/define` SWD-385: System Status BAD tag quality despite fine HA measurements; catalog overlay + ignore stale retained BAD + HA-started republish; PLAN `docs/agents/PLAN-tag-quality-stale-bad.md`; Sub-tasks SWD-386–388; bug/fix-fast. Next `/implement SWD-385`.
 - 2026-08-16 — shipped SWD-356 via PR #619: Restart required as Settings repair (HACS path), tombstone leftover MQTT Update card; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.8`. Next Done.
 - 2026-08-16 — `/review-fix` SWD-356 CLEAN (focused): 0 blockers / 2 should-fix (split fused repair tests + default delete path; document 2026.08.8 one-hop). Fast suite 875 passed, 88 skipped. Next `/ship SWD-356`.
 - 2026-08-16 — `/implement` SWD-356 In Review: Restart required is a Settings **repair** (HACS path), not an MQTT Update card; tombstone leftover discovery; PR https://github.com/marcuskrogh/HeatingAssistant/pull/619; CalVer 2026.08.8. Fast suite 873 passed, 88 skipped. Next `/review-fix SWD-356`.

@@ -67,6 +67,7 @@ class _BridgeManager:
         self._catalog_task: asyncio.Task[None] | None = None
         self._status_unsub: Callable[[], None] | None = None
         self._restart_poll_unsub: Callable[[], None] | None = None
+        self._inbound_bindings: list[tuple[str, str]] = []
 
     async def async_start(self) -> None:
         self._binding_unsub = await _maybe_await(
@@ -105,7 +106,7 @@ class _BridgeManager:
         )
         sync_restart_issue(self.hass)
         if self.hass.is_running:
-            await self._async_publish_entity_catalog()
+            await self._async_publish_live_inbound_snapshot()
 
     async def async_stop(self) -> None:
         if self._catalog_task is not None and not self._catalog_task.done():
@@ -126,7 +127,26 @@ class _BridgeManager:
 
     async def _async_homeassistant_started(self, _event: Event) -> None:
         sync_restart_issue(self.hass)
-        await self._async_publish_entity_catalog()
+        await self._async_publish_live_inbound_snapshot()
+
+    async def _async_publish_live_inbound_snapshot(self) -> None:
+        """Publish catalog and inbound tags with one shared snapshot timestamp."""
+
+        snapshot_ts = time.time()
+        await self._async_publish_entity_catalog(snapshot_ts=snapshot_ts)
+        await self._async_republish_inbound_bindings(snapshot_ts=snapshot_ts)
+
+    async def _async_republish_inbound_bindings(
+        self, snapshot_ts: float | None = None
+    ) -> None:
+        """Re-publish inbound tag/in from live HA state after Core has started."""
+
+        for tag, entity_id in list(self._inbound_bindings):
+            await self._publish_entity_state(
+                tag,
+                self.hass.states.get(entity_id),
+                snapshot_ts=snapshot_ts,
+            )
 
     async def _async_app_status_message(self, _msg: Any) -> None:
         sync_restart_issue(self.hass)
@@ -148,7 +168,9 @@ class _BridgeManager:
 
         self._catalog_task = self.hass.async_create_task(_debounced())
 
-    async def _async_publish_entity_catalog(self) -> None:
+    async def _async_publish_entity_catalog(
+        self, snapshot_ts: float | None = None
+    ) -> None:
         """Publish a searchable HA entity list for Ingress configuration pickers."""
 
         catalog: list[dict[str, str]] = []
@@ -177,7 +199,10 @@ class _BridgeManager:
 
         catalog.sort(key=lambda item: (item["name"].lower(), item["entity_id"]))
         payload = json.dumps(
-            {"ts": time.time(), "entities": catalog},
+            {
+                "ts": time.time() if snapshot_ts is None else snapshot_ts,
+                "entities": catalog,
+            },
             separators=(",", ":"),
             sort_keys=True,
         )
@@ -219,15 +244,24 @@ class _BridgeManager:
                 self._bind_entity_input(tag, entity_id)
             elif direction == "out":
                 await self._bind_entity_output(tag, entity_id)
+        if self.hass.is_running:
+            await self._async_publish_live_inbound_snapshot()
 
     def _bind_entity_input(self, tag: str, entity_id: str) -> None:
+        self._inbound_bindings.append((tag, entity_id))
+
         async def _state_changed(event: Event) -> None:
             await self._publish_entity_state(tag, event.data.get("new_state"))
 
         self._binding_subs.append(
             async_track_state_change_event(self.hass, [entity_id], _state_changed)
         )
-        self.hass.async_create_task(self._publish_entity_state(tag, self.hass.states.get(entity_id)))
+        # Reload / late load: the bindings handler publishes a shared-timestamp
+        # catalog+inbound snapshot. Publishing here would race with a later ts.
+        if not self.hass.is_running:
+            self.hass.async_create_task(
+                self._publish_entity_state(tag, self.hass.states.get(entity_id))
+            )
 
     async def _bind_entity_output(self, tag: str, entity_id: str) -> None:
         async def _message_received(message: Any) -> None:
@@ -243,9 +277,18 @@ class _BridgeManager:
         )
         self._binding_subs.append(unsubscribe)
 
-    async def _publish_entity_state(self, tag: str, state: State | None) -> None:
+    async def _publish_entity_state(
+        self,
+        tag: str,
+        state: State | None,
+        *,
+        snapshot_ts: float | None = None,
+    ) -> None:
+        stamp = time.time() if snapshot_ts is None else snapshot_ts
         if state is None or state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
-            payload = MqttTagPayload(None, status="BAD", reason="entity_unavailable", ts=time.time())
+            payload = MqttTagPayload(
+                None, status="BAD", reason="entity_unavailable", ts=stamp
+            )
         else:
             # Weather entities report condition in ``state``; outdoor °C lives in
             # ``attributes.temperature`` (mirrors classic read_outdoor_temp).
@@ -272,7 +315,7 @@ class _BridgeManager:
                     value,
                     status="GOOD",
                     reason=reason,
-                    ts=time.time(),
+                    ts=stamp,
                     attributes=attributes,
                 )
                 encoded = payload.encode()
@@ -289,7 +332,7 @@ class _BridgeManager:
                     value,
                     status="GOOD",
                     reason=reason,
-                    ts=time.time(),
+                    ts=stamp,
                     attributes=None,
                 )
                 encoded = payload.encode()
@@ -387,6 +430,7 @@ class _BridgeManager:
     def _clear_binding_subscriptions(self) -> None:
         while self._binding_subs:
             self._binding_subs.pop()()
+        self._inbound_bindings.clear()
 
 
 async def _maybe_await(value: Any) -> Any:
