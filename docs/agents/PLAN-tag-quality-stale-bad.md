@@ -87,4 +87,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review-fix SWD-385` — Review the delivery PR then fix-forward if needed
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/620
