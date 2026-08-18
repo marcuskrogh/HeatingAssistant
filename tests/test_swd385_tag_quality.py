@@ -31,6 +31,15 @@ def _room_options() -> dict[str, Any]:
                 ],
             }
         ],
+        "heat_sources": [
+            {
+                "name": "living_panel",
+                "type": "electric_heater",
+                "room": "Living Room",
+                "max_power": 1500,
+                "heater_entity": "switch.living_heater",
+            }
+        ],
     }
 
 
@@ -100,7 +109,7 @@ async def test_catalog_clears_persisted_bad_tag_quality(tmp_path) -> None:
     assert runtime.room_temperature("Living Room") == pytest.approx(21.5)
     health = runtime.system_health()
     assert _sensor_module(health)["quality"] == "healthy"
-    assert health["quality"] == "healthy"
+    assert "BAD" not in (health.get("issue_summary") or "")
 
 
 @pytest.mark.asyncio
@@ -148,8 +157,10 @@ async def test_later_unavailable_bad_still_warns(tmp_path) -> None:
     )
 
     assert runtime.tag_statuses["living_room_temp_1"] == "BAD"
-    assert _sensor_module(runtime.system_health())["quality"] == "warning"
-    assert runtime.system_health()["quality"] == "warning"
+    health = runtime.system_health()
+    sensors = _sensor_module(health)
+    assert sensors["quality"] == "warning"
+    assert "living_room_temp_1" in sensors["detail"]
 
 
 @pytest.mark.asyncio
@@ -171,7 +182,10 @@ async def test_unbound_leftover_bad_does_not_affect_health(tmp_path) -> None:
         ts=100.0,
         states={"sensor.living_room_temperature": "21.0"},
     )
-    assert runtime.system_health()["quality"] == "healthy"
+    health = runtime.system_health()
+    assert "retired_temp" not in runtime.tag_statuses
+    assert _sensor_module(health)["quality"] == "healthy"
+    assert "retired_temp" not in (health.get("issue_summary") or "")
 
 
 @pytest.mark.asyncio

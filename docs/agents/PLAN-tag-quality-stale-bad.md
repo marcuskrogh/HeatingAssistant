@@ -82,9 +82,9 @@
 - Task: SWD-385
 - Sub-tasks: SWD-386, SWD-387, SWD-388
 - Branch: cursor/swd-385-tag-quality-stale-bad-77cb
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/620
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-385` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-385` — Review the delivery PR then fix-forward if needed
