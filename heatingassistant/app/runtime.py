@@ -574,7 +574,7 @@ class HeatingRuntime:
         if parsed is None or parsed.instance_id != self.instance_id or parsed.direction != "in":
             return
         tag_payload = MqttTagPayload.decode(payload)
-        if self._is_stale_unavailable_payload(parsed.tag, tag_payload):
+        if self._is_stale_unavailable_payload(parsed.tag, tag_payload, retain=retain):
             return
         previous_value = self.tag_values.get(parsed.tag)
         self.update_tag(parsed.tag, tag_payload)
@@ -2951,8 +2951,19 @@ class HeatingRuntime:
         except ValueError:
             return text
 
-    def _is_stale_unavailable_payload(self, tag: str, payload: MqttTagPayload) -> bool:
-        """Return True for retained bind-time BAD that the catalog already superseded."""
+    def _is_stale_unavailable_payload(
+        self,
+        tag: str,
+        payload: MqttTagPayload,
+        *,
+        retain: bool,
+    ) -> bool:
+        """Return True for bind-time BAD that the catalog already superseded.
+
+        Live (non-retained) ``BAD`` without a timestamp still applies. Retained
+        null-``ts`` payloads and ``entity_unavailable`` stamps at or before the
+        catalog snapshot are ignored when that catalog row is usable.
+        """
 
         if payload.status != "BAD":
             return False
@@ -2968,8 +2979,8 @@ class HeatingRuntime:
         if item is None or self._usable_catalog_value(item.get("state")) is None:
             return False
         if payload.ts is None:
-            return True
-        return float(payload.ts) < float(catalog_ts)
+            return bool(retain)
+        return float(payload.ts) <= float(catalog_ts)
 
     def _apply_catalog_to_inbound_tags(self) -> None:
         """Adopt usable catalog states when they are newer than stored tag quality."""
@@ -3303,6 +3314,7 @@ async def publish_tag_in(
     status: str = "GOOD",
     reason: str | None = None,
     ts: float | None = None,
+    retain: bool = False,
 ) -> None:
     """Test helper that publishes a tag/in payload through the runtime bus."""
 
@@ -3310,4 +3322,5 @@ async def publish_tag_in(
         tag_in(runtime.instance_id, tag),
         MqttTagPayload(value=value, status=status, reason=reason, ts=ts).encode(),
         qos=DEFAULT_QOS,
+        retain=retain,
     )

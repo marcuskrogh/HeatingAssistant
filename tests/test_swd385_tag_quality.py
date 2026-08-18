@@ -130,11 +130,84 @@ async def test_stale_retained_bad_is_ignored_after_catalog(tmp_path) -> None:
         status="BAD",
         reason="entity_unavailable",
         ts=50.0,
+        retain=True,
     )
 
     assert runtime.tag_statuses["living_room_temp_1"] == "GOOD"
     assert runtime.tag_values["living_room_temp_1"] == pytest.approx(20.5)
     assert _sensor_module(runtime.system_health())["quality"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_retained_null_ts_bad_is_ignored_after_catalog(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_room_options())
+    await runtime.start()
+    await _publish_catalog(
+        runtime,
+        ts=100.0,
+        states={"sensor.living_room_temperature": "20.5"},
+    )
+
+    await publish_tag_in(
+        runtime,
+        "living_room_temp_1",
+        None,
+        status="BAD",
+        reason="entity_unavailable",
+        ts=None,
+        retain=True,
+    )
+
+    assert runtime.tag_statuses["living_room_temp_1"] == "GOOD"
+    assert runtime.tag_values["living_room_temp_1"] == pytest.approx(20.5)
+
+
+@pytest.mark.asyncio
+async def test_live_null_ts_bad_still_warns_after_catalog(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_room_options())
+    await runtime.start()
+    await _publish_catalog(
+        runtime,
+        ts=100.0,
+        states={"sensor.living_room_temperature": "20.5"},
+    )
+
+    await publish_tag_in(
+        runtime,
+        "living_room_temp_1",
+        None,
+        status="BAD",
+        reason="entity_unavailable",
+        ts=None,
+        retain=False,
+    )
+
+    assert runtime.tag_statuses["living_room_temp_1"] == "BAD"
+    assert _sensor_module(runtime.system_health())["quality"] == "warning"
+
+
+@pytest.mark.asyncio
+async def test_equal_timestamp_unavailable_bad_is_ignored(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_room_options())
+    await runtime.start()
+    await _publish_catalog(
+        runtime,
+        ts=100.0,
+        states={"sensor.living_room_temperature": "20.5"},
+    )
+
+    await publish_tag_in(
+        runtime,
+        "living_room_temp_1",
+        None,
+        status="BAD",
+        reason="entity_unavailable",
+        ts=100.0,
+        retain=True,
+    )
+
+    assert runtime.tag_statuses["living_room_temp_1"] == "GOOD"
+    assert runtime.tag_values["living_room_temp_1"] == pytest.approx(20.5)
 
 
 @pytest.mark.asyncio
@@ -204,16 +277,13 @@ async def test_hass_states_uses_catalog_when_binding_stub_unknown(tmp_path) -> N
     assert live["state"] == "19.75"
 
 
-@pytest.mark.asyncio
-async def test_bridge_republishes_inbound_tags_when_ha_started() -> None:
+def _load_thin_bridge(published: list[dict[str, Any]]):
     ha_mqtt = MagicMock()
-    published: list[dict[str, Any]] = []
 
     async def fake_publish(*args: Any, **kwargs: Any) -> None:
         published.append({"args": args, "kwargs": kwargs})
 
     ha_mqtt.async_publish = AsyncMock(side_effect=fake_publish)
-
     fake_components = MagicMock()
     fake_components.mqtt = ha_mqtt
     fake_ha = MagicMock()
@@ -228,8 +298,7 @@ async def test_bridge_republishes_inbound_tags_when_ha_started() -> None:
     fake_ha.core = MagicMock()
     fake_ha.helpers = MagicMock()
     fake_ha.helpers.event = MagicMock(async_track_state_change_event=MagicMock())
-
-    with patch.dict(
+    patcher = patch.dict(
         "sys.modules",
         {
             "homeassistant": fake_ha,
@@ -240,32 +309,99 @@ async def test_bridge_republishes_inbound_tags_when_ha_started() -> None:
             "homeassistant.helpers": fake_ha.helpers,
             "homeassistant.helpers.event": fake_ha.helpers.event,
         },
-    ):
-        for name in list(sys.modules):
-            if name.startswith("custom_components.heating_assistant"):
-                del sys.modules[name]
-        thin_init = importlib.import_module("custom_components.heating_assistant.__init__")
-        sensor_state = MagicMock()
-        sensor_state.state = "21.5"
-        sensor_state.domain = "sensor"
-        sensor_state.attributes = {"unit_of_measurement": "°C"}
-        hass = MagicMock()
-        hass.states.get.return_value = sensor_state
-        hass.states.async_all.return_value = []
-        manager = thin_init._BridgeManager(
-            hass, MagicMock(data={"instance_id": "default"})
-        )
+    )
+    patcher.start()
+    for name in list(sys.modules):
+        if name.startswith("custom_components.heating_assistant"):
+            del sys.modules[name]
+    thin_init = importlib.import_module("custom_components.heating_assistant.__init__")
+    return thin_init, patcher
+
+
+def _bridge_manager(thin_init: Any, *, is_running: bool = False):
+    sensor_state = MagicMock()
+    sensor_state.state = "21.5"
+    sensor_state.domain = "sensor"
+    sensor_state.attributes = {"unit_of_measurement": "°C"}
+    hass = MagicMock()
+    hass.is_running = is_running
+    hass.states.get.return_value = sensor_state
+    hass.states.async_all.return_value = []
+    hass.async_create_task = MagicMock()
+    manager = thin_init._BridgeManager(
+        hass, MagicMock(data={"instance_id": "default"})
+    )
+    return manager, hass
+
+
+def _inbound_publish(published: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(
+        item
+        for item in published
+        if len(item["args"]) > 1
+        and str(item["args"][1]).endswith("/tag/living_room_temp_1/in")
+    )
+
+
+def _catalog_publish(published: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(
+        item
+        for item in published
+        if len(item["args"]) > 1 and str(item["args"][1]).endswith("/entities")
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_republishes_inbound_tags_when_ha_started() -> None:
+    published: list[dict[str, Any]] = []
+    thin_init, patcher = _load_thin_bridge(published)
+    try:
+        manager, _hass = _bridge_manager(thin_init)
         manager._inbound_bindings = [
             ("living_room_temp_1", "sensor.living_room_temperature")
         ]
         await manager._async_homeassistant_started(None)
+    finally:
+        patcher.stop()
 
-    topics = [str(item["args"][1]) for item in published if len(item["args"]) > 1]
-    assert any(topic.endswith("/tag/living_room_temp_1/in") for topic in topics)
-    inbound = next(
-        item for item in published if str(item["args"][1]).endswith("/tag/living_room_temp_1/in")
-    )
+    inbound = _inbound_publish(published)
     payload = MqttTagPayload.decode(inbound["args"][2])
+    catalog = json.loads(_catalog_publish(published)["args"][2])
     assert payload.status == "GOOD"
     assert payload.value == pytest.approx(21.5)
     assert inbound["kwargs"].get("retain") is True
+    assert payload.ts == pytest.approx(catalog["ts"])
+
+
+@pytest.mark.asyncio
+async def test_bridge_republishes_inbound_tags_when_ha_already_running() -> None:
+    published: list[dict[str, Any]] = []
+    thin_init, patcher = _load_thin_bridge(published)
+    try:
+        manager, hass = _bridge_manager(thin_init, is_running=True)
+        message = MagicMock()
+        message.payload = json.dumps(
+            {
+                "bindings": [
+                    {
+                        "tag": "living_room_temp_1",
+                        "entity_id": "sensor.living_room_temperature",
+                        "direction": "in",
+                    }
+                ]
+            }
+        )
+        await manager._async_bindings_message(message)
+        assert hass.is_running is True
+        assert manager._inbound_bindings == [
+            ("living_room_temp_1", "sensor.living_room_temperature")
+        ]
+    finally:
+        patcher.stop()
+
+    inbound = _inbound_publish(published)
+    payload = MqttTagPayload.decode(inbound["args"][2])
+    catalog = json.loads(_catalog_publish(published)["args"][2])
+    assert payload.status == "GOOD"
+    assert payload.value == pytest.approx(21.5)
+    assert payload.ts == pytest.approx(catalog["ts"])
