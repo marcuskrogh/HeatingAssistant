@@ -67,6 +67,7 @@ class _BridgeManager:
         self._catalog_task: asyncio.Task[None] | None = None
         self._status_unsub: Callable[[], None] | None = None
         self._restart_poll_unsub: Callable[[], None] | None = None
+        self._inbound_bindings: list[tuple[str, str]] = []
 
     async def async_start(self) -> None:
         self._binding_unsub = await _maybe_await(
@@ -127,6 +128,13 @@ class _BridgeManager:
     async def _async_homeassistant_started(self, _event: Event) -> None:
         sync_restart_issue(self.hass)
         await self._async_publish_entity_catalog()
+        await self._async_republish_inbound_bindings()
+
+    async def _async_republish_inbound_bindings(self) -> None:
+        """Re-publish inbound tag/in from live HA state after Core has started."""
+
+        for tag, entity_id in list(self._inbound_bindings):
+            await self._publish_entity_state(tag, self.hass.states.get(entity_id))
 
     async def _async_app_status_message(self, _msg: Any) -> None:
         sync_restart_issue(self.hass)
@@ -221,6 +229,8 @@ class _BridgeManager:
                 await self._bind_entity_output(tag, entity_id)
 
     def _bind_entity_input(self, tag: str, entity_id: str) -> None:
+        self._inbound_bindings.append((tag, entity_id))
+
         async def _state_changed(event: Event) -> None:
             await self._publish_entity_state(tag, event.data.get("new_state"))
 
@@ -387,6 +397,7 @@ class _BridgeManager:
     def _clear_binding_subscriptions(self) -> None:
         while self._binding_subs:
             self._binding_subs.pop()()
+        self._inbound_bindings.clear()
 
 
 async def _maybe_await(value: Any) -> Any:

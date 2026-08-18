@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.9
+
+- System Status no longer keeps a sensor warning when Home Assistant already
+  has valid measurements for the configured tags.
+
 # 2026.08.8
 
 - Restart required is a Settings repair (same section as other apps), not a
