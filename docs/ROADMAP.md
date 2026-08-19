@@ -1,7 +1,7 @@
 # Roadmap: Hierarchical nonlinear OCP + P tracking
 
 ## Destination
-A two-rate controller. A nonlinear OCP on a slow grid (study start: **1 h**) produces the nominal path `(T_ref(t), u_ref(t))`. Between solves, a P-controller with feedforward `u = clip(u_ref(t) + K_p (T_ref(t) − T_filtered))` tracks that path. One heater per room. A failed OCP keeps the last path. Five hours of consecutive failures (including timeouts) set every heater to `u = 0` and raise a persistent notification. The linearised QP is not in the happy path. No production deploy until an offline study picks a feasible OCP period.
+A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) produces the nominal path `(T_ref(t), u_ref(t))`. Between solves, a P-controller with feedforward `u = clip(u_ref(t) + K_p (T_ref(t) − T_filtered))` tracks that path. One heater per room. A failed OCP keeps the last path. Five hours of consecutive failures (including timeouts) set every heater to `u = 0` and raise a persistent notification. The linearised QP is not in the happy path.
 
 ## Notes
 - NMPC already absorbs nominal solar, outdoor, and price; P only rejects residuals.
@@ -10,7 +10,8 @@ A two-rate controller. A nonlinear OCP on a slow grid (study start: **1 h**) pro
 - NMPC is SciPy in the App process, not Home Assistant Core (`SWD-254`).
 - First cut: one heater per room. Inter-room `R_ij` lives in the OCP only.
 - Failed solve includes timeout. Watchdog shut-off is `u = 0` (free, bounded).
-- Defaults: `T_s` = 15 min, `T_H` = 36 h, both configurable. `T_NMPC` study start 1 h.
+- Defaults: `T_s` = 15 min, `T_H` = 36 h, both configurable. `T_NMPC` = **2 h** (sandbox).
+- NMPC must not run inline on the App asyncio loop; worker thread (same idea as PE). Fast EKF+P stays on the 15 min ticker using the last path.
 
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
@@ -24,10 +25,11 @@ A two-rate controller. A nonlinear OCP on a slow grid (study start: **1 h**) pro
 - Tracker is P + `u_ref`, not PI/LQR/linear MPC. Error is `T_ref − T_hat`.
 - OCP miss → last path. Five hours of misses → heaters off (`u = 0`) + persistent notification.
 - [SWD-393 model](https://marcusknielsen.atlassian.net/browse/SWD-393) — hierarchical mean OCP + P-FF. Artifact `docs/agents/MODEL-nmpc-p-ff.md`.
+- [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) iteration 2: operator chose **2 h** OCP period. Cold SLSQP ~94 s (47 iters, success, not at cap). Wire NLP on a worker thread so Ingress/MQTT stay live.
 
 ## Not yet specified
-- Feasible `T_NMPC` (sandbox brackets: 15 min, 1 h, 2 h).
-- SciPy flavour, timeout, iteration cap, numeric default `K_p`.
+- SciPy flavour, timeout seconds, iteration cap, numeric default `K_p`.
+- Closed-loop P vs QP comfort/cost (optional further sandbox turn).
 
 ## Out of scope
 - Split-range / several heaters in one room.
@@ -42,7 +44,7 @@ A two-rate controller. A nonlinear OCP on a slow grid (study start: **1 h**) pro
 - Tasks: [SWD-393](https://marcusknielsen.atlassian.net/browse/SWD-393), [SWD-394](https://marcusknielsen.atlassian.net/browse/SWD-394), [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
 - Delivery branch (no explore/model/sandbox PR): `cursor/swd-395-nmpc-p-tracker-46be`
 - Model: `docs/agents/MODEL-nmpc-p-ff.md`
-- Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (iteration 1 inspectables in `sandbox/nmpc-p-ff/inspect/`)
+- Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (`sandbox/nmpc-p-ff/inspect/`)
 
 ## Next
-`/sandbox SWD-394` — after operator verdict on iteration 1 (solve-time gauge).
+`/sandbox SWD-394` — after operator verdict on 2 h + worker-thread wiring.
