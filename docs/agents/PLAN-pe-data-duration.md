@@ -80,9 +80,9 @@
   [SWD-343](https://marcusknielsen.atlassian.net/browse/SWD-343)
 - Sub-tasks: SWD-390, SWD-391
 - Branch: `cursor/swd-389-pe-data-duration-67d2`
-- PR: (opened at implement)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/621
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-389` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-389` — Focused review on the same PR

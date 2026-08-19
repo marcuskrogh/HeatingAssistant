@@ -400,7 +400,7 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert ".store-row__tag--cat" not in css
     tuning = (root / "docs" / "TUNING.md").read_text(encoding="utf-8")
     assert "One day of data can cover every recommended category" in tuning
-    assert "several days of normal operation usually give a more reliable model" in tuning
+    assert "Several days of normal operation usually give a more reliable model" in tuning
     tile_rule = css.split(".pe-coverage-tile {", 1)[1].split("}", 1)[0]
     assert "pointer-events: none" not in tile_rule
     assert "cursor: pointer" in tile_rule

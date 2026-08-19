@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | In Progress | — | docs/agents/PLAN-pe-data-duration.md | `/review-fix SWD-389` |
-| SWD-390 | Sub-task | PE page + TUNING duration guidance copy | In Progress | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
-| SWD-391 | Sub-task | Tests, CalVer, App sync | In Progress | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
+| SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | In Review | — | docs/agents/PLAN-pe-data-duration.md | `/review-fix SWD-389` |
+| SWD-390 | Sub-task | PE page + TUNING duration guidance copy | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
+| SWD-391 | Sub-task | Tests, CalVer, App sync | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
 | SWD-385 | Task | [Bug] System Status BAD tag quality despite fine HA sensor measurements | Done | — | docs/agents/PLAN-tag-quality-stale-bad.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/620 |
 | SWD-386 | Sub-task | Catalog overlay + prune persisted BAD tag quality | Done | SWD-385 | docs/agents/PLAN-tag-quality-stale-bad.md | — |
 | SWD-387 | Sub-task | Republish inbound tags when HA has started | Done | SWD-385 | docs/agents/PLAN-tag-quality-stale-bad.md | — |
@@ -115,7 +115,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
-- 2026-08-19 — `/define`+`/implement` SWD-389: PE duration guidance (one day covers categories; several days for a good model); PLAN `docs/agents/PLAN-pe-data-duration.md`; Sub-tasks SWD-390–391; tweak/delta-fast; Relates SWD-335, SWD-343; CalVer 2026.08.10. Next `/review-fix SWD-389`.
+- 2026-08-19 — `/implement` SWD-389 In Review: PE duration guidance (one day covers categories; several days for a good model); PR https://github.com/marcuskrogh/HeatingAssistant/pull/621; CalVer 2026.08.10. Fast suite 885 passed, 88 skipped. Next `/review-fix SWD-389`.
 - 2026-08-18 — shipped SWD-385 via PR #620: System Status clears stale BAD tag quality when HA sensors already measure; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.9`. Next Done.
 - 2026-08-18 — `/review-fix` SWD-385 CLEAN (focused): 0 blockers / 3 should-fix (retain/null-ts; HA-running republish; shared catalog/inbound snapshot timestamp). Focused tests 10 passed. Fast suite 885 passed, 88 skipped. Next `/ship SWD-385`.
 - 2026-08-18 — `/implement` SWD-385 In Review: catalog overlay + ignore stale retained BAD + HA-started republish; PR https://github.com/marcuskrogh/HeatingAssistant/pull/620; CalVer 2026.08.9. Fast suite 881 passed, 88 skipped. Next `/review-fix SWD-385`.
