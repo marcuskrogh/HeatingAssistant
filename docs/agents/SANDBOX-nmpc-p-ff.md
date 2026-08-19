@@ -90,7 +90,7 @@ keep the App responsive. A process pool is optional later.
 |---|--------|-------------|---------|
 | 1 | SLSQP single shooting, all three brackets | sandbox/nmpc-p-ff/inspect/01_report.md | delta: operator wants 2 h (dislikes maxiter on 1 h) |
 | 2 | lock 2 h; re-time with maxiter 80 | sandbox/nmpc-p-ff/inspect/02_report.md | delta: supply analytic derivatives |
-| 3 | analytic dJ/dU via dfdx/dfdu | sandbox/nmpc-p-ff/inspect/03_report.md | waiting: accept / further delta / sandbox-only end |
+| 3 | analytic dJ/dU via dfdx/dfdu | sandbox/nmpc-p-ff/inspect/03_report.md | **accept** — 2 h, analytic Jacobian, worker thread |
 
 ## Role in pipeline
 Promotion input for `/define SWD-395` then `/implement`. Supportive
@@ -104,4 +104,4 @@ isolation — not production source. No sandbox PR.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/sandbox SWD-394` — after operator accept, named delta, or sandbox-only end.
+`/define SWD-395` — operator accepted 2 h + analytic Jacobian + worker thread.

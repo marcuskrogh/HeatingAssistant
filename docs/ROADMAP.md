@@ -18,7 +18,7 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
 | 1 | Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | model | — | Done | [SWD-393](https://marcusknielsen.atlassian.net/browse/SWD-393) |
-| 2 | Offline NMPC period + closed-loop P eval (may kill hourly) | sandbox | SWD-393 | To Do | [SWD-394](https://marcusknielsen.atlassian.net/browse/SWD-394) |
+| 2 | Offline NMPC period + closed-loop P eval (may kill hourly) | sandbox | SWD-393 | Done | [SWD-394](https://marcusknielsen.atlassian.net/browse/SWD-394) |
 | 3 | Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | define | SWD-394 | To Do | [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395) |
 
 ## Cleared so far
@@ -27,7 +27,7 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - OCP miss → last path. Five hours of misses → heaters off (`u = 0`) + persistent notification.
 - [SWD-393 model](https://marcusknielsen.atlassian.net/browse/SWD-393) — hierarchical mean OCP + P-FF. Artifact `docs/agents/MODEL-nmpc-p-ff.md`.
 - [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) iteration 2: operator chose **2 h** OCP period. Cold SLSQP ~94 s (47 iters, success, not at cap). Wire NLP on a worker thread so Ingress/MQTT stay live.
-- [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) iteration 3: analytic Jacobian. Cold **22 s** (80 iters, J already 0.81); warm **7.7 s** and success. About 4× faster than finite-difference cold.
+- [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) **accepted**: 2 h OCP, analytic Jacobian, NLP on a worker thread. Harness stays on `cursor/swd-395-nmpc-p-tracker-46be`.
 
 ## Not yet specified
 - Timeout seconds, iteration cap (cold still hits 80), numeric default `K_p`.
@@ -49,4 +49,4 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (`sandbox/nmpc-p-ff/inspect/`)
 
 ## Next
-`/sandbox SWD-394` — after operator accept of 2 h + analytic Jacobian + worker thread, a named delta, or sandbox-only end.
+`/define SWD-395` — production NMPC + P from accepted sandbox.

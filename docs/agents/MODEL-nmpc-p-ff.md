@@ -189,4 +189,4 @@ alignment input — not product scope/UX.
 
 ## Next
 
-`/sandbox SWD-394` — offline NMPC period + closed-loop P eval.
+`/define SWD-395` — sandbox accepted (2 h, analytic Jacobian, worker thread).
