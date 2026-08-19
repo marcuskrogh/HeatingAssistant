@@ -14,7 +14,7 @@ import {
   updateEstimationParams,
 } from '../ha-services.js?v=124';
 import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=131';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=132';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);

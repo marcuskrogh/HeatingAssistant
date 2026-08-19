@@ -99,9 +99,10 @@ For a roof window pitched towards the South at 30° from horizontal, use
 ## Automatic parameter estimation
 
 Open **Parameter estimation** in the Ingress panel, select a room, and run ML
-identification when you have enough heating history (typically several days of
-normal operation). The page also supports one-step EKF reconstruction, open-loop
-simulation, and model-fit validation before you apply results.
+identification when you have enough heating history. One day of data can cover
+every recommended category; several days of normal operation usually give a
+more reliable model. The page also supports one-step EKF reconstruction,
+open-loop simulation, and model-fit validation before you apply results.
 
 The App service `estimate_parameters_ml` performs the same joint optimisation if
 you call it programmatically; the panel is the supported workflow.

@@ -350,6 +350,8 @@ def test_pe_page_sources_include_recommended_data_checklist():
         root / "heatingassistant" / "app" / "static" / "css" / "pages" / "climate-card.css"
     ).read_text(encoding="utf-8")
     assert "Recommended data" in datasets
+    assert "One day of recording can cover every category" in datasets
+    assert "Several days usually give a more reliable model" in datasets
     assert "Run recommended estimation" in datasets
     assert "pe-coverage-row" in datasets
     assert "pe-coverage-tile" in datasets
@@ -396,6 +398,9 @@ def test_pe_page_sources_include_recommended_data_checklist():
     assert ".store-row__cats" in css
     assert ".pe-coverage-chip" not in css
     assert ".store-row__tag--cat" not in css
+    tuning = (root / "docs" / "TUNING.md").read_text(encoding="utf-8")
+    assert "One day of data can cover every recommended category" in tuning
+    assert "several days of normal operation usually give a more reliable model" in tuning
     tile_rule = css.split(".pe-coverage-tile {", 1)[1].split("}", 1)[0]
     assert "pointer-events: none" not in tile_rule
     assert "cursor: pointer" in tile_rule

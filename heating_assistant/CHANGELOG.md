@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.10
+
+- Parameter estimation now says one day can cover every recommended category,
+  but several days usually give a more reliable model.
+
 # 2026.08.9
 
 - System Status no longer keeps a sensor warning when Home Assistant already
