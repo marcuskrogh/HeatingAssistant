@@ -85,4 +85,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-389` — Focused review on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/621
