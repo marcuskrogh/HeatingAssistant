@@ -126,6 +126,17 @@ def electrical_w(sources: list[HeatPump], u: np.ndarray) -> float:
     return p
 
 
+def electrical_dPdu(sources: list[HeatPump], u: np.ndarray) -> np.ndarray:
+    g = np.zeros(len(sources), dtype=float)
+    for j, src in enumerate(sources):
+        uj = float(u[j])
+        if uj > 0.0:
+            g[j] = float(src.elec_per_unit_heat)
+        elif uj < 0.0:
+            g[j] = -float(src.elec_per_unit_cool)
+    return g
+
+
 class MeanOcp:
     def __init__(
         self,
@@ -169,8 +180,20 @@ class MeanOcp:
         self._price_slow = np.array(
             [float(np.mean(traces["price"][n * self.m : (n + 1) * self.m])) for n in range(self.n)]
         )
+        self.njev = 0
+        d0 = self._d_fast[0]
+        a0 = sde.dfdx(self.x0, np.zeros(self.nu), d0, self.p, 0.0)
+        self._h_sub = TS_S / float(N_INT)
+        eye = np.eye(sde.nx)
+        self._M = np.linalg.inv(eye - self._h_sub * a0)
 
     def _roll(self, U: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+        j, U, air, _ = self._roll_maybe_jac(U, with_jac=False)
+        return j, U, air
+
+    def _roll_maybe_jac(
+        self, U: np.ndarray, *, with_jac: bool
+    ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray | None]:
         if self.deadline is not None and time.perf_counter() > self.deadline:
             self.timed_out = True
             raise TimeoutError("NMPC wall-clock timeout")
@@ -180,27 +203,62 @@ class MeanOcp:
         air_path = []
         j = 0.0
         u_prev = self.u_prev
+        n_dec = self.n * self.nu
+        sx = np.zeros((self.sde.nx, n_dec)) if with_jac else None
+        g = np.zeros(n_dec) if with_jac else None
         for n in range(self.n):
             u_n = U[n]
+            col = n * self.nu
             for m in range(self.m):
                 k = n * self.m + m
                 d_k = self._d_fast[k]
                 rhs = lambda xx, u=u_n, d=d_k: self.sde.f(xx, u, d, self.p, 0.0)
-                jac = lambda xx, u=u_n, d=d_k: self.sde.dfdx(xx, u, d, self.p, 0.0)
-                x = implicit_euler_substeps(rhs, jac, x, TS_S, N_INT)
+                jacx = lambda xx, u=u_n, d=d_k: self.sde.dfdx(xx, u, d, self.p, 0.0)
+                x = implicit_euler_substeps(rhs, jacx, x, TS_S, N_INT)
                 ta = x[: self.n_rooms]
                 air_path.append(ta.copy())
                 viol = np.maximum(0.0, self.t_min - ta) + np.maximum(0.0, ta - self.t_max)
                 j += RHO * float(np.dot(viol, viol))
+                if with_jac:
+                    b_u = self.sde.dfdu(x, u_n, d_k, self.p, 0.0)
+                    hmb = self._h_sub * (self._M @ b_u)
+                    for _ in range(N_INT):
+                        sx = self._M @ sx
+                        sx[:, col : col + self.nu] += hmb
+                    sta = sx[: self.n_rooms]
+                    for i in range(self.n_rooms):
+                        if ta[i] < self.t_min[i]:
+                            viol_i = self.t_min[i] - ta[i]
+                            g += RHO * 2.0 * viol_i * (-1.0) * sta[i]
+                        elif ta[i] > self.t_max[i]:
+                            viol_i = ta[i] - self.t_max[i]
+                            g += RHO * 2.0 * viol_i * (1.0) * sta[i]
             du = u_n - u_prev
             j += S_ROM * float(np.dot(du, du))
             j += ALPHA_PRICE * self._price_slow[n] * electrical_w(self.sources, u_n) * 1e-3 * self.dt_h_slow
+            if with_jac:
+                g[col : col + self.nu] += 2.0 * S_ROM * du
+                if n > 0:
+                    g[col - self.nu : col] -= 2.0 * S_ROM * du
+                g[col : col + self.nu] += (
+                    ALPHA_PRICE
+                    * self._price_slow[n]
+                    * 1e-3
+                    * self.dt_h_slow
+                    * electrical_dPdu(self.sources, u_n)
+                )
             u_prev = u_n
-        return j, U, np.asarray(air_path)
+        return j, U, np.asarray(air_path), g
 
     def cost(self, u_flat: np.ndarray) -> float:
         j, _, _ = self._roll(u_flat)
         return j
+
+    def jac(self, u_flat: np.ndarray) -> np.ndarray:
+        self.njev += 1
+        _, _, _, g = self._roll_maybe_jac(u_flat, with_jac=True)
+        assert g is not None
+        return g
 
 
 def solve_nmpc(
@@ -210,9 +268,11 @@ def solve_nmpc(
     method: str,
     *,
     use_explicit_jac: bool = False,
+    use_analytic_jac: bool = False,
     timeout_s: float = TIMEOUT_S,
 ) -> dict:
     ocp.nfev = 0
+    ocp.njev = 0
     ocp.timed_out = False
     ocp.deadline = time.perf_counter() + timeout_s
     t0 = time.perf_counter()
@@ -223,7 +283,7 @@ def solve_nmpc(
     success = False
     fun = float("nan")
 
-    def jac(u_flat: np.ndarray) -> np.ndarray:
+    def fd_jac(u_flat: np.ndarray) -> np.ndarray:
         return approx_fprime(u_flat, ocp.cost, FD_EPS)
 
     kwargs: dict = {
@@ -233,8 +293,10 @@ def solve_nmpc(
         "bounds": ocp.bounds,
         "options": {"maxiter": maxiter, "ftol": 1e-6, "disp": False},
     }
-    if use_explicit_jac:
-        kwargs["jac"] = jac
+    if use_analytic_jac:
+        kwargs["jac"] = ocp.jac
+    elif use_explicit_jac:
+        kwargs["jac"] = fd_jac
     try:
         res = minimize(**kwargs)
         u_star = np.asarray(res.x, dtype=float)
@@ -254,6 +316,7 @@ def solve_nmpc(
         "success": success,
         "elapsed_s": elapsed,
         "nfev": ocp.nfev,
+        "njev": ocp.njev,
         "nit": nit,
         "fun": fun,
         "message": message,
@@ -356,6 +419,7 @@ def main() -> None:
     parser.add_argument("--maxiter", type=int, default=None)
     parser.add_argument("--tag", default="01")
     parser.add_argument("--explicit-jac", action="store_true")
+    parser.add_argument("--analytic", action="store_true", help="analytic dJ/dU via dfdx/dfdu")
     parser.add_argument("--timeout", type=float, default=TIMEOUT_S)
     args = parser.parse_args()
 
@@ -383,9 +447,19 @@ def main() -> None:
         time_qp(model, sources, traces, N_FAST),
     ]
 
+    if args.analytic:
+        chk = MeanOcp(sde, sources, traces, brackets[0]["t_nmpc_s"], x0, u_prev)
+        rng = np.random.default_rng(0)
+        u_chk = rng.uniform(0.05, 0.25, size=chk.n * chk.nu)
+        g_an = chk.jac(u_chk)
+        g_fd = approx_fprime(u_chk, chk.cost, 1e-5)
+        abs_err = float(np.max(np.abs(g_an - g_fd)))
+        rel = abs_err / max(float(np.max(np.abs(g_fd))), 1e-12)
+        print(f"analytic vs FD jac: max abs {abs_err:.3e} rel {rel:.3e}", flush=True)
+
     nmpc_rows: list[dict] = []
     warm_u: dict[str, np.ndarray] = {}
-    for br in BRACKETS:
+    for br in brackets:
         ocp = MeanOcp(sde, sources, traces, br["t_nmpc_s"], x0, u_prev)
         u0 = np.zeros(ocp.n * ocp.nu)
         print(f"NMPC {br['label']} cold N={ocp.n} decisions={ocp.n * ocp.nu} ...", flush=True)
@@ -395,10 +469,12 @@ def main() -> None:
             br["maxiter"],
             "SLSQP",
             use_explicit_jac=args.explicit_jac,
+            use_analytic_jac=args.analytic,
             timeout_s=args.timeout,
         )
         print(
-            f"  cold {cold['elapsed_s']:.2f}s status={cold['status']} nfev={cold['nfev']}",
+            f"  cold {cold['elapsed_s']:.2f}s status={cold['status']} "
+            f"nfev={cold['nfev']} njev={cold['njev']} nit={cold['nit']}",
             flush=True,
         )
         u_warm0 = cold["u_star"]
@@ -409,10 +485,12 @@ def main() -> None:
             br["maxiter"],
             "SLSQP",
             use_explicit_jac=args.explicit_jac,
+            use_analytic_jac=args.analytic,
             timeout_s=args.timeout,
         )
         print(
-            f"  warm {warm['elapsed_s']:.2f}s status={warm['status']} nfev={warm['nfev']}",
+            f"  warm {warm['elapsed_s']:.2f}s status={warm['status']} "
+            f"nfev={warm['nfev']} njev={warm['njev']} nit={warm['nit']}",
             flush=True,
         )
         warm_u[br["label"]] = warm["u_star"]
@@ -431,6 +509,9 @@ def main() -> None:
                 "warm_status": warm["status"],
                 "cold_nfev": cold["nfev"],
                 "warm_nfev": warm["nfev"],
+                "cold_njev": cold["njev"],
+                "warm_njev": warm["njev"],
+                "analytic": bool(args.analytic),
                 "cold_nit": cold["nit"],
                 "warm_nit": warm["nit"],
                 "cold_success": cold["success"],
