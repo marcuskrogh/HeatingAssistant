@@ -12,6 +12,7 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - Failed solve includes timeout. Watchdog shut-off is `u = 0` (free, bounded).
 - Defaults: `T_s` = 15 min, `T_H` = 36 h, both configurable. `T_NMPC` = **2 h** (sandbox).
 - NMPC must not run inline on the App asyncio loop; worker thread (same idea as PE). Fast EKF+P stays on the 15 min ticker using the last path.
+- Supply analytic `dJ/dU` to SciPy (production `dfdx`/`dfdu` through implicit Euler). Finite-difference Jacobians are not the happy path.
 
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
@@ -26,9 +27,10 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - OCP miss → last path. Five hours of misses → heaters off (`u = 0`) + persistent notification.
 - [SWD-393 model](https://marcusknielsen.atlassian.net/browse/SWD-393) — hierarchical mean OCP + P-FF. Artifact `docs/agents/MODEL-nmpc-p-ff.md`.
 - [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) iteration 2: operator chose **2 h** OCP period. Cold SLSQP ~94 s (47 iters, success, not at cap). Wire NLP on a worker thread so Ingress/MQTT stay live.
+- [SWD-394 sandbox](https://marcusknielsen.atlassian.net/browse/SWD-394) iteration 3: analytic Jacobian. Cold **22 s** (80 iters, J already 0.81); warm **7.7 s** and success. About 4× faster than finite-difference cold.
 
 ## Not yet specified
-- SciPy flavour, timeout seconds, iteration cap, numeric default `K_p`.
+- Timeout seconds, iteration cap (cold still hits 80), numeric default `K_p`.
 - Closed-loop P vs QP comfort/cost (optional further sandbox turn).
 
 ## Out of scope
@@ -47,4 +49,4 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (`sandbox/nmpc-p-ff/inspect/`)
 
 ## Next
-`/sandbox SWD-394` — after operator verdict on 2 h + worker-thread wiring.
+`/sandbox SWD-394` — after operator accept of 2 h + analytic Jacobian + worker thread, a named delta, or sandbox-only end.

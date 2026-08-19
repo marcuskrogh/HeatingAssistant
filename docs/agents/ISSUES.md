@@ -119,6 +119,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-19 — `/sandbox` SWD-394 iteration 3: analytic `dJ/dU` via production `dfdx`/`dfdu` (rel error 1.3e-5 vs FD). 2 h cold **22 s** / 80 iters (J=0.81, hit cap); warm **7.7 s** / 26 iters success. Inspect `sandbox/nmpc-p-ff/inspect/03_report.md`. Next `/sandbox SWD-394`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 2: operator locked **2 h**. Cold SLSQP 94 s / 47 iters (success, cap 80). Warm polish hit maxiter. NMPC must use a worker thread (today’s `compute_actions` is inline on the App asyncio loop). Inspect `sandbox/nmpc-p-ff/inspect/02_report.md`. Next `/sandbox SWD-394`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 1: approximate SLSQP solve times on synthetic two-room heat-pump house (live traces waived). QP ~0.7 s; 15 min NMPC ~112 s; 1 h ~77 s (maxiter); 2 h ~24 s. Inspect `sandbox/nmpc-p-ff/inspect/01_report.md`. Next `/sandbox SWD-394`.
 - 2026-08-19 — `/sandbox` SWD-394 representativeness: measure bar is solve-time (p95/timeouts/warm-start) + closed-loop vs `HeatingLinearisedMPC`; live household traces named as a gap; inspect-loop not started. Artifact `docs/agents/SANDBOX-nmpc-p-ff.md`. Next `/sandbox SWD-394`.

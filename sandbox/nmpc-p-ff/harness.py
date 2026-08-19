@@ -547,10 +547,15 @@ def main() -> None:
         "nmpc": nmpc_rows,
         "notes": [
             "Single shooting in U; F = production implicit Euler of HouseThermalSDE.f.",
-            "SciPy SLSQP; default FD unless --explicit-jac.",
+            (
+                "SciPy SLSQP with analytic dJ/dU (--analytic) from production dfdx/dfdu."
+                if args.analytic
+                else "SciPy SLSQP; default FD unless --explicit-jac."
+            ),
             "A solve that leaves J near the zero-u cost (~3.5e6) is a false success; inspectables keep only runs with J<10.",
         ],
         "tag": args.tag,
+        "analytic": bool(args.analytic),
         "explicit_jac": bool(args.explicit_jac),
     }
     (INSPECT / f"{args.tag}_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -559,7 +564,8 @@ def main() -> None:
         f"# Iteration {args.tag}: NMPC solve times",
         "",
         "Synthetic two-room 2R2C, production `HouseThermalSDE` + implicit Euler, "
-        "one heat pump per room. Live traces waived. SciPy SLSQP.",
+        "one heat pump per room. Live traces waived. SciPy SLSQP"
+        + (" with analytic `dJ/dU` (`--analytic`)." if args.analytic else "."),
         "",
         f"One 36 h cost evaluation (1 h grid, u=0): **{t_cost:.3f} s**.",
         "",

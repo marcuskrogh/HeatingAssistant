@@ -13,7 +13,7 @@ measure
 ## Isolation
 - Path: `sandbox/nmpc-p-ff/`
 - Harness: `python3 sandbox/nmpc-p-ff/harness.py`
-  (`--only "2 h" --maxiter 80 --tag 02 --timeout 300` for iteration 2)
+  (`--only "2 h" --maxiter 80 --tag 03 --analytic --timeout 300` for iteration 3)
 - Inspectables: `sandbox/nmpc-p-ff/inspect/`
 
 ## Representativeness
@@ -35,7 +35,8 @@ measure
   - **Live recorded household traces** — waived for the solve-time verdict.
   - **HAOS App CPU vs this VM** — absolute seconds may not transfer.
   - **Closed-loop EKF+P** — not measured yet.
-  - **SciPy flavour** — SLSQP only; finite-difference Jacobian is brittle.
+  - **SciPy flavour** — SLSQP; analytic `dJ/dU` via production `dfdx`/`dfdu`
+    chained through implicit Euler (iteration 3).
 
 ## Bar
 - Metrics: solve-time cold/warm, nfev, success vs maxiter.
@@ -43,8 +44,12 @@ measure
   - QP N=144: 0.72 s
   - 2 h NMPC cold: **94 s**, 47 iterations, **success** (cap was 80)
   - 2 h NMPC warm: 162 s, hit maxiter 80 while polishing (J 0.83 → 0.68)
-  - Safe wall-clock budget on this VM: about **two minutes** for a
-    successful cold solve; still far below a 2 h period.
+- Iteration 3 (analytic Jacobian, 2 h, maxiter 80):
+  - Analytic vs FD: max relative error **1.3e-5**
+  - Cold: **22 s**, 80 iters, J=0.81 (hit cap but already in-band)
+  - Warm: **7.7 s**, 26 iters, **success**
+  - Finite-difference cold was 94 s; analytic is about 4× faster and
+    warm-start works.
 
 ## App concurrency (production wiring)
 Today `run_control_cycle` calls `compute_actions` **inline** on whatever
@@ -72,6 +77,8 @@ keep the App responsive. A process pool is optional later.
   - Default `T_NMPC` = 2 h (`N = 18` at `T_H` = 36 h).
   - NLP on a worker thread; do not call it inline from `run_control_cycle`.
   - Fast loop: EKF then P every `T_s` = 15 min from the last path.
+  - Analytic `dJ/dU` from production `dfdx`/`dfdu` through implicit Euler.
+    Do not ship finite-difference Jacobians as the happy path.
   - `heatingassistant/engine/controller/facade.py`,
     `heatingassistant/engine/control_loop.py`, heater `K_p`, App timeout
     = fail, 5 h → `u = 0` + notify.
@@ -82,7 +89,8 @@ keep the App responsive. A process pool is optional later.
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
 | 1 | SLSQP single shooting, all three brackets | sandbox/nmpc-p-ff/inspect/01_report.md | delta: operator wants 2 h (dislikes maxiter on 1 h) |
-| 2 | lock 2 h; re-time with maxiter 80 | sandbox/nmpc-p-ff/inspect/02_report.md | waiting: accept / further delta / sandbox-only end |
+| 2 | lock 2 h; re-time with maxiter 80 | sandbox/nmpc-p-ff/inspect/02_report.md | delta: supply analytic derivatives |
+| 3 | analytic dJ/dU via dfdx/dfdu | sandbox/nmpc-p-ff/inspect/03_report.md | waiting: accept / further delta / sandbox-only end |
 
 ## Role in pipeline
 Promotion input for `/define SWD-395` then `/implement`. Supportive
