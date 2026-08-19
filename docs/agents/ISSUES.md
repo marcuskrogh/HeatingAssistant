@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/model SWD-393` |
-| SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | To Do | SWD-392 | docs/ROADMAP.md | `/model SWD-393` |
-| SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | To Do | SWD-392 | docs/ROADMAP.md | `/sandbox SWD-394` (blocked by SWD-393) |
+| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/sandbox SWD-394` |
+| SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
+| SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | To Do | SWD-392 | docs/ROADMAP.md | `/sandbox SWD-394` |
 | SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/ROADMAP.md | `/define SWD-395` (blocked by SWD-394) |
 | SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | Done | — | docs/agents/PLAN-pe-data-duration.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/621 |
 | SWD-390 | Sub-task | PE page + TUNING duration guidance copy | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
@@ -119,6 +119,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-19 — `/model` SWD-393 Done: hierarchical mean OCP + P-FF; artifact `docs/agents/MODEL-nmpc-p-ff.md` on `cursor/swd-395-nmpc-p-tracker-46be` (no PR). Next `/sandbox SWD-394`.
 - 2026-08-19 — `/explore` SWD-392: hierarchical nonlinear OCP + P tracking; route SWD-393 model → SWD-394 sandbox → SWD-395 define; last-plan hold; 5 h fail → u = 0 + persistent notification. Next `/model SWD-393`.
 - 2026-08-19 — shipped SWD-389 via PR #621: PE duration guidance (one day covers categories; several days for a good model); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.10`. Next Done.
 - 2026-08-19 — `/review-fix` SWD-389 CLEAN (focused): 0 blockers / 0 should-fix; APPROVE intent on PR #621 (`gh` review API 403, posted comment). Fast suite 885 passed, 88 skipped. Next `/ship SWD-389`.
