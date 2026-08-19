@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import approx_fprime, minimize
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -50,6 +50,7 @@ RHO = float(DEFAULT_SOFT_CONSTRAINT_WEIGHT)
 S_ROM = float(DEFAULT_SMOOTHING_WEIGHT)
 ALPHA_PRICE = float(DEFAULT_ENERGY_PRICE_WEIGHT)
 TIMEOUT_S = 180.0
+FD_EPS = 1e-4
 METHODS = ("SLSQP",)
 
 BRACKETS = (
@@ -212,13 +213,18 @@ def solve_nmpc(ocp: MeanOcp, u0: np.ndarray, maxiter: int, method: str) -> dict:
     nit = 0
     success = False
     fun = float("nan")
+
+    def jac(u_flat: np.ndarray) -> np.ndarray:
+        return approx_fprime(u_flat, ocp.cost, FD_EPS)
+
     try:
         res = minimize(
             ocp.cost,
             u0,
             method=method,
+            jac=jac,
             bounds=ocp.bounds,
-            options={"maxiter": maxiter, "ftol": 1e-4, "disp": False},
+            options={"maxiter": maxiter, "ftol": 1e-6, "disp": False},
         )
         u_star = np.asarray(res.x, dtype=float)
         nit = int(getattr(res, "nit", 0) or 0)
@@ -392,6 +398,7 @@ def main() -> None:
                 "warm_fun": warm["fun"],
                 "cold_message": cold["message"],
                 "warm_message": warm["message"],
+                "moved": bool(np.isfinite(cold["fun"]) and cold["fun"] < 10.0),
             }
         )
 
@@ -415,7 +422,8 @@ def main() -> None:
         "nmpc": nmpc_rows,
         "notes": [
             "Single shooting in U; F = production implicit Euler of HouseThermalSDE.f.",
-            "SciPy SLSQP, finite-difference Jacobian, timeout 180 s.",
+            "SciPy SLSQP; finite-difference Jacobian (eps=1e-4 when jac is passed).",
+            "A solve that leaves J near the zero-u cost (~3.5e6) is a false success; inspectables keep only runs with J<10.",
             "Closed-loop P not timed this iteration — solve-time gauge only.",
         ],
     }

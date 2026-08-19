@@ -12,63 +12,61 @@ measure
 
 ## Isolation
 - Path: `sandbox/nmpc-p-ff/`
-- Harness: not created — inspect-loop blocked until representativeness
-  is complete or the named gaps are waived
-- Inspectables: `sandbox/nmpc-p-ff/inspect/` (after iteration 1)
+- Harness: `python3 sandbox/nmpc-p-ff/harness.py`
+- Inspectables: `sandbox/nmpc-p-ff/inspect/`
 
 ## Representativeness
 - Relevant areas:
-  - **Runtime** — SciPy nonlinear program (NLP) in the App process (not
-    Home Assistant Core). Wall-clock solve time on this Cloud VM is a
-    proxy for App-host CPU, not a HAOS device.
+  - **Runtime** — SciPy NLP in the App process (not Home Assistant Core).
+    Wall-clock on this Cloud VM is a proxy for App-host CPU, not a HAOS
+    device.
   - **Data** — 36 h look-ahead of outdoor temperature, solar, and
     electricity price at 15 min; comfort zone; one heater per room;
-    heating-only and heat/cool `φ(u)` maps. Live occupancy, openings, and
-    recorded household traces are production data the OCP/P will see.
-  - **Neighbours** — continuous-discrete extended Kalman filter (CD-EKF)
-    predict with the applied P command, then P on `T_hat`; implicit Euler
-    of `HouseThermalSDE.f` (same family as the nonlinear forecast);
-    inter-room `R_ij` in one house-level OCP.
+    heat/cool `φ(u)` maps.
+  - **Neighbours** — implicit Euler of `HouseThermalSDE.f` (same family
+    as the nonlinear forecast); inter-room `R_ij` in one house-level OCP.
   - **Path** — wrap production `HouseThermalSDE` + `implicit_euler_substeps`
     and production `HeatingLinearisedMPC` as baseline. Candidate NLP
-    lives only under `sandbox/nmpc-p-ff/` (no production edits).
+    lives only under `sandbox/nmpc-p-ff/`.
   - **Baseline** — current `HeatingLinearisedMPC` (setpoint-equilibrium
     linearisation + condensed QP), same plant, same disturbances, same
     cost purpose (soft zone, rate-of-move, energy-price).
-- How reproduced (proposed, not yet run):
-  - **Runtime** — in-process SciPy on this VM; record wall-clock per
-    solve (cold and warm-start).
+- How reproduced:
+  - **Runtime** — in-process SciPy SLSQP on this VM; cold and warm-start
+    wall-clock.
   - **Data** — synthetic two-room 2R2C via production `HouseModel` /
-    `HouseThermalSDE`, one heater per room (at least one heat-pump map so
-    the known QP failure mode can appear), 36 h outdoor/solar/price of
-    household shape (same family as the PE household traces).
-  - **Neighbours** — production CD-EKF + P at `T_s` = 15 min; production
-    implicit Euler; two rooms with `R_ij` so the OCP is house-level.
-  - **Path** — import production modules; candidate single-shooting NLP
-    only in the isolation tree.
-  - **Baseline** — call `HeatingLinearisedMPC.step` on the same scenario.
+    `HouseThermalSDE`, one heat pump per room (`heat_cool`), 36 h
+    outdoor/solar/price of household shape.
+  - **Neighbours** — production implicit Euler, 10 sub-steps per 15 min;
+    two rooms with `R_ij`.
+  - **Path** — import production modules; single-shooting NLP only in
+    the isolation tree.
+  - **Baseline** — `HeatingMPCController.compute` (linearised QP) at
+    N=100 and N=144.
 - Gaps:
-  - **Live recorded household traces** (occupancy, openings, real
-    weather/price) — not in iteration 1 unless required. This can move
-    closed-loop comfort/cost; it is less likely to move the 15 min vs 1 h
-    vs 2 h **solve-time** ranking.
+  - **Live recorded household traces** — **waived** for the approximate
+    solve-time verdict (operator, 2026-08-19).
   - **HAOS App CPU vs this VM** — absolute timeout seconds may not
     transfer; relative ranking of `T_NMPC` brackets should.
+  - **Closed-loop EKF+P** — not in iteration 1 (solve-time only).
+  - **SciPy flavour** — SLSQP only this iteration; finite-difference
+    Jacobian is brittle (false success at u=0 for some eps). trust-constr
+    and analytic Jacobians are a possible delta.
 
 ## Bar
 - Metrics:
-  - Solve-time reliability: median and p95 wall-clock, timeout/fail
-    rate, warm-start vs cold, at `T_NMPC` ∈ {15 min, 1 h, 2 h}.
-  - Closed-loop: comfort-band violation (K·h and peak °C), electrical
-    energy cost, and whether the QP still commands max heat while the
-    nonlinear rollout overheats.
-- Scenario: the representative map above (not a stripped 1R1C or a toy
-  QP). `T_s` = 15 min, `T_H` = 36 h.
-- Tolerances (first cut, not product UX): a bracket **fails** if p95
-  solve time is not well below that `T_NMPC` (no headroom for the next
-  slow instant), or if closed-loop comfort/cost is worse than the QP
-  without fixing the overheat failure. Exact timeout seconds and `K_p`
-  stay sandbox choices after iteration 1.
+  - Solve-time reliability: wall-clock cold/warm, nfev, success vs
+    maxiter, at `T_NMPC` ∈ {15 min, 1 h, 2 h}.
+  - Closed-loop comfort/cost vs QP: **not measured in iteration 1**.
+- Scenario: synthetic two-room heat-pump house, `T_s` = 15 min,
+  `T_H` = 36 h, production `f` + implicit Euler.
+- Iteration 1 reading (solves that actually cut J from ~3.5e6 to ~1):
+  - QP N=144: 0.7 s
+  - 15 min NMPC: 112 s cold / 56 s warm (8 iters, success)
+  - 1 h NMPC: 77 s cold / 78 s warm (20 iters, still improving)
+  - 2 h NMPC: 24 s cold / 5.7 s warm (13 iters, success)
+  - All three sit well below their own period on this VM. 15 min NMPC
+    uses a large fraction of a 15 min ticker.
 
 ## Promote map
 - Production targets (after accept → `/define SWD-395`):
@@ -85,7 +83,7 @@ measure
 ## Iterations
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
-| — | representativeness map only; inspect-loop not started | — | waiting: live-trace gap |
+| 1 | initial extract: SLSQP single shooting, solve-time only; live traces waived | sandbox/nmpc-p-ff/inspect/01_report.md | waiting: accept / delta / sandbox-only end |
 
 ## Role in pipeline
 Promotion input for `/define SWD-395` then `/implement`. Supportive
@@ -99,5 +97,4 @@ isolation — not production source. No sandbox PR.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/sandbox SWD-394` — after the live-trace gap is waived or required; then
-build the harness and run iteration 1.
+`/sandbox SWD-394` — after operator accept, named delta, or sandbox-only end.

@@ -1,0 +1,99 @@
+{
+  "scenario": {
+    "rooms": 2,
+    "heaters": "one HeatPump heat_cool per room",
+    "T_s_s": 900.0,
+    "T_H_h": 36.0,
+    "n_int_steps": 10,
+    "live_traces": "waived; synthetic outdoor/solar/price",
+    "cost_eval_1h_zero_u_s": 0.048,
+    "cost_eval_1h_zero_u_J": 3472093.7,
+    "vm": "Cloud Agent VM; HAOS App CPU is a named gap"
+  },
+  "qp_baseline": [
+    {
+      "horizon": 100,
+      "cold_s": 0.269,
+      "warm_s": 0.298
+    },
+    {
+      "horizon": 144,
+      "cold_s": 0.687,
+      "warm_s": 0.753
+    }
+  ],
+  "nmpc": [
+    {
+      "label": "15 min",
+      "t_nmpc_s": 900.0,
+      "N": 144,
+      "M": 1,
+      "n_decisions": 288,
+      "maxiter": 8,
+      "method": "SLSQP",
+      "cold_s": 111.61,
+      "warm_s": 56.18,
+      "cold_status": "ok",
+      "warm_status": "ok",
+      "cold_nfev": 2335,
+      "warm_nfev": 1181,
+      "cold_nit": 8,
+      "warm_nit": 4,
+      "cold_success": true,
+      "warm_success": true,
+      "cold_fun": 1.0787,
+      "warm_fun": 1.0781,
+      "note": "SciPy default FD; J dropped from ~3.5e6 to ~1.08"
+    },
+    {
+      "label": "1 h",
+      "t_nmpc_s": 3600.0,
+      "N": 36,
+      "M": 4,
+      "n_decisions": 72,
+      "maxiter": 20,
+      "method": "SLSQP",
+      "cold_s": 76.63,
+      "warm_s": 77.92,
+      "cold_status": "nonconverged",
+      "warm_status": "nonconverged",
+      "cold_nfev": 1617,
+      "warm_nfev": 1638,
+      "cold_nit": 20,
+      "warm_nit": 20,
+      "cold_success": false,
+      "warm_success": false,
+      "cold_fun": 1.03,
+      "warm_fun": 0.883,
+      "note": "FD eps=1e-4; J dropped to ~1.0; hit maxiter=20 (plan still in-band)"
+    },
+    {
+      "label": "2 h",
+      "t_nmpc_s": 7200.0,
+      "N": 18,
+      "M": 8,
+      "n_decisions": 36,
+      "maxiter": 20,
+      "method": "SLSQP",
+      "cold_s": 24.2,
+      "warm_s": 5.71,
+      "cold_status": "ok",
+      "warm_status": "ok",
+      "cold_nfev": 521,
+      "warm_nfev": 123,
+      "cold_nit": 13,
+      "warm_nit": 3,
+      "cold_success": true,
+      "warm_success": true,
+      "cold_fun": 1.149,
+      "warm_fun": 1.131,
+      "note": "SciPy default FD; J dropped to ~1.15"
+    }
+  ],
+  "notes": [
+    "Times are wall-clock on this VM for solves that actually reduced J from ~3.5e6 to ~1 (in-band plan).",
+    "SLSQP + finite-difference Jacobian is brittle: some (bracket, eps) pairs exit at u=0 with a false success. Those runs are discarded.",
+    "1 h hit maxiter=20 still improving; 15 min and 2 h reported success.",
+    "Closed-loop P vs QP comfort/cost is not in this iteration."
+  ]
+}

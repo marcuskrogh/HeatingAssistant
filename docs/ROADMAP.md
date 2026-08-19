@@ -42,7 +42,7 @@ A two-rate controller. A nonlinear OCP on a slow grid (study start: **1 h**) pro
 - Tasks: [SWD-393](https://marcusknielsen.atlassian.net/browse/SWD-393), [SWD-394](https://marcusknielsen.atlassian.net/browse/SWD-394), [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
 - Delivery branch (no explore/model/sandbox PR): `cursor/swd-395-nmpc-p-tracker-46be`
 - Model: `docs/agents/MODEL-nmpc-p-ff.md`
-- Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (inspect-loop blocked on representativeness)
+- Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (iteration 1 inspectables in `sandbox/nmpc-p-ff/inspect/`)
 
 ## Next
-`/sandbox SWD-394` — waive or require live household traces, then iteration 1.
+`/sandbox SWD-394` — after operator verdict on iteration 1 (solve-time gauge).
