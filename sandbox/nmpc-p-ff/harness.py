@@ -5,6 +5,7 @@ Isolation tree only. Imports production plant / QP; does not edit them.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
@@ -202,10 +203,18 @@ class MeanOcp:
         return j
 
 
-def solve_nmpc(ocp: MeanOcp, u0: np.ndarray, maxiter: int, method: str) -> dict:
+def solve_nmpc(
+    ocp: MeanOcp,
+    u0: np.ndarray,
+    maxiter: int,
+    method: str,
+    *,
+    use_explicit_jac: bool = False,
+    timeout_s: float = TIMEOUT_S,
+) -> dict:
     ocp.nfev = 0
     ocp.timed_out = False
-    ocp.deadline = time.perf_counter() + TIMEOUT_S
+    ocp.deadline = time.perf_counter() + timeout_s
     t0 = time.perf_counter()
     status = "ok"
     message = ""
@@ -217,15 +226,17 @@ def solve_nmpc(ocp: MeanOcp, u0: np.ndarray, maxiter: int, method: str) -> dict:
     def jac(u_flat: np.ndarray) -> np.ndarray:
         return approx_fprime(u_flat, ocp.cost, FD_EPS)
 
+    kwargs: dict = {
+        "fun": ocp.cost,
+        "x0": u0,
+        "method": method,
+        "bounds": ocp.bounds,
+        "options": {"maxiter": maxiter, "ftol": 1e-6, "disp": False},
+    }
+    if use_explicit_jac:
+        kwargs["jac"] = jac
     try:
-        res = minimize(
-            ocp.cost,
-            u0,
-            method=method,
-            jac=jac,
-            bounds=ocp.bounds,
-            options={"maxiter": maxiter, "ftol": 1e-6, "disp": False},
-        )
+        res = minimize(**kwargs)
         u_star = np.asarray(res.x, dtype=float)
         nit = int(getattr(res, "nit", 0) or 0)
         success = bool(res.success)
@@ -340,11 +351,27 @@ def plot_plan(ocp: MeanOcp, u_star: np.ndarray, path: Path) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="SWD-394 NMPC solve-time harness")
+    parser.add_argument("--only", action="append", dest="only", default=None)
+    parser.add_argument("--maxiter", type=int, default=None)
+    parser.add_argument("--tag", default="01")
+    parser.add_argument("--explicit-jac", action="store_true")
+    parser.add_argument("--timeout", type=float, default=TIMEOUT_S)
+    args = parser.parse_args()
+
     INSPECT.mkdir(parents=True, exist_ok=True)
     model, sources, sde = build_plant()
     traces = synthetic_traces(N_FAST)
     x0 = sde.x.copy()
     u_prev = np.zeros(sde.nu)
+    brackets = list(BRACKETS)
+    if args.only:
+        want = {item.strip() for item in args.only}
+        brackets = [br for br in brackets if br["label"] in want]
+        if not brackets:
+            raise SystemExit(f"no brackets match {sorted(want)}")
+    if args.maxiter is not None:
+        brackets = [{**br, "maxiter": int(args.maxiter)} for br in brackets]
 
     t_cost0 = time.perf_counter()
     probe = MeanOcp(sde, sources, traces, 3600.0, x0, u_prev)
@@ -362,14 +389,28 @@ def main() -> None:
         ocp = MeanOcp(sde, sources, traces, br["t_nmpc_s"], x0, u_prev)
         u0 = np.zeros(ocp.n * ocp.nu)
         print(f"NMPC {br['label']} cold N={ocp.n} decisions={ocp.n * ocp.nu} ...", flush=True)
-        cold = solve_nmpc(ocp, u0, br["maxiter"], "SLSQP")
+        cold = solve_nmpc(
+            ocp,
+            u0,
+            br["maxiter"],
+            "SLSQP",
+            use_explicit_jac=args.explicit_jac,
+            timeout_s=args.timeout,
+        )
         print(
             f"  cold {cold['elapsed_s']:.2f}s status={cold['status']} nfev={cold['nfev']}",
             flush=True,
         )
         u_warm0 = cold["u_star"]
         print(f"NMPC {br['label']} warm-start ...", flush=True)
-        warm = solve_nmpc(ocp, u_warm0, br["maxiter"], "SLSQP")
+        warm = solve_nmpc(
+            ocp,
+            u_warm0,
+            br["maxiter"],
+            "SLSQP",
+            use_explicit_jac=args.explicit_jac,
+            timeout_s=args.timeout,
+        )
         print(
             f"  warm {warm['elapsed_s']:.2f}s status={warm['status']} nfev={warm['nfev']}",
             flush=True,
@@ -402,10 +443,13 @@ def main() -> None:
             }
         )
 
-    # Plan plot for the study-default 1 h bracket (even if nonconverged).
-    ocp_1h = MeanOcp(sde, sources, traces, 3600.0, x0, u_prev)
-    plot_plan(ocp_1h, warm_u["1 h"], INSPECT / "01_plan_1h.png")
-    plot_times(nmpc_rows, qp_rows, INSPECT / "01_solve_times.png")
+    plan_label = brackets[0]["label"] if len(brackets) == 1 else "2 h"
+    if plan_label not in warm_u:
+        plan_label = next(iter(warm_u))
+    t_nmpc = next(br["t_nmpc_s"] for br in brackets if br["label"] == plan_label)
+    ocp_plan = MeanOcp(sde, sources, traces, t_nmpc, x0, u_prev)
+    plot_plan(ocp_plan, warm_u[plan_label], INSPECT / f"{args.tag}_plan.png")
+    plot_times(nmpc_rows, qp_rows, INSPECT / f"{args.tag}_solve_times.png")
 
     report = {
         "scenario": {
@@ -422,15 +466,16 @@ def main() -> None:
         "nmpc": nmpc_rows,
         "notes": [
             "Single shooting in U; F = production implicit Euler of HouseThermalSDE.f.",
-            "SciPy SLSQP; finite-difference Jacobian (eps=1e-4 when jac is passed).",
+            "SciPy SLSQP; default FD unless --explicit-jac.",
             "A solve that leaves J near the zero-u cost (~3.5e6) is a false success; inspectables keep only runs with J<10.",
-            "Closed-loop P not timed this iteration — solve-time gauge only.",
         ],
+        "tag": args.tag,
+        "explicit_jac": bool(args.explicit_jac),
     }
-    (INSPECT / "01_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (INSPECT / f"{args.tag}_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     lines = [
-        "# Iteration 1: approximate NMPC solve times",
+        f"# Iteration {args.tag}: NMPC solve times",
         "",
         "Synthetic two-room 2R2C, production `HouseThermalSDE` + implicit Euler, "
         "one heat pump per room. Live traces waived. SciPy SLSQP.",
@@ -448,22 +493,22 @@ def main() -> None:
         "",
         "## Nonlinear OCP (single shooting, 36 h look-ahead)",
         "",
-        "| T_NMPC | N | decisions | maxiter | cold [s] | warm [s] | cold status | warm status | cold nfev |",
-        "|--------|---|-----------|---------|----------|----------|-------------|-------------|-----------|",
+        "| T_NMPC | N | decisions | maxiter | cold [s] | warm [s] | cold status | warm status | cold nfev | cold nit | J |",
+        "|--------|---|-----------|---------|----------|----------|-------------|-------------|-----------|----------|---|",
     ]
     for r in nmpc_rows:
         lines.append(
             f"| {r['label']} | {r['N']} | {r['n_decisions']} | {r['maxiter']} | "
             f"{r['cold_s']:.2f} | {r['warm_s']:.2f} | {r['cold_status']} | "
-            f"{r['warm_status']} | {r['cold_nfev']} |"
+            f"{r['warm_status']} | {r['cold_nfev']} | {r['cold_nit']} | {r['cold_fun']:.3g} |"
         )
     lines += [
         "",
-        "Plots: `01_solve_times.png`, `01_plan_1h.png`.",
+        f"Plots: `{args.tag}_solve_times.png`, `{args.tag}_plan.png`.",
         "",
-        "Closed-loop P vs QP comfort/cost is **not** in this iteration.",
+        "Closed-loop P vs QP comfort/cost is not in this iteration.",
     ]
-    (INSPECT / "01_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (INSPECT / f"{args.tag}_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 
 
