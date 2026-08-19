@@ -168,6 +168,8 @@ export function setupDatasetsAndExperiments(ctx) {
       <p class="pe-coverage__desc">
         Each category needs a stored dataset with that kind of data. Tap a
         category to see what the window should contain.
+        One day of recording can cover every category.
+        Several days usually give a more reliable model.
       </p>
       <div class="pe-coverage-row" id="pe-coverage-list" role="group"
         aria-label="Recommended data categories"></div>
