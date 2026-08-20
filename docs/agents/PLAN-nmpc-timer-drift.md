@@ -99,4 +99,4 @@
 - Workflow: fix-fast
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628 (`554e9fc`)
