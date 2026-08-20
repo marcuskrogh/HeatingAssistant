@@ -47,7 +47,8 @@ A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) 
 - Provider: jira (`SWD`)
 - Story (map): [SWD-392](https://marcusknielsen.atlassian.net/browse/SWD-392)
 - Tasks: [SWD-393](https://marcusknielsen.atlassian.net/browse/SWD-393), [SWD-394](https://marcusknielsen.atlassian.net/browse/SWD-394), [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
-- Delivery branch (no explore/model/sandbox PR): `cursor/swd-395-nmpc-p-tracker-46be`
+- Delivery branch: `cursor/swd-395-nmpc-p-tracker-46be`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/622 (draft)
 - Model: `docs/agents/MODEL-nmpc-p-ff.md`
 - Plan: `docs/agents/PLAN-nmpc-p-ff.md`
 - Sandbox: `docs/agents/SANDBOX-nmpc-p-ff.md` (`sandbox/nmpc-p-ff/inspect/`)

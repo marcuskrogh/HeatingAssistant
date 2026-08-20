@@ -7,7 +7,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/implement SWD-395` |
 | SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
 | SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | Done | SWD-392 | docs/agents/SANDBOX-nmpc-p-ff.md | Done — `/define SWD-395` |
-| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/implement SWD-395` |
+| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/implement SWD-395` — https://github.com/marcuskrogh/HeatingAssistant/pull/622 |
 | SWD-396 | Sub-task | Mean OCP + analytic Jacobian + accept/reject (replace QP path) | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
 | SWD-397 | Sub-task | Fast P + heater K_p; EKF uses applied u | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
 | SWD-398 | Sub-task | NLP worker thread + 5 h fail watchdog + notify | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |

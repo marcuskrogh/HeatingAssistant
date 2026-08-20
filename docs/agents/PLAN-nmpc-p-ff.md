@@ -156,7 +156,7 @@
   [SWD-398](https://marcusknielsen.atlassian.net/browse/SWD-398),
   [SWD-399](https://marcusknielsen.atlassian.net/browse/SWD-399)
 - Branch: `cursor/swd-395-nmpc-p-tracker-46be`
-- PR: (opening)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/622
 - Classification: feature
 - Workflow: feature-standard
 
