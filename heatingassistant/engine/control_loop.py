@@ -269,6 +269,15 @@ class ControlEngine:
         controller = self._controller
         return bool(controller is not None and getattr(controller, "nmpc_due", False))
 
+    def nmpc_plan_idle(self) -> bool:
+        controller = self._controller
+        if controller is None:
+            return False
+        idle = getattr(controller, "nmpc_plan_idle", None)
+        if callable(idle):
+            return bool(idle())
+        return False
+
     def mark_nmpc_busy(self) -> None:
         """Mark the NLP in-flight and freeze the worker's EKF / input snapshot."""
 
@@ -296,7 +305,10 @@ class ControlEngine:
         controller = self._controller
         if controller is None:
             return False
-        return bool(controller.apply_nmpc_result(dict(result)))
+        applied = bool(controller.apply_nmpc_result(dict(result)))
+        if applied:
+            self._cache_controller_forecast(controller)
+        return applied
 
     def consume_watchdog_notification(self) -> str | None:
         controller = self._controller
@@ -495,6 +507,8 @@ class ControlEngine:
                 rated = float(source.max_power)
             bucket["current_rated_max_power"] += rated
             cooling = getattr(source, "max_cooling_power", None)
+            if cooling is None:
+                cooling = getattr(source, "rated_cooling_power", None)
             if cooling is None:
                 cooling = getattr(source, "rated_cooling_capacity", None)
                 if callable(cooling):

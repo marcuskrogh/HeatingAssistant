@@ -42,7 +42,8 @@ HeatingMPCController
       1. Runs the CD-EKF to fuse the current temperature measurement
          (predict uses the last applied P command).
       2. Applies ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``
-         from the last accepted slow plan (or ``u = 0`` when none).
+         from the last accepted slow plan.  With no plan, P toward the
+         setpoint while air is outside the comfort band (else ``u = 0``).
       3. Applies the command to all heat sources.
 
     The slow nonlinear OCP runs on a worker thread (not inline from
@@ -114,6 +115,7 @@ from ..const import (
 )
 from ..integrator import implicit_euler_substeps
 from ..nmpc_ocp import (
+    NMPC_IDLE_U_ABS,
     NMPC_MAXITER,
     NMPC_TIMEOUT_S,
     MeanOcp,
@@ -122,7 +124,7 @@ from ..nmpc_ocp import (
     plan_from_solve,
     solve_mean_ocp,
 )
-from ..nmpc_p import p_command
+from ..nmpc_p import comfort_fallback_command, p_command
 from ..nmpc_timing import NmpcTiming, derive_nmpc_timing, timing_from_dt_horizon
 from ..thermal_model import _SG_FACTOR_TYPICAL
 
@@ -1735,7 +1737,9 @@ class HeatingMPCController:
 
     The fast loop at each ``T_s``:
       1. CD-EKF predict+update using the last applied P command.
-      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``.
+      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)`` from the
+         last accepted plan.  With no plan, P toward the setpoint while
+         air is outside the comfort band (watchdog still forces ``u = 0``).
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -2337,13 +2341,23 @@ class HeatingMPCController:
 
     @property
     def nmpc_due(self) -> bool:
-        """True when a slow solve should start (no path, or one period elapsed)."""
+        """True when a slow solve should start (no path, idle zeros, or one period)."""
         if self._nmpc_busy:
             return False
         with self._nmpc_lock:
             if self._nmpc_U is None:
                 return True
+            if float(np.max(np.abs(self._nmpc_U))) < NMPC_IDLE_U_ABS:
+                return True
             return self._nmpc_k >= self._timing.m
+
+    def nmpc_plan_idle(self) -> bool:
+        """True when an installed slow plan is identically off."""
+        with self._nmpc_lock:
+            U = self._nmpc_U
+            if U is None:
+                return False
+            return float(np.max(np.abs(U))) < NMPC_IDLE_U_ABS
 
     def consume_watchdog_notification(self) -> Optional[str]:
         """Return ``create`` / ``dismiss`` once, then clear."""
@@ -2409,9 +2423,48 @@ class HeatingMPCController:
             self._solve_times.append(float(elapsed))
         if result.get("accepted"):
             self.set_accepted_path(result["u_star"], result["t_ref"], now=now)
+            self.rebuild_forecast_from_plan()
             return True
         self._record_nmpc_reject(now)
         return False
+
+    def rebuild_forecast_from_plan(self) -> bool:
+        """Rebuild plot trajectories from the installed slow plan.
+
+        ``compute()`` caches heating_schedule before the NLP worker finishes.
+        After a plan is applied, refresh the schedule and air-temperature
+        path immediately so Ingress does not keep an open-loop (U = 0)
+        forecast until the next control tick.
+        """
+        with self._nmpc_lock:
+            U_fast = None if self._nmpc_U_fast is None else self._nmpc_U_fast.copy()
+            T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
+        if U_fast is None:
+            return False
+        outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
+        N = int(self._horizon)
+        if U_fast.shape[0] < N:
+            return False
+        if len(outdoor_seq) < N:
+            if not outdoor_seq:
+                return False
+            outdoor_seq = outdoor_seq + [float(outdoor_seq[-1])] * (N - len(outdoor_seq))
+        self._heating_schedule = [
+            self._system.display_heating_powers(U_fast[k], outdoor_seq[k])
+            for k in range(N)
+        ]
+        if T_ref is not None and T_ref.shape[0] > 0:
+            room_list = self._system._room_list
+            n_rooms = min(int(T_ref.shape[1]), len(room_list))
+            self._predictions = [
+                {
+                    name: float(T_ref[min(k, T_ref.shape[0] - 1), i])
+                    for i, name in enumerate(room_list[:n_rooms])
+                }
+                for k in range(N)
+            ]
+            self._linearised_predictions = [dict(step) for step in self._predictions]
+        return True
 
     def _comfort_bounds_fast(
         self,
@@ -2604,6 +2657,22 @@ class HeatingMPCController:
                         float(u_ref[j]),
                         float(t_ref_row[ri]),
                         t_hat,
+                        kp,
+                        float(src.u_min),
+                        float(src.u_max),
+                    )
+            elif not watchdog:
+                rooms = self._system._model.rooms
+                for j, src in enumerate(self._sources):
+                    ri = room_index.get(src.room, 0)
+                    room = rooms.get(src.room)
+                    if room is None:
+                        continue
+                    kp = float(getattr(src, "p_gain", 0.1))
+                    u_abs[j] = comfort_fallback_command(
+                        float(x_hat[ri]),
+                        float(room.setpoint),
+                        float(getattr(room, "comfort_offset", 2.0) or 2.0),
                         kp,
                         float(src.u_min),
                         float(src.u_max),
@@ -2903,6 +2972,11 @@ class HeatingMPCController:
             self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
+        # The NLP worker may install a path while this tick rolled out U=0.
+        # Refresh only then so disabled-source zeros in U_abs are not replaced
+        # by the unmasked plan.
+        if float(np.max(np.abs(U_abs))) < 1e-9:
+            self.rebuild_forecast_from_plan()
 
         return actions
 

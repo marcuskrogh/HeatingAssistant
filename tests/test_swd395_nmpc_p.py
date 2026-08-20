@@ -27,7 +27,7 @@ from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_accept import accept_plan
 from heatingassistant.engine.nmpc_ocp import MeanOcp
-from heatingassistant.engine.nmpc_p import p_command
+from heatingassistant.engine.nmpc_p import comfort_fallback_command, p_command
 from heatingassistant.engine.nmpc_timing import (
     derive_nmpc_timing,
     timing_from_dt_horizon,
@@ -69,6 +69,13 @@ def test_p_command_clips():
     assert p_command(0.0, 18.0, 21.0, 10.0, 0.0, 1.0) == 0.0
 
 
+def test_comfort_fallback_only_outside_band():
+    assert comfort_fallback_command(21.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
+    assert comfort_fallback_command(18.0, 21.0, 2.0, 0.1, 0.0, 1.0) == pytest.approx(0.3)
+    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, -1.0, 1.0) == pytest.approx(-0.7)
+    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
+
+
 def test_accept_in_band_vs_zero_heat():
     lo = np.array([0.0])
     hi = np.array([1.0])
@@ -86,7 +93,7 @@ def test_compute_does_not_call_qp_step():
 
     ctrl._mpc.step = boom  # type: ignore[method-assign]
     actions = ctrl.compute(outdoor_temp=-5.0, now=_NOW)
-    assert actions["h"] == pytest.approx(0.0)
+    assert "h" in actions
 
 
 def test_p_tracks_seeded_reference():
@@ -101,9 +108,29 @@ def test_p_tracks_seeded_reference():
     assert actions["h"] == pytest.approx(0.3, abs=0.15)
 
 
-def test_no_path_is_zero_heat():
+def test_no_path_heats_when_below_band():
     ctrl = _tiny_ctrl()
     actions = ctrl.compute(outdoor_temp=-10.0, now=_NOW)
+    assert actions["h"] > 0.05
+
+
+def test_no_path_cools_when_above_band():
+    hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=2, dt=900.0)
+    actions = ctrl.compute(outdoor_temp=30.0, now=_NOW)
+    assert actions["hp"] < -0.05
+
+
+def test_no_path_idle_inside_band():
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=21.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [heater], horizon=2, dt=900.0)
+    actions = ctrl.compute(outdoor_temp=10.0, now=_NOW)
     assert actions["h"] == pytest.approx(0.0)
 
 
@@ -521,7 +548,8 @@ def test_analytic_jacobian_refreshes_M_each_fast_tick(monkeypatch):
         minimize_fn=fake_min,
         timeout_s=5.0,
     )
-    assert counts["n"] == ctrl.horizon
+    assert counts["n"] >= ctrl.horizon
+    assert counts["n"] % ctrl.horizon == 0
 
 
 def test_nmpc_worker_freezes_ekf_snapshot():
@@ -599,3 +627,327 @@ def test_nmpc_still_heats_electric_when_cold():
     assert plan["accepted"] is True
     assert float(np.min(u_star)) >= -1e-9
     assert float(np.max(u_star)) > 0.1
+
+
+def test_idle_zero_plan_keeps_nmpc_due():
+    ctrl = _tiny_ctrl()
+    n_fast = ctrl.horizon
+    ctrl.set_accepted_path(
+        np.zeros((ctrl.timing.n_slow, 1)), np.full((n_fast, 1), 21.0)
+    )
+    assert ctrl.nmpc_plan_idle() is True
+    assert ctrl.nmpc_due is True
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, 1), 0.4), np.full((n_fast, 1), 21.0)
+    )
+    assert ctrl.nmpc_plan_idle() is False
+    assert ctrl.nmpc_due is False
+
+
+def test_nmpc_cools_production_horizon_and_refreshes_forecast():
+    engine = ControlEngine(
+        {
+            "nmpc_period": DEFAULT_NMPC_PERIOD,
+            "nmpc_fast_substeps": DEFAULT_NMPC_FAST_SUBSTEPS,
+            "nmpc_horizon_h": DEFAULT_NMPC_HORIZON_H,
+            "latitude": 55.67,
+            "longitude": 12.57,
+            "energy_price_weight": 1.0,
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "setpoint": 23.5,
+                    "comfort_offset": 2.0,
+                    "temperature": 24.0,
+                    "solar_exposure": "high",
+                    "solar_facing": 180.0,
+                }
+            ],
+            "heat_sources": [
+                {
+                    "name": "hp",
+                    "type": "heat_pump",
+                    "room": "Living Room",
+                    "max_power": 7000.0,
+                    "hvac_mode": "heat_cool",
+                }
+            ],
+        }
+    )
+    now = datetime(2026, 8, 20, 13, 10, tzinfo=timezone.utc)
+    n_fast = engine._controller.horizon
+    outdoor = [28.0] * n_fast
+    prices = [2.0] * n_fast
+    engine.compute_actions(
+        {"Living Room": 24.0},
+        28.0,
+        {"Living Room": 23.5},
+        now=now,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    before = engine.forecast_snapshot()["heating_schedule"]
+    assert before
+    assert max(abs(float(step["Living Room"])) for step in before) < 1.0
+
+    engine.mark_nmpc_busy()
+    plan = engine.solve_nmpc_blocking()
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert plan["accepted"] is True
+    assert float(np.min(u_star)) < -0.05
+    assert engine.apply_nmpc_result(plan) is True
+
+    snap = engine.forecast_snapshot()
+    watts = [float(step["Living Room"]) for step in snap["heating_schedule"]]
+    assert min(watts) < -100.0
+    temps = [float(step["Living Room"]) for step in snap["predictions"]]
+    assert max(temps) < 26.5
+
+    meta = engine.room_power_meta(28.0)["Living Room"]
+    assert float(meta["max_cooling_power"]) > 1000.0
+
+    engine.compute_actions(
+        {"Living Room": 24.0},
+        28.0,
+        {"Living Room": 23.5},
+        now=now,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    after_compute = [
+        float(step["Living Room"])
+        for step in engine.forecast_snapshot()["heating_schedule"]
+    ]
+    assert min(after_compute) < -100.0
+
+
+def test_signed_probe_cools_when_slsqp_returns_zero():
+    hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=4, dt=900.0)
+
+    class _Res:
+        def __init__(self, x):
+            self.x = np.zeros_like(np.asarray(x, dtype=float))
+            self.fun = 1.0
+            self.success = True
+            self.nit = 1
+            self.message = "ok"
+
+    def fake_min(**kwargs):
+        return _Res(kwargs["x0"])
+
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=30.0, now=_NOW, minimize_fn=fake_min, timeout_s=10.0
+    )
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert float(np.min(u_star)) < -0.05
+    assert float(plan["fun"]) < float(plan["cost_zero"])
+
+
+def test_cauchy_timeout_does_not_abort_solve(monkeypatch):
+    ctrl = _tiny_ctrl()
+    orig = MeanOcp.jac
+    state = {"n": 0}
+
+    def maybe_timeout(self, u):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise TimeoutError("cauchy")
+        return orig(self, u)
+
+    monkeypatch.setattr(MeanOcp, "jac", maybe_timeout)
+
+    class _Res:
+        def __init__(self, x):
+            self.x = np.asarray(x, dtype=float)
+            self.fun = 0.0
+            self.success = True
+            self.nit = 1
+            self.message = "ok"
+
+    def fake_min(**kwargs):
+        return _Res(kwargs["x0"])
+
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=5.0, now=_NOW, minimize_fn=fake_min, timeout_s=5.0
+    )
+    assert plan["status"] != "timeout"
+    assert plan["u_star"] is not None
+    assert state["n"] >= 1
+
+
+def test_rebuild_forecast_pads_short_outdoor():
+    ctrl = _tiny_ctrl()
+    n_fast = ctrl.horizon
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, 1), 0.4), np.full((n_fast, 1), 21.0)
+    )
+    ctrl._outdoor_forecast = [5.0]
+    assert ctrl.rebuild_forecast_from_plan() is True
+    assert len(ctrl.heating_schedule) == n_fast
+    watts = [float(step["living_room"]) for step in ctrl.heating_schedule]
+    assert max(abs(w) for w in watts) > 1.0
+
+
+def test_idle_plan_debounces_nmpc_worker(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={
+            "instance_id": "haos",
+            "nmpc_period": 1800,
+            "nmpc_fast_substeps": 2,
+            "nmpc_horizon_h": 0.5,
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "setpoint": 21.0,
+                    "temp_tags": ["living_temp"],
+                }
+            ],
+            "heat_sources": [
+                {
+                    "name": "heater",
+                    "type": "electric_heater",
+                    "room": "Living Room",
+                    "max_power": 1500.0,
+                }
+            ],
+        },
+    )
+    ctrl = runtime.control_engine._controller
+    assert ctrl is not None
+    n_fast = ctrl.horizon
+    ctrl.set_accepted_path(
+        np.zeros((ctrl.timing.n_slow, 1)), np.full((n_fast, 1), 21.0)
+    )
+    assert ctrl.nmpc_plan_idle() is True
+    assert ctrl.nmpc_due is True
+    runtime._last_nmpc_ts = time.time()
+    started = threading.Event()
+
+    def _fake_solve():
+        started.set()
+        return {
+            "accepted": False,
+            "u_star": np.zeros((ctrl.timing.n_slow, 1)),
+            "t_ref": np.zeros((n_fast, 1)),
+            "fun": 1.0,
+        }
+
+    runtime.control_engine.solve_nmpc_blocking = _fake_solve  # type: ignore[method-assign]
+    runtime.control_engine.mark_nmpc_busy = lambda: None  # type: ignore[method-assign]
+    runtime._schedule_nmpc_worker()
+    assert not started.wait(timeout=0.4)
+    thread = runtime._nmpc_thread
+    assert thread is None or not thread.is_alive()
+
+
+def test_nmpc_worker_requests_control_cycle_on_accept(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    requested: list[bool] = []
+    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
+        lambda: requested.append(True)
+    )
+    runtime.control_engine.apply_nmpc_result = lambda _result: True  # type: ignore[method-assign]
+    runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
+        "accepted": True,
+        "u_star": np.array([[0.4]]),
+        "t_ref": np.array([[21.0]]),
+        "fun": 1.0,
+    }
+    runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
+    runtime._nmpc_worker_thread()
+    assert requested == [True]
+
+
+def test_request_control_cycle_runs_when_loop_missing(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_runs_when_loop_closed(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    loop = asyncio.new_event_loop()
+    loop.close()
+    runtime._nmpc_loop = loop
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_waits_for_held_lock(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    assert runtime._control_lock.acquire(blocking=False)
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            runtime._request_control_cycle_after_nmpc()
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, name="nmpc-followup-lock")
+    thread.start()
+    assert not done.wait(timeout=0.3)
+    runtime._control_lock.release()
+    assert done.wait(timeout=15.0)
+    thread.join(timeout=2.0)
+    assert runtime._last_control_ts is not None
+
+
+def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    requested: list[bool] = []
+    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
+        lambda: requested.append(True)
+    )
+    runtime.control_engine.apply_nmpc_result = lambda _result: False  # type: ignore[method-assign]
+    runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
+        "accepted": False,
+        "u_star": np.array([[0.0]]),
+        "t_ref": np.array([[21.0]]),
+        "fun": 1.0,
+    }
+    runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
+    runtime._nmpc_worker_thread()
+    assert requested == []

@@ -7,6 +7,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | In Review | — | docs/agents/PLAN-heating-assistant-icon.md | `/review-fix SWD-408` |
 | SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
+| SWD-411 | Task | [Iterate] Heat and cool on the fast loop when comfort bounds are already violated | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626 (`ae030d9`) |
+| SWD-412 | Sub-task | Fast P comfort fallback and publish actuators on NMPC apply | Done | SWD-411 | docs/agents/ITERATE.md | — |
+| SWD-413 | Sub-task | Tests, CalVer, App sync for comfort fallback | Done | SWD-411 | docs/agents/ITERATE.md | — |
+| SWD-405 | Task | [Iterate] NMPC planned power stays at 0 kW when cooling is needed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/624 (`68d86cf`) |
+| SWD-406 | Sub-task | Refresh NMPC forecast on apply and retry idle zero plans | Done | SWD-405 | docs/agents/ITERATE.md | — |
+| SWD-407 | Sub-task | Tests, CalVer, App sync for cooling plan plot | Done | SWD-405 | docs/agents/ITERATE.md | — |
 | SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623 (`61c56e7`) |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |
@@ -133,6 +139,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 - 2026-08-20 — `/implement` SWD-408 In Review: brand SVG/PNGs, Supervisor icon/logo, HA `brand/` folder, Ingress favicon; CalVer 2026.08.21. Fast suite 928 passed, 88 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next `/review-fix SWD-408`.
 - 2026-08-20 — `/define` SWD-408: PLAN `docs/agents/PLAN-heating-assistant-icon.md` (tweak / delta-fast). Shared house + settling-curve mark; Supervisor icon/logo; HA 2026.3+ `brand/` folder; brands lift copy. Sub-tasks SWD-409–410. Next `/implement SWD-408`.
+- 2026-08-20 — `/ship` SWD-411 via PR #626 (`ae030d9`): heat/cool on the 15 min loop when already out of band; post-accept publish works off ticker/start ephemeral loops; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.22`. Next Done.
+- 2026-08-20 — `/review-fix` SWD-411: 1 blocker / 3 should-fix (ephemeral `_nmpc_loop` skipped post-accept publish; lock wait; tests; changelog). Fix-forward on PR #626.
+- 2026-08-20 — `/iterate` SWD-411 In Review: fast P comfort fallback + publish actuators on NMPC apply; PR https://github.com/marcuskrogh/HeatingAssistant/pull/626; CalVer 2026.08.22. Next `/review-fix SWD-411`.
+- 2026-08-20 — `/iterate` SWD-411 from SWD-405: live heat/cool idle at `u = 0` while comfort bounds are already violated; fast P fallback + publish actuators on NMPC apply; Relates SWD-405; Sub-tasks SWD-412–413. Next `/implement SWD-411`.
+- 2026-08-20 — `/iterate` SWD-405 from SWD-400: planned cooling still 0 kW on the room plot; refresh forecast on apply + retry idle zero plans; Relates SWD-400; Sub-tasks SWD-406–407. Next `/review-fix SWD-405`.
 - 2026-08-20 — `/define` SWD-395: PLAN `docs/agents/PLAN-nmpc-p-ff.md` (feature / feature-standard). Timing triple 2 h / 8 fast substeps / 36 h (`T_s` derived); `K_p` 0.1 /K; robust accept/reject; worker + 5 h watchdog. Sub-tasks SWD-396–399. Next `/implement SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 **accepted** (2 h, analytic Jacobian, worker thread). Supportive Task Done. Next `/define SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 3: analytic `dJ/dU` via production `dfdx`/`dfdu` (rel error 1.3e-5 vs FD). 2 h cold **22 s** / 80 iters (J=0.81, hit cap); warm **7.7 s** / 26 iters success. Inspect `sandbox/nmpc-p-ff/inspect/03_report.md`. Next `/sandbox SWD-394`.
