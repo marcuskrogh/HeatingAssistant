@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.25
+
+- Room view Forecast and Planned Power now stay on the two-hour planner
+  path after each 15-minute control tick, matching Controller Tuning
+  preview: power holds for two hours, and the temperature forecast is
+  the planner trajectory rather than a jittery short-step re-rollout.
+
 # 2026.08.24
 
 - Room view now plots the two-hour planner's path (Forecast and Planned

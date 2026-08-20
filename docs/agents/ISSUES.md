@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-421 | Task | [Iterate] Room view plots 15-minute steps instead of the 2-hour NMPC trajectory | In Review | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/629 |
+| SWD-422 | Sub-task | Keep Ingress plots on the installed 2-hour NMPC plan | Done | SWD-421 | docs/agents/ITERATE.md | — |
+| SWD-423 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-421 | docs/agents/ITERATE.md | — |
 | SWD-414 | Task | [Iterate] Room view optimal trajectory still U=0 / 30°C free response | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/627 (`434027a`) |
 | SWD-415 | Sub-task | Accept NMPC plans that beat zero-heat and plot that trajectory | Done | SWD-414 | docs/agents/ITERATE.md | — |
 | SWD-416 | Sub-task | Tests, CalVer, changelog, App sync for trajectory plot | Done | SWD-414 | docs/agents/ITERATE.md | — |
@@ -139,6 +142,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/ship` SWD-421: review-fix CLEAN (focused); GitHub CI 6/6 green on `8c95654`; closeout on PR #629. Next Done.
+- 2026-08-20 — `/iterate` SWD-421 In Review: keep room-view Forecast / Planned Power on the installed 2-hour `U*` hold and `T_ref` after 15-minute ticks; PR https://github.com/marcuskrogh/HeatingAssistant/pull/629; CalVer 2026.08.25. Fast suite 948 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-421`.
+- 2026-08-20 — `/iterate` SWD-421 from SWD-414: room view still plots 15-minute power steps and a jittery Forecast after each fast `compute()`; keep Planned Power / Forecast on the installed 2-hour `U*` hold and `T_ref`. Relates SWD-414; Sub-tasks SWD-422–423. Next `/review-fix SWD-421`.
 - 2026-08-20 — `/ship` SWD-414 via PR #627 (`434027a`): room view plots the two-hour planner path when it beats leaving the heater off; accept at ≥0.1% better than J(u=0); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.24`. Next Done.
 - 2026-08-20 — `/review-fix` SWD-414: 0 blockers / 1 should-fix (accept threshold used strict `<` at the 0.1% bar). Fix-forward on PR #627.
 - 2026-08-20 — `/iterate` SWD-414 In Review: accept NMPC when J is 0.1% better than J(u=0); room view refetches on `last_nmpc_ts`; PR https://github.com/marcuskrogh/HeatingAssistant/pull/627; CalVer 2026.08.24. Fast suite 945 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-414`.

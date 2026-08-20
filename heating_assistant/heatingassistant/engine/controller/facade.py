@@ -2431,14 +2431,15 @@ class HeatingMPCController:
     def rebuild_forecast_from_plan(self) -> bool:
         """Rebuild plot trajectories from the installed slow plan.
 
-        ``compute()`` caches heating_schedule before the NLP worker finishes.
-        After a plan is applied, refresh the schedule and air-temperature
-        path immediately so Ingress does not keep an open-loop (U = 0)
-        forecast until the next control tick.
+        Ingress Forecast / Planned Power should show the accepted ``U*``
+        hold and the planner air path ``T_ref``, not the 15-minute P-grid
+        re-rollout. Display power uses the outdoor sample at the start of
+        each slow interval so COP does not invent 15-minute watt steps.
         """
         with self._nmpc_lock:
             U_fast = None if self._nmpc_U_fast is None else self._nmpc_U_fast.copy()
             T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
+            m = int(self._timing.m)
         if U_fast is None:
             return False
         outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
@@ -2449,10 +2450,13 @@ class HeatingMPCController:
             if not outdoor_seq:
                 return False
             outdoor_seq = outdoor_seq + [float(outdoor_seq[-1])] * (N - len(outdoor_seq))
-        self._heating_schedule = [
-            self._system.display_heating_powers(U_fast[k], outdoor_seq[k])
-            for k in range(N)
-        ]
+        m = max(m, 1)
+        self._heating_schedule = []
+        for k in range(N):
+            outdoor_k = outdoor_seq[(k // m) * m]
+            self._heating_schedule.append(
+                self._system.display_heating_powers(U_fast[k], outdoor_k)
+            )
         if T_ref is not None and T_ref.shape[0] > 0:
             room_list = self._system._room_list
             n_rooms = min(int(T_ref.shape[1]), len(room_list))
@@ -2962,21 +2966,30 @@ class HeatingMPCController:
         self._u_prev = u_abs.copy()
         self._mpc._u_prev = u_abs.copy()
 
-        self._predictions = self._compute_nonlinear_predictions(
-            U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
-            wind_seq=wind_seq,
-        )
-        self._linearised_predictions = [dict(step) for step in self._predictions]
-
-        self._heating_schedule = [
-            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
-            for k in range(N)
-        ]
-        # The NLP worker may install a path while this tick rolled out U=0.
-        # Refresh only then so disabled-source zeros in U_abs are not replaced
-        # by the unmasked plan.
-        if float(np.max(np.abs(U_abs))) < 1e-9:
-            self.rebuild_forecast_from_plan()
+        # Ingress plots the installed slow plan.  The 15-minute tick still
+        # runs EKF then P for actuators; it must not replace Forecast /
+        # Planned Power with a fast-grid re-rollout.  Display power uses
+        # the (possibly disabled-source-masked) U_abs with one outdoor
+        # sample per slow interval so COP does not invent 15-minute watt
+        # steps.
+        if self.rebuild_forecast_from_plan():
+            m = max(int(self._timing.m), 1)
+            self._heating_schedule = [
+                self._system.display_heating_powers(
+                    U_abs[k], outdoor_seq[(k // m) * m]
+                )
+                for k in range(N)
+            ]
+        else:
+            self._predictions = self._compute_nonlinear_predictions(
+                U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
+                wind_seq=wind_seq,
+            )
+            self._linearised_predictions = [dict(step) for step in self._predictions]
+            self._heating_schedule = [
+                self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
+                for k in range(N)
+            ]
 
         return actions
 
