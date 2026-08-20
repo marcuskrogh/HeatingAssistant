@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-414 | Task | [Iterate] Room view optimal trajectory still U=0 / 30°C free response | In Progress | — | docs/agents/ITERATE.md | `/implement SWD-414` |
-| SWD-415 | Sub-task | Accept NMPC plans that beat zero-heat and plot that trajectory | In Progress | SWD-414 | docs/agents/ITERATE.md | — |
-| SWD-416 | Sub-task | Tests, CalVer, changelog, App sync for trajectory plot | To Do | SWD-414 | docs/agents/ITERATE.md | — |
+| SWD-414 | Task | [Iterate] Room view optimal trajectory still U=0 / 30°C free response | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-414` |
+| SWD-415 | Sub-task | Accept NMPC plans that beat zero-heat and plot that trajectory | Done | SWD-414 | docs/agents/ITERATE.md | — |
+| SWD-416 | Sub-task | Tests, CalVer, changelog, App sync for trajectory plot | Done | SWD-414 | docs/agents/ITERATE.md | — |
 | SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | Done | — | docs/agents/PLAN-heating-assistant-icon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/625 (`acbd43b`) |
 | SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
@@ -139,6 +139,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/iterate` SWD-414 In Review: accept NMPC when J is 0.1% better than J(u=0); room view refetches on `last_nmpc_ts`; PR https://github.com/marcuskrogh/HeatingAssistant/pull/627; CalVer 2026.08.24. Fast suite 945 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-414`.
 - 2026-08-20 — `/iterate` SWD-414 from SWD-411: room-view optimal trajectory still U=0 / 30°C free response; accept plans that beat J(u=0); Relates SWD-411; Sub-tasks SWD-415–416. Next `/implement SWD-414`.
 - 2026-08-20 — `/ship` SWD-408 via PR #625 (`acbd43b`): proper Heating Assistant icon for App store, Ingress, and HA 2026.3+ `brand/`; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.23`. Next Done.
 - 2026-08-20 — `/review-fix` SWD-408 CLEAN (focused): 1 blocker / 6 should-fix (CalVer behind main; brands README; font fallbacks; favicon size + cache-bust; Python `copytree brand/`; PLAN logo 500×200). Fix-forward on PR #625. Next `/ship SWD-408`.

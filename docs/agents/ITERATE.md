@@ -49,4 +49,4 @@
 - Branch: `cursor/swd-414-nmpc-optimal-trajectory-ce1e`
 
 ## Next
-`/implement SWD-414` — Build the accept-bar and room-view forecast refresh
+`/review-fix SWD-414` — Review and auto-fix on PR #627
