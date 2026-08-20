@@ -21,6 +21,7 @@ THIN_FILES=(
   repairs.py
   restart_issue.py
   strings.json
+  icon.svg
 )
 
 for required in "${CONFIG}" "${DOCKERFILE}" "${ROOT}/pyproject.toml" "${SRC_PACKAGE}" "${SRC_INTEGRATION}" "${ROOT}/README.md"; do
@@ -35,6 +36,10 @@ for file in "${THIN_FILES[@]}"; do
     exit 1
   fi
 done
+if [ ! -d "${SRC_INTEGRATION}/brand" ]; then
+  echo "Missing required thin integration brand assets: ${SRC_INTEGRATION}/brand" >&2
+  exit 1
+fi
 
 rm -rf "${DST_PACKAGE}" "${DST_INTEGRATION}"
 mkdir -p "${APP_DIR}/custom_components" "${DST_INTEGRATION}"
@@ -42,6 +47,9 @@ cp -a "${SRC_PACKAGE}" "${DST_PACKAGE}"
 for file in "${THIN_FILES[@]}"; do
   cp -a "${SRC_INTEGRATION}/${file}" "${DST_INTEGRATION}/${file}"
 done
+if [ -d "${SRC_INTEGRATION}/brand" ]; then
+  cp -a "${SRC_INTEGRATION}/brand" "${DST_INTEGRATION}/brand"
+fi
 cp -a "${ROOT}/pyproject.toml" "${APP_DIR}/pyproject.toml"
 cp -a "${ROOT}/README.md" "${APP_DIR}/README.md"
 # App subtree docs live at ../docs relative to heating_assistant/README.md
@@ -147,6 +155,7 @@ shutil.rmtree(dst_package, ignore_errors=True)
 shutil.rmtree(dst_integration, ignore_errors=True)
 dst_integration.mkdir(parents=True, exist_ok=True)
 shutil.copytree(root / "heatingassistant", dst_package)
+src_integration = root / "custom_components" / "heating_assistant"
 for name in (
     "manifest.json",
     "__init__.py",
@@ -159,11 +168,12 @@ for name in (
     "strings.json",
     "repairs.py",
     "restart_issue.py",
+    "icon.svg",
 ):
-    shutil.copy2(
-        root / "custom_components" / "heating_assistant" / name,
-        dst_integration / name,
-    )
+    shutil.copy2(src_integration / name, dst_integration / name)
+brand_src = src_integration / "brand"
+if brand_src.is_dir():
+    shutil.copytree(brand_src, dst_integration / "brand")
 shutil.copy2(root / "pyproject.toml", app_dir / "pyproject.toml")
 shutil.copy2(root / "README.md", app_dir / "README.md")
 readme_app = (app_dir / "README.md").read_text(encoding="utf-8")

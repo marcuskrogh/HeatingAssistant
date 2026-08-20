@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.21
+
+- Heating Assistant now has its own icon in the App store and in
+  Home Assistant Settings.
+
 # 2026.08.20
 
 - When a heat pump can cool, the two-hour planner now uses negative power

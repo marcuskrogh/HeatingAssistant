@@ -101,7 +101,7 @@
 - Task: SWD-408
 - Sub-tasks: SWD-409, SWD-410
 - Branch: `cursor/swd-408-heating-assistant-icon-73a2`
-- PR: (draft, opened after first commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/625
 - Classification: tweak
 - Workflow: delta-fast
 
