@@ -123,6 +123,30 @@ def test_nmpc_worker_stamps_last_nmpc_ts_on_reject(tmp_path: Path) -> None:
     assert attrs["last_nmpc_ts"] == pytest.approx(runtime._last_nmpc_ts)
 
 
+def test_concurrent_runtime_state_saves_do_not_raise(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(
+        tmp_path, bus=InMemoryMqttBus(), options={"instance_id": "haos"}
+    )
+    errors: list[BaseException] = []
+
+    def _save_loop() -> None:
+        try:
+            for _ in range(40):
+                runtime._last_nmpc_ts = time.time()
+                runtime._save_runtime_state()
+        except BaseException as exc:  # noqa: BLE001 — collect any thread failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_save_loop) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+    assert errors == []
+    assert (tmp_path / "state.json").is_file()
+
+
 def test_panel_js_wires_dual_countdown_rings() -> None:
     countdown = (_STATIC / "js" / "components" / "countdown.js").read_text(
         encoding="utf-8"

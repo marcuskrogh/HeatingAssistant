@@ -212,6 +212,7 @@ class HeatingRuntime:
         self._ticker_stop = threading.Event()
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._nmpc_thread: threading.Thread | None = None
         self._nmpc_loop: asyncio.AbstractEventLoop | None = None
         self._history_lock = threading.Lock()
@@ -787,20 +788,18 @@ class HeatingRuntime:
             self._note_nmpc_cycle_complete()
 
     def _note_nmpc_cycle_complete(self) -> None:
-        """Stamp the slow planner cycle so the UI can count down to the next one."""
+        """Stamp the slow planner cycle so the UI can count down to the next one.
 
-        with self._control_lock:
-            self._last_nmpc_ts = time.time()
-            try:
-                self._save_runtime_state()
-            except Exception:
-                _logger.exception("Failed to persist last NMPC timestamp")
-        loop = self._nmpc_loop
-        if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._best_effort_mqtt(self.publish_status(), "status"),
-                loop,
-            )
+        Ingress polls ``hass_states()``, so the in-memory stamp is enough for
+        the ring. Persist under ``_state_lock`` so the worker does not race
+        ``update_tag`` / control-cycle writers on ``state.json``.
+        """
+
+        self._last_nmpc_ts = time.time()
+        try:
+            self._save_runtime_state()
+        except Exception:
+            _logger.exception("Failed to persist last NMPC timestamp")
 
     def _emit_nmpc_notify(self, action: str) -> None:
         loop = self._nmpc_loop
@@ -3141,6 +3140,10 @@ class HeatingRuntime:
             )
 
     def _save_runtime_state(self) -> None:
+        with self._state_lock:
+            self._write_runtime_state_locked()
+
+    def _write_runtime_state_locked(self) -> None:
         self.state["bindings"] = self.binding_dicts()
         self.state["tag_values"] = dict(self.tag_values)
         self._prune_unbound_tag_quality()

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 CONFIG_FILENAME = "config.json"
@@ -40,11 +42,20 @@ def save_json(data_dir: str | Path, filename: str, data: Mapping[str, Any]) -> P
 
     path = _path(data_dir, filename)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
-        json.dump(dict(data), handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    tmp_path.replace(path)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(dict(data), handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        tmp_path.replace(path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return path
 
 

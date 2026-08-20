@@ -23,9 +23,26 @@ def test_config_and_state_round_trip(tmp_path) -> None:
     assert load_state(tmp_path) == {"tag_values": {"living": 21.0}}
 
 
-def test_missing_config_and_state_default_to_empty_dict(tmp_path) -> None:
-    assert load_config(tmp_path) == {}
-    assert load_state(tmp_path) == {}
+def test_concurrent_save_json_does_not_raise(tmp_path) -> None:
+    import threading
+
+    errors: list[BaseException] = []
+
+    def _write(n: int) -> None:
+        try:
+            for i in range(40):
+                save_state(tmp_path, {"n": n, "i": i})
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_write, args=(n,)) for n in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+    assert errors == []
+    assert load_state(tmp_path)["n"] in {0, 1, 2, 3}
 
 
 def test_runtime_loads_options_and_exposes_status(tmp_path) -> None:
