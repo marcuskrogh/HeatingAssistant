@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-418 | Task | [Bug] NMPC long timer resets when the solve finishes — schedule must stay drift-free | To Do | — | docs/agents/PLAN-nmpc-timer-drift.md | `/implement SWD-418` |
+| SWD-419 | Sub-task | Wall-clock epoch: do not restamp NMPC/control timers when a solve finishes | To Do | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
+| SWD-420 | Sub-task | Tests, CalVer, changelog, App sync for drift-free NMPC timer | To Do | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
 | SWD-414 | Task | [Iterate] Room view optimal trajectory still U=0 / 30°C free response | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/627 (`434027a`) |
 | SWD-415 | Sub-task | Accept NMPC plans that beat zero-heat and plot that trajectory | Done | SWD-414 | docs/agents/ITERATE.md | — |
 | SWD-416 | Sub-task | Tests, CalVer, changelog, App sync for trajectory plot | Done | SWD-414 | docs/agents/ITERATE.md | — |
@@ -139,6 +142,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/define` SWD-418: PLAN `docs/agents/PLAN-nmpc-timer-drift.md` (bug / fix-fast). `last_nmpc_ts` is the Start epoch; NMPC finish must not restamp it. Sub-tasks SWD-419–420. Next `/implement SWD-418`.
 - 2026-08-20 — `/ship` SWD-414 via PR #627 (`434027a`): room view plots the two-hour planner path when it beats leaving the heater off; accept at ≥0.1% better than J(u=0); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.24`. Next Done.
 - 2026-08-20 — `/review-fix` SWD-414: 0 blockers / 1 should-fix (accept threshold used strict `<` at the 0.1% bar). Fix-forward on PR #627.
 - 2026-08-20 — `/iterate` SWD-414 In Review: accept NMPC when J is 0.1% better than J(u=0); room view refetches on `last_nmpc_ts`; PR https://github.com/marcuskrogh/HeatingAssistant/pull/627; CalVer 2026.08.24. Fast suite 945 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-414`.
