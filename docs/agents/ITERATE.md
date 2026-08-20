@@ -1,56 +1,47 @@
-# Iterate: Restart required as Settings repair, not an Update card
+# Iterate: NMPC must choose negative heater power when cooling is allowed
 
 ## Prior work
-- Task: [SWD-352](https://marcusknielsen.atlassian.net/browse/SWD-352)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/618
-- Spec context: `docs/agents/PLAN-app-update-path.md`
+- Task: [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/622
+- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/MODEL-nmpc-p-ff.md`
 
 ## Problem
-- After updating the App to 2026.08.7, Settings still shows HeatingAssistant
-  under **Updates** (`1 update`) with restart-required text.
-- The card stays after a normal Home Assistant Core restart.
-- The user wants the same separate top-of-Settings section other apps use.
+- Heat-pump bounds are `[-1, 1]` and `HouseThermalSDE` cools at `u < 0`.
+- SciPy SLSQP from the zero warm-start returns `U* = 0` whenever the
+  optimum is negative (comfort cost/gradient ~1e5; SLSQP reports success
+  after one evaluation). Heating from the same start still works because
+  `u = 0` is the lower bound and the search direction is positive.
 
 ## Clarifications
-- Home Assistant Settings has two dashboard cards: **Repairs**
-  (`ha-config-repairs`) and **Updates** (`ha-config-updates`).
-- HACS (and other integrations) create a fixable `restart_required` repair via
-  `issue_registry.async_create_issue` plus `repairs.py` (`homeassistant.restart`).
-  That is the separate section.
-- SWD-352 published an MQTT Update entity, so the prompt landed in Updates and
-  looked like another HeatingAssistant software update. Retained MQTT discovery
-  plus a stamp that is not cleared on a normal Core restart kept it there.
-- First hop onto this version: App tombstone clears the Updates card immediately.
-  Loaded 2026.08.7 cannot create a repair. After Core restart, disk and loaded
-  versions match, so no repair appears for this hop. Later App updates (with
-  this code already loaded) show Restart required under Repairs before Core
-  restart.
+- Confirmed on a cooling-capable heat pump, overheated room (28 °C vs
+  21 ± 2 °C): `J(u=-1) ≪ J(0)`, analytic Jacobian matches finite
+  differences, but SLSQP stays at `0`. Scaling `J` by `max(1, |J(u0)|)`
+  finds `u* ≈ -0.83`. L-BFGS-B also finds cooling without scaling.
+- Keep SLSQP (PLAN). Scale the NLP objective and Jacobian only; accept
+  still uses unscaled `J`.
 
 ## Acceptance criteria
-- App start tombstones `homeassistant/update/heatingassistant_restart/config`
-  (empty retained payload) so leftover Update cards disappear.
-- The thin integration creates a fixable **Restart required** repair when the
-  on-disk `manifest.json` version differs from the loaded `VERSION`.
-- The repair is deleted when versions match (after Core restart).
-- Repair fix flow calls `homeassistant.restart` (HACS path).
-- Native `update.py` stays unregistered (would put a card back in Updates).
-- Tests cover create/delete and the MQTT tombstone. CalVer bump + App sync.
+- Overheated room + cooling-capable heat pump: accepted `U*` has negative
+  entries (from a zero warm-start).
+- Heating-only electric heater: still commands heat when too cold.
+- Source `u_min` / `u_max` still set the box bounds.
+- Tests, CalVer 2026.08.20, changelog, App sync.
 
 ## Out of scope
-- Prebuilt registry images / dynamic download percent.
-- Persistent notifications.
-- Auto Core restart from `run.sh`.
+- Switching the NLP backend away from SLSQP.
+- Changing the accept ratio vs `J(u=0)`.
+- I-term / D-term or QP fallback.
 
 ## Work packages
-1. Settings repair + tombstone MQTT update (SWD-357)
-2. Tests, CalVer, App sync (SWD-358)
+1. Scale NMPC NLP so SLSQP can choose negative `u` (SWD-401)
+2. Tests, CalVer, App sync (SWD-402)
 
 ## Tracker
-- Task: [SWD-356](https://marcusknielsen.atlassian.net/browse/SWD-356)
-- Relates: [SWD-352](https://marcusknielsen.atlassian.net/browse/SWD-352)
-- Sub-tasks: SWD-357, SWD-358
-- Branch: `cursor/swd-356-restart-repair-51f5`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/619
+- Task: [SWD-400](https://marcusknielsen.atlassian.net/browse/SWD-400)
+- Relates: [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
+- Sub-tasks: [SWD-401](https://marcusknielsen.atlassian.net/browse/SWD-401),
+  [SWD-402](https://marcusknielsen.atlassian.net/browse/SWD-402)
+- Branch: `cursor/swd-400-nmpc-signed-u-46be`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/619
+`/implement SWD-400` — scale the NLP and add the cooling regression
