@@ -99,4 +99,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-418` — review-fix CLEAN; merge PR #628 after pytest-fast is green
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628
