@@ -65,8 +65,9 @@ def test_brands_lift_copy_matches_readme() -> None:
 def test_ingress_uses_shared_svg_and_favicon() -> None:
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
-    assert 'rel="icon" href="static/img/logo.svg"' in index
-    assert "apple-touch-icon" in index
+    assert 'rel="icon" href="static/img/logo.svg?v=135"' in index
+    assert 'rel="apple-touch-icon" href="static/img/favicon.png?v=135"' in index
+    assert png_size(STATIC / "img" / "favicon.png") == (128, 128)
     assert "img/logo.svg" in dashboard
     assert "panel-nav__logo" in dashboard
     assert 'src="${BASE_PATH}/img/logo.svg' in dashboard
@@ -75,7 +76,7 @@ def test_ingress_uses_shared_svg_and_favicon() -> None:
 def test_sync_script_copies_icon_svg_and_brand_folder() -> None:
     text = SYNC.read_text(encoding="utf-8")
     assert text.count("icon.svg") >= 2
-    assert "brand" in text
+    assert 'shutil.copytree(brand_src, dst_integration / "brand")' in text
     dest = APP_DIR / "custom_components" / "heating_assistant"
     assert (dest / "icon.svg").is_file()
     assert (dest / "brand" / "icon.png").is_file()

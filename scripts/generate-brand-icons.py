@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Render Heating Assistant brand PNGs from the shared SVG mark.
 
-Source of truth for the glyph is custom_components/heating_assistant/icon.svg
-(written by this script). Badge PNGs are rasterized with cairosvg so strokes
-stay clean at 128–512 px.
+Canonical glyph is GLYPH_SVG in this script. main() writes it to
+custom_components/heating_assistant/icon.svg and
+heatingassistant/app/static/img/logo.svg. Badge PNGs are rasterized with
+cairosvg so strokes stay clean at 128–512 px.
 """
 
 from __future__ import annotations
@@ -53,6 +54,20 @@ def svg_to_png(svg: str, width: int, height: int | None = None) -> Image.Image:
     return Image.open(BytesIO(png)).convert("RGBA")
 
 
+def load_wordmark_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = (
+        Path("/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf"),
+        Path("/usr/share/fonts/truetype/inter/Inter-SemiBold.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
+    )
+    for path in candidates:
+        if path.is_file():
+            return ImageFont.truetype(str(path), size)
+    return ImageFont.load_default()
+
+
 def render_logo(width: int = 500, height: int = 200) -> Image.Image:
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     badge_size = int(height * 0.92)
@@ -60,8 +75,7 @@ def render_logo(width: int = 500, height: int = 200) -> Image.Image:
     by = (height - badge_size) // 2
     bx = by
     img.alpha_composite(badge, (bx, by))
-    font_path = Path("/usr/share/fonts/truetype/macos/Inter-SemiBold.ttf")
-    font = ImageFont.truetype(str(font_path), max(18, int(height * 0.28)))
+    font = load_wordmark_font(max(18, int(height * 0.28)))
     draw = ImageDraw.Draw(img)
     text_x = bx + badge_size + int(height * 0.12)
     line1, line2 = "Heating", "Assistant"

@@ -8,8 +8,8 @@ integration is ever published.
 brands/
 └── custom_integrations/
     └── heating_assistant/
-        ├── icon.png      # 256x256, transparent
-        └── icon@2x.png   # 512x512, transparent
+        ├── icon.png      # 256x256 teal rounded-square badge
+        └── icon@2x.png   # 512x512 teal rounded-square badge
 ```
 
 The source of truth for the artwork is

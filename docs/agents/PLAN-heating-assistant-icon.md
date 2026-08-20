@@ -13,7 +13,7 @@
 - Shared SVG mark (house frame, S-curve to a setpoint, target dot) in teal
   `#00d4aa`, matching the Ingress nav.
 - Supervisor App assets next to `heating_assistant/config.yaml`: `icon.png`
-  (128×128) and `logo.png` (~250×100).
+  (128×128) and `logo.png` (500×200, 2× of the ~250×100 Supervisor slot).
 - Thin integration `custom_components/heating_assistant/brand/` with
   `icon.png`, `icon@2x.png`, and dark variants so Settings → Devices & Services
   shows the mark on Home Assistant 2026.3+.
@@ -76,8 +76,8 @@
 
 ## Acceptance criteria
 1. `heating_assistant/icon.png` is a square PNG (128×128) and
-   `heating_assistant/logo.png` is a rectangular PNG (~250×100) so Supervisor
-   can show the App in the store.
+   `heating_assistant/logo.png` is a rectangular PNG (500×200, 2× of the
+   ~250×100 Supervisor slot) so Supervisor can show the App in the store.
 2. `custom_components/heating_assistant/brand/` contains `icon.png` (256×256)
    and `icon@2x.png` (512×512) plus dark variants; App sync copies that folder.
 3. `custom_components/heating_assistant/icon.svg` is the source of truth;
