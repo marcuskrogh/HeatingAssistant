@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-405 | Task | [Iterate] NMPC planned power stays at 0 kW when cooling is needed | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-405` |
-| SWD-406 | Sub-task | Refresh NMPC forecast on apply and retry idle zero plans | In Progress | SWD-405 | docs/agents/ITERATE.md | — |
-| SWD-407 | Sub-task | Tests, CalVer, App sync for cooling plan plot | In Progress | SWD-405 | docs/agents/ITERATE.md | — |
+| SWD-405 | Task | [Iterate] NMPC planned power stays at 0 kW when cooling is needed | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-405` — https://github.com/marcuskrogh/HeatingAssistant/pull/624 |
+| SWD-406 | Sub-task | Refresh NMPC forecast on apply and retry idle zero plans | Done | SWD-405 | docs/agents/ITERATE.md | — |
+| SWD-407 | Sub-task | Tests, CalVer, App sync for cooling plan plot | Done | SWD-405 | docs/agents/ITERATE.md | — |
 | SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623 (`61c56e7`) |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |

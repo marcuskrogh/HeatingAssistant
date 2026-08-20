@@ -53,6 +53,7 @@
 - Sub-tasks: [SWD-406](https://marcusknielsen.atlassian.net/browse/SWD-406),
   [SWD-407](https://marcusknielsen.atlassian.net/browse/SWD-407)
 - Branch: `cursor/swd-405-nmpc-cooling-plan-46be`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/624
 
 ## Next
 `/review-fix SWD-405` — Review and auto-fix on the new delivery PR
