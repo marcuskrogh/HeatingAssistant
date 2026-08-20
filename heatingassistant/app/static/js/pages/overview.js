@@ -1,6 +1,6 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=124';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown } from '../components/countdown.js?v=124';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=125';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
 import {
@@ -42,6 +42,8 @@ export function renderOverview(container, rooms, state, connection, hass) {
 
   const countdown = createCountdown(state, false);
   kpiGrid.appendChild(countdown.element);
+  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: false });
+  kpiGrid.appendChild(nmpcCountdown.element);
 
   controllerSection.appendChild(kpiGrid);
   container.appendChild(controllerSection);
@@ -64,7 +66,10 @@ export function renderOverview(container, rooms, state, connection, hass) {
   // Per-room index of scheduled identification experiments; kept fresh so the
   // tiles can flip into their "experiment in progress" look as a run starts.
   let latestExperiments = null;
-  const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
+  const countdownInterval = setInterval(() => {
+    countdown.tick(latestState);
+    nmpcCountdown.tick(latestState);
+  }, 1000);
 
   // Fetch fresh schedule data via WebSocket (bypasses entity-state cache) and
   // push it to all tiles. Debounced so that a burst of rapid state updates
@@ -112,6 +117,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
       gauges.forEach((g) => g.updater(newState));
       tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
+      updateCountdown(nmpcCountdown, newState);
       // Re-fetch schedules so the badge and period list reflect any toggle or
       // save that triggered this state update. Debounced to coalesce bursts.
       refreshSchedules();

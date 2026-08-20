@@ -189,6 +189,7 @@ class HeatingRuntime:
         self._id_history_append_failure_streak: int = 0
         self._id_history_last_append_ok: bool | None = None
         self._last_control_ts: float | None = self._coerce_number(self.state.get("last_control_ts"))
+        self._last_nmpc_ts: float | None = self._coerce_number(self.state.get("last_nmpc_ts"))
         self._last_control_duration_s: float = float(
             self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
         )
@@ -782,6 +783,24 @@ class HeatingRuntime:
                 note = controller.consume_watchdog_notification()
                 if note:
                     self._emit_nmpc_notify(note)
+        finally:
+            self._note_nmpc_cycle_complete()
+
+    def _note_nmpc_cycle_complete(self) -> None:
+        """Stamp the slow planner cycle so the UI can count down to the next one."""
+
+        with self._control_lock:
+            self._last_nmpc_ts = time.time()
+            try:
+                self._save_runtime_state()
+            except Exception:
+                _logger.exception("Failed to persist last NMPC timestamp")
+        loop = self._nmpc_loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._best_effort_mqtt(self.publish_status(), "status"),
+                loop,
+            )
 
     def _emit_nmpc_notify(self, action: str) -> None:
         loop = self._nmpc_loop
@@ -1490,6 +1509,9 @@ class HeatingRuntime:
         update_interval = float(
             self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
         )
+        nmpc_period_s = float(
+            self.options.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
+        )
         mean_error = self._mean_tracking_error()
         states["sensor.heating_assistant_mpc_performance"] = self._ha_state(
             "sensor.heating_assistant_mpc_performance",
@@ -1497,6 +1519,8 @@ class HeatingRuntime:
             {
                 "last_run_ts": self._last_control_ts,
                 "dt_s": update_interval,
+                "last_nmpc_ts": self._last_nmpc_ts,
+                "nmpc_period_s": nmpc_period_s,
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
             },
@@ -1844,6 +1868,7 @@ class HeatingRuntime:
             "mode": self.control_engine.mode,
             "fallback_reason": self.control_engine.fallback_reason,
             "last_run_ts": self._last_control_ts,
+            "last_nmpc_ts": self._last_nmpc_ts,
             "last_duration_s": self._last_control_duration_s,
         }
     def _load_bindings(self) -> list[Binding]:
@@ -3127,6 +3152,7 @@ class HeatingRuntime:
         self.state["room_temperatures"] = dict(self.room_temperatures)
         self.state["actuator_outputs"] = dict(self.actuator_outputs)
         self.state["last_control_ts"] = self._last_control_ts
+        self.state["last_nmpc_ts"] = self._last_nmpc_ts
         self.state["last_control_duration_s"] = self._last_control_duration_s
         self.state["energy_total_wh"] = dict(self._energy_total_wh)
         self.state["energy_last_ts"] = self._energy_last_ts
