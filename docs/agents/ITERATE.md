@@ -42,6 +42,7 @@
 - Sub-tasks: [SWD-422](https://marcusknielsen.atlassian.net/browse/SWD-422),
   [SWD-423](https://marcusknielsen.atlassian.net/browse/SWD-423)
 - Branch: `cursor/swd-421-room-view-nmpc-grid-7742`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/629
 
 ## Next
-`/review-fix SWD-421` — Review and auto-fix on the new delivery PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/629
