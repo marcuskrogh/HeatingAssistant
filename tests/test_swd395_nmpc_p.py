@@ -27,7 +27,7 @@ from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_accept import accept_plan
 from heatingassistant.engine.nmpc_ocp import MeanOcp
-from heatingassistant.engine.nmpc_p import p_command
+from heatingassistant.engine.nmpc_p import comfort_fallback_command, p_command
 from heatingassistant.engine.nmpc_timing import (
     derive_nmpc_timing,
     timing_from_dt_horizon,
@@ -69,6 +69,13 @@ def test_p_command_clips():
     assert p_command(0.0, 18.0, 21.0, 10.0, 0.0, 1.0) == 0.0
 
 
+def test_comfort_fallback_only_outside_band():
+    assert comfort_fallback_command(21.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
+    assert comfort_fallback_command(18.0, 21.0, 2.0, 0.1, 0.0, 1.0) == pytest.approx(0.3)
+    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, -1.0, 1.0) == pytest.approx(-0.7)
+    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
+
+
 def test_accept_in_band_vs_zero_heat():
     lo = np.array([0.0])
     hi = np.array([1.0])
@@ -86,7 +93,7 @@ def test_compute_does_not_call_qp_step():
 
     ctrl._mpc.step = boom  # type: ignore[method-assign]
     actions = ctrl.compute(outdoor_temp=-5.0, now=_NOW)
-    assert actions["h"] == pytest.approx(0.0)
+    assert "h" in actions
 
 
 def test_p_tracks_seeded_reference():
@@ -101,9 +108,29 @@ def test_p_tracks_seeded_reference():
     assert actions["h"] == pytest.approx(0.3, abs=0.15)
 
 
-def test_no_path_is_zero_heat():
+def test_no_path_heats_when_below_band():
     ctrl = _tiny_ctrl()
     actions = ctrl.compute(outdoor_temp=-10.0, now=_NOW)
+    assert actions["h"] > 0.05
+
+
+def test_no_path_cools_when_above_band():
+    hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=2, dt=900.0)
+    actions = ctrl.compute(outdoor_temp=30.0, now=_NOW)
+    assert actions["hp"] < -0.05
+
+
+def test_no_path_idle_inside_band():
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=21.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [heater], horizon=2, dt=900.0)
+    actions = ctrl.compute(outdoor_temp=10.0, now=_NOW)
     assert actions["h"] == pytest.approx(0.0)
 
 
@@ -817,3 +844,110 @@ def test_idle_plan_debounces_nmpc_worker(tmp_path):
     assert not started.wait(timeout=0.4)
     thread = runtime._nmpc_thread
     assert thread is None or not thread.is_alive()
+
+
+def test_nmpc_worker_requests_control_cycle_on_accept(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    requested: list[bool] = []
+    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
+        lambda: requested.append(True)
+    )
+    runtime.control_engine.apply_nmpc_result = lambda _result: True  # type: ignore[method-assign]
+    runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
+        "accepted": True,
+        "u_star": np.array([[0.4]]),
+        "t_ref": np.array([[21.0]]),
+        "fun": 1.0,
+    }
+    runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
+    runtime._nmpc_worker_thread()
+    assert requested == [True]
+
+
+def test_request_control_cycle_runs_when_loop_missing(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_runs_when_loop_closed(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    loop = asyncio.new_event_loop()
+    loop.close()
+    runtime._nmpc_loop = loop
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_waits_for_held_lock(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    assert runtime._control_lock.acquire(blocking=False)
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            runtime._request_control_cycle_after_nmpc()
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, name="nmpc-followup-lock")
+    thread.start()
+    assert not done.wait(timeout=0.3)
+    runtime._control_lock.release()
+    assert done.wait(timeout=15.0)
+    thread.join(timeout=2.0)
+    assert runtime._last_control_ts is not None
+
+
+def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    requested: list[bool] = []
+    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
+        lambda: requested.append(True)
+    )
+    runtime.control_engine.apply_nmpc_result = lambda _result: False  # type: ignore[method-assign]
+    runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
+        "accepted": False,
+        "u_star": np.array([[0.0]]),
+        "t_ref": np.array([[21.0]]),
+        "fun": 1.0,
+    }
+    runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
+    runtime._nmpc_worker_thread()
+    assert requested == []

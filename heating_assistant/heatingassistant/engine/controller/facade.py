@@ -42,7 +42,8 @@ HeatingMPCController
       1. Runs the CD-EKF to fuse the current temperature measurement
          (predict uses the last applied P command).
       2. Applies ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``
-         from the last accepted slow plan (or ``u = 0`` when none).
+         from the last accepted slow plan.  With no plan, P toward the
+         setpoint while air is outside the comfort band (else ``u = 0``).
       3. Applies the command to all heat sources.
 
     The slow nonlinear OCP runs on a worker thread (not inline from
@@ -123,7 +124,7 @@ from ..nmpc_ocp import (
     plan_from_solve,
     solve_mean_ocp,
 )
-from ..nmpc_p import p_command
+from ..nmpc_p import comfort_fallback_command, p_command
 from ..nmpc_timing import NmpcTiming, derive_nmpc_timing, timing_from_dt_horizon
 from ..thermal_model import _SG_FACTOR_TYPICAL
 
@@ -1736,7 +1737,9 @@ class HeatingMPCController:
 
     The fast loop at each ``T_s``:
       1. CD-EKF predict+update using the last applied P command.
-      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``.
+      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)`` from the
+         last accepted plan.  With no plan, P toward the setpoint while
+         air is outside the comfort band (watchdog still forces ``u = 0``).
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -2658,6 +2661,22 @@ class HeatingMPCController:
                         float(src.u_min),
                         float(src.u_max),
                     )
+            elif not watchdog:
+                rooms = self._system._model.rooms
+                for j, src in enumerate(self._sources):
+                    ri = room_index.get(src.room, 0)
+                    room = rooms.get(src.room)
+                    if room is None:
+                        continue
+                    kp = float(getattr(src, "p_gain", 0.1))
+                    u_abs[j] = comfort_fallback_command(
+                        float(x_hat[ri]),
+                        float(room.setpoint),
+                        float(getattr(room, "comfort_offset", 2.0) or 2.0),
+                        kp,
+                        float(src.u_min),
+                        float(src.u_max),
+                    )
             self._nmpc_k = k + 1
         if u_min_seq is not None and u_max_seq is not None and clamp_mask is not None:
             for j, src in enumerate(self._sources):
@@ -2953,10 +2972,11 @@ class HeatingMPCController:
             self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
-        # The NLP worker may install a path while this tick is rolling out
-        # U=0. Prefer the installed plan so Ingress does not recache the
-        # open-loop schedule after a cooling apply.
-        self.rebuild_forecast_from_plan()
+        # The NLP worker may install a path while this tick rolled out U=0.
+        # Refresh only then so disabled-source zeros in U_abs are not replaced
+        # by the unmasked plan.
+        if float(np.max(np.abs(U_abs))) < 1e-9:
+            self.rebuild_forecast_from_plan()
 
         return actions
 

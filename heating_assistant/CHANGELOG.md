@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.22
+
+- Heaters and heat pumps now heat or cool on the 15-minute loop when the
+  room is already outside the comfort band, instead of waiting for the
+  two-hour planner and holding the current temperature.
+- After the two-hour planner accepts a path, climate and number commands
+  update immediately instead of waiting for the next 15-minute tick.
+
 # 2026.08.21
 
 - Heat/cool planned power now shows cooling (negative kW) as soon as the
