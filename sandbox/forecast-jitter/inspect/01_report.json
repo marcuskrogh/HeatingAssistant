@@ -1,0 +1,76 @@
+{
+  "tag": "01",
+  "scenario": {
+    "now": "2026-08-21T06:00:00+00:00",
+    "room": "Living Room",
+    "T0": 25.2,
+    "setpoint": 23.5,
+    "comfort_offset": 2.0,
+    "timing": "2 h / 8 fast / 36 h",
+    "solar_exposure": "high"
+  },
+  "baseline_n_int": 10,
+  "metrics": [
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.6377194361995251,
+      "rms_dT_K": 0.10699087204352477,
+      "sign_flips": 18.0,
+      "p95_abs_dT_K": 0.1800469525203394,
+      "max_abs_dT_per_h": 2.5508777447981004,
+      "n_int": 1,
+      "accepted": true,
+      "applied": true,
+      "fun": 10.599216441436736,
+      "cost_zero": 3211137.1403611987,
+      "min_W": -563.5406014522463,
+      "max_W": -181.90381310945284,
+      "u_hold_h": 2.0,
+      "idle_max_T": 33.2468787386036,
+      "plan_max_T": 25.50370326450724,
+      "dt_s": 900.0
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.7969822445198034,
+      "rms_dT_K": 0.11618596680677024,
+      "sign_flips": 20.0,
+      "p95_abs_dT_K": 0.16637274805941582,
+      "max_abs_dT_per_h": 3.1879289780792135,
+      "n_int": 10,
+      "accepted": true,
+      "applied": true,
+      "fun": 10.546917252947505,
+      "cost_zero": 3214806.216371823,
+      "min_W": -570.7182133605749,
+      "max_W": -188.77858731350608,
+      "u_hold_h": 2.0,
+      "idle_max_T": 33.243471145991386,
+      "plan_max_T": 25.50004153054777,
+      "dt_s": 900.0
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.448998204368646,
+      "rms_dT_K": 0.0904339423430233,
+      "sign_flips": 14.0,
+      "p95_abs_dT_K": 0.1413931944973026,
+      "max_abs_dT_per_h": 1.795992817474584,
+      "n_int": 40,
+      "accepted": true,
+      "applied": true,
+      "fun": 10.781614680152032,
+      "cost_zero": 3215051.8287873617,
+      "min_W": -560.6519480391353,
+      "max_W": -218.0443876533636,
+      "u_hold_h": 2.0,
+      "idle_max_T": 33.24299993326269,
+      "plan_max_T": 25.50184421456647,
+      "dt_s": 900.0
+    }
+  ],
+  "plots": [
+    "sandbox/forecast-jitter/inspect/01_forecast.png",
+    "sandbox/forecast-jitter/inspect/01_dT.png"
+  ]
+}
