@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | In Progress | — | docs/agents/PLAN-heating-assistant-icon.md | `/implement SWD-408` |
-| SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | In Progress | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
-| SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | In Progress | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
+| SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | In Review | — | docs/agents/PLAN-heating-assistant-icon.md | `/review-fix SWD-408` |
+| SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
+| SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623 (`61c56e7`) |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |
@@ -131,7 +131,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
-- 2026-08-20 — `/implement` SWD-408 In Progress: brand SVG/PNGs, Supervisor icon/logo, HA `brand/` folder, Ingress favicon. PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next `/review-fix SWD-408` after verify.
+- 2026-08-20 — `/implement` SWD-408 In Review: brand SVG/PNGs, Supervisor icon/logo, HA `brand/` folder, Ingress favicon; CalVer 2026.08.21. Fast suite 928 passed, 88 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next `/review-fix SWD-408`.
 - 2026-08-20 — `/define` SWD-408: PLAN `docs/agents/PLAN-heating-assistant-icon.md` (tweak / delta-fast). Shared house + settling-curve mark; Supervisor icon/logo; HA 2026.3+ `brand/` folder; brands lift copy. Sub-tasks SWD-409–410. Next `/implement SWD-408`.
 - 2026-08-20 — `/define` SWD-395: PLAN `docs/agents/PLAN-nmpc-p-ff.md` (feature / feature-standard). Timing triple 2 h / 8 fast substeps / 36 h (`T_s` derived); `K_p` 0.1 /K; robust accept/reject; worker + 5 h watchdog. Sub-tasks SWD-396–399. Next `/implement SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 **accepted** (2 h, analytic Jacobian, worker thread). Supportive Task Done. Next `/define SWD-395`.

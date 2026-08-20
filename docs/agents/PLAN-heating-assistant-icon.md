@@ -106,4 +106,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-408` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-408` — Focused review then fix-forward on the same PR
