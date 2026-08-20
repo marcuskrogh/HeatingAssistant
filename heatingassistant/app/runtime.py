@@ -502,13 +502,14 @@ class HeatingRuntime:
         control_every = self._control_tick_interval_s()
         now0 = time.time()
         epoch = self._last_nmpc_ts
+        # Plot / ID cadence is not the NMPC clock — keep it on a simple
+        # interval so sampling does not wait on the control grid.
+        next_history = now0 + history_every
         if epoch is None:
-            next_history = now0 + history_every
             # First control soon after start so energy/actuators move without
             # waiting a full update_interval when tags are silent.
             next_control = now0 + min(control_every, history_every)
         else:
-            next_history = next_grid_ts(epoch, history_every, now0)
             next_control = next_grid_ts(epoch, control_every, now0)
         while not self._ticker_stop.is_set():
             now = time.time()
@@ -524,7 +525,7 @@ class HeatingRuntime:
                 except Exception:
                     _logger.exception("Wall-clock identification sample failed")
                 history_every = self._history_tick_interval_s()
-                next_history = self._next_aligned_ts(history_every, time.time())
+                next_history = time.time() + history_every
             if now >= next_control:
                 last = self._last_control_ran_ts
                 if last is not None and (now - last) < (control_every * 0.5):
