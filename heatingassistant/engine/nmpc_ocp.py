@@ -22,6 +22,8 @@ from .nmpc_timing import NmpcTiming
 NMPC_MAXITER = 200
 NMPC_TIMEOUT_S = 60.0
 NMPC_FTOL = 1e-6
+# Installed |U| below this is treated as idle (off) for re-solve scheduling.
+NMPC_IDLE_U_ABS = 1e-6
 
 
 def electrical_w(sources: Sequence[HeatSource], u: np.ndarray) -> float:
@@ -265,6 +267,88 @@ class MeanOcp:
         return j, U, air
 
 
+def _clip_to_bounds(u: np.ndarray, ocp: MeanOcp) -> np.ndarray:
+    """Clip a flat or shaped decision vector to the OCP box bounds."""
+
+    flat = np.asarray(u, dtype=float).reshape(-1)
+    expected = ocp.n * ocp.nu
+    if flat.size != expected:
+        flat = np.zeros(expected, dtype=float)
+    lo = np.array([b[0] for b in ocp.bounds], dtype=float)
+    hi = np.array([b[1] for b in ocp.bounds], dtype=float)
+    return np.clip(flat, lo, hi)
+
+
+def _cauchy_warm_start(
+    ocp: MeanOcp, u0: np.ndarray, j_ref: float
+) -> tuple[np.ndarray, float]:
+    """Take a feasible steepest-descent step so SLSQP is not stuck at u = 0.
+
+    Signed heat-pump bounds include 0 in the interior.  From a zero start,
+    SLSQP can report success without searching u < 0.  One projected
+    gradient step (when it lowers J) puts the iterate in the cooling or
+    heating region before SLSQP runs.
+    """
+
+    if not np.isfinite(j_ref):
+        return u0, j_ref
+    try:
+        grad = np.asarray(ocp.jac(u0), dtype=float).reshape(-1)
+    except TimeoutError:
+        raise
+    if grad.size != u0.size or not np.isfinite(grad).all():
+        return u0, j_ref
+    gmax = float(np.max(np.abs(grad)))
+    if gmax <= 1e-12:
+        return u0, j_ref
+    direction = -grad / gmax
+    best_u = u0
+    best_j = j_ref
+    for alpha in (1.0, 0.3, 0.1):
+        cand = _clip_to_bounds(u0 + alpha * direction, ocp)
+        if np.allclose(cand, u0, atol=1e-12):
+            continue
+        try:
+            j_cand = float(ocp.cost(cand))
+        except TimeoutError:
+            raise
+        if np.isfinite(j_cand) and j_cand < best_j:
+            best_u = cand
+            best_j = j_cand
+            break
+    return best_u, best_j
+
+
+def _signed_probe_if_idle(
+    ocp: MeanOcp, u_mat: np.ndarray, fun: float
+) -> tuple[np.ndarray, float]:
+    """If SLSQP stayed at ~0, try a mid-bound signed probe (cooling or heat)."""
+
+    u_mat = np.asarray(u_mat, dtype=float).reshape(ocp.n, ocp.nu)
+    if float(np.max(np.abs(u_mat))) >= 0.05:
+        return u_mat, fun
+    lo = np.asarray(ocp.u_min, dtype=float).reshape(ocp.n, ocp.nu)
+    hi = np.asarray(ocp.u_max, dtype=float).reshape(ocp.n, ocp.nu)
+    probe = np.zeros_like(u_mat)
+    for j in range(ocp.nu):
+        lo_j = float(np.min(lo[:, j]))
+        hi_j = float(np.max(hi[:, j]))
+        if lo_j < -1e-9:
+            probe[:, j] = 0.5 * lo_j
+        elif hi_j > 1e-9:
+            probe[:, j] = 0.5 * hi_j
+    probe = np.clip(probe, lo, hi)
+    if float(np.max(np.abs(probe))) < 0.05:
+        return u_mat, fun
+    try:
+        j_probe = float(ocp.cost(probe.reshape(-1)))
+    except TimeoutError:
+        return u_mat, fun
+    if np.isfinite(j_probe) and (not np.isfinite(fun) or j_probe < fun):
+        return probe, j_probe
+    return u_mat, fun
+
+
 def solve_mean_ocp(
     ocp: MeanOcp,
     u0: np.ndarray,
@@ -319,6 +403,10 @@ def solve_mean_ocp(
             "M": ocp.m,
             "timed_out": ocp.timed_out,
         }
+    try:
+        u0, j_ref = _cauchy_warm_start(ocp, u0, j_ref)
+    except TimeoutError:
+        pass
     j_scale = abs(j_ref) if np.isfinite(j_ref) and abs(j_ref) > 1.0 else 1.0
 
     def fun_scaled(x: np.ndarray) -> float:
@@ -358,6 +446,8 @@ def solve_mean_ocp(
         ocp.deadline = None
     elapsed = time.perf_counter() - t0
     u_mat = np.asarray(u_star, dtype=float).reshape(ocp.n, ocp.nu)
+    if status != "timeout":
+        u_mat, fun = _signed_probe_if_idle(ocp, u_mat, fun)
     return {
         "status": status,
         "success": success,

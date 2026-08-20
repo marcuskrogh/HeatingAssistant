@@ -756,6 +756,11 @@ class HeatingRuntime:
         thread = getattr(self, "_nmpc_thread", None)
         if thread is not None and thread.is_alive():
             return
+        if self.control_engine.nmpc_plan_idle():
+            last = self._last_nmpc_ts
+            dt_s = float(self._derived_update_interval())
+            if last is not None and (time.time() - last) < max(1.0, dt_s):
+                return
         try:
             self._nmpc_loop = asyncio.get_running_loop()
         except RuntimeError:
