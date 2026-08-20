@@ -49,4 +49,4 @@
 - Branch: `cursor/swd-414-nmpc-optimal-trajectory-ce1e`
 
 ## Next
-`/review-fix SWD-414` — Review and auto-fix on PR #627
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/627
