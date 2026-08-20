@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-418 | Task | [Bug] NMPC long timer resets when the solve finishes — schedule must stay drift-free | In Review | — | docs/agents/PLAN-nmpc-timer-drift.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628 |
+| SWD-419 | Sub-task | Wall-clock epoch: do not restamp NMPC/control timers when a solve finishes | Done | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
+| SWD-420 | Sub-task | Tests, CalVer, changelog, App sync for drift-free NMPC timer | Done | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
 | SWD-421 | Task | [Iterate] Room view plots 15-minute steps instead of the 2-hour NMPC trajectory | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/629 (`c0a2c13`) |
 | SWD-422 | Sub-task | Keep Ingress plots on the installed 2-hour NMPC plan | Done | SWD-421 | docs/agents/ITERATE.md | — |
 | SWD-423 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-421 | docs/agents/ITERATE.md | — |
@@ -142,6 +145,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/ship` SWD-418 closeout: review-fix CLEAN; GitHub Tests green on `04a2bc4` (pytest-fast, slow shards, panel-harness, coverage). Merging PR https://github.com/marcuskrogh/HeatingAssistant/pull/628. Changelog `heating_assistant/CHANGELOG.md` `# 2026.08.25`. Next Done.
+- 2026-08-20 — `/review-fix` SWD-418: 1 blocker / 1 should-fix (history ticker aligned to NMPC epoch; SWD-318 test stamped `_last_control_ts`). Fix-forward on PR #628 (`803e982`): plot/ID ticks stay `now + interval`; control stays on the Start grid. Local pytest-fast 951 passed, 88 skipped, 18 deselected. Next `/ship SWD-418`.
+- 2026-08-20 — `/implement` SWD-418 In Review: Start epoch is `last_nmpc_ts` / `last_run_ts`; NMPC finish does not restamp; PR https://github.com/marcuskrogh/HeatingAssistant/pull/628; CalVer 2026.08.25. Fast suite 951 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-418`.
+- 2026-08-20 — `/define` SWD-418: PLAN `docs/agents/PLAN-nmpc-timer-drift.md` (bug / fix-fast). `last_nmpc_ts` is the Start epoch; NMPC finish must not restamp it. Sub-tasks SWD-419–420. Next `/implement SWD-418`.
 - 2026-08-20 — `/ship` SWD-421 via PR #629 (`c0a2c13`): room view Forecast / Planned Power stay on the two-hour planner path after 15-minute ticks; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.25`. Next Done.
 - 2026-08-20 — `/iterate` SWD-421 In Review: keep room-view Forecast / Planned Power on the installed 2-hour `U*` hold and `T_ref` after 15-minute ticks; PR https://github.com/marcuskrogh/HeatingAssistant/pull/629; CalVer 2026.08.25. Fast suite 948 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-421`.
 - 2026-08-20 — `/iterate` SWD-421 from SWD-414: room view still plots 15-minute power steps and a jittery Forecast after each fast `compute()`; keep Planned Power / Forecast on the installed 2-hour `U*` hold and `T_ref`. Relates SWD-414; Sub-tasks SWD-422–423. Next `/review-fix SWD-421`.

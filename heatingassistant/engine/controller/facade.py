@@ -2341,7 +2341,11 @@ class HeatingMPCController:
 
     @property
     def nmpc_due(self) -> bool:
-        """True when a slow solve should start (no path, idle zeros, or one period)."""
+        """True when a slow solve should start (no path or idle zeros).
+
+        The two-hour cadence is a wall-clock grid on the runtime, not
+        ``_nmpc_k >= M``. Fast-step count only indexes the installed plan.
+        """
         if self._nmpc_busy:
             return False
         with self._nmpc_lock:
@@ -2349,7 +2353,7 @@ class HeatingMPCController:
                 return True
             if float(np.max(np.abs(self._nmpc_U))) < NMPC_IDLE_U_ABS:
                 return True
-            return self._nmpc_k >= self._timing.m
+            return False
 
     def nmpc_plan_idle(self) -> bool:
         """True when an installed slow plan is identically off."""

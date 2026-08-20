@@ -79,10 +79,10 @@ async def test_background_ticker_runs_control_when_tags_quiet(
     await runtime.start()
     try:
         # Clear the start-up control timestamp so the ticker must run.
-        runtime._last_control_ts = None
+        runtime._last_control_ran_ts = None
         deadline = time.time() + 2.0
-        while time.time() < deadline and runtime._last_control_ts is None:
+        while time.time() < deadline and runtime._last_control_ran_ts is None:
             time.sleep(0.05)
-        assert runtime._last_control_ts is not None
+        assert runtime._last_control_ran_ts is not None
     finally:
         await runtime.stop()
