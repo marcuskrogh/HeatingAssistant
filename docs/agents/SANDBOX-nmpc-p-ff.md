@@ -104,4 +104,4 @@ isolation — not production source. No sandbox PR.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/define SWD-395` — operator accepted 2 h + analytic Jacobian + worker thread.
+`/implement SWD-395` — build per `docs/agents/PLAN-nmpc-p-ff.md`.

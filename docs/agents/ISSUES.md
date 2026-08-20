@@ -4,10 +4,14 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/define SWD-395` |
+| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/implement SWD-395` |
 | SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
 | SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | Done | SWD-392 | docs/agents/SANDBOX-nmpc-p-ff.md | Done — `/define SWD-395` |
-| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/ROADMAP.md | `/define SWD-395` |
+| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/implement SWD-395` |
+| SWD-396 | Sub-task | Mean OCP + analytic Jacobian + accept/reject (replace QP path) | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-397 | Sub-task | Fast P + heater K_p; EKF uses applied u | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-398 | Sub-task | NLP worker thread + 5 h fail watchdog + notify | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-399 | Sub-task | Timing triple 2 h / 8 substeps / 36 h, Tuning UI, tests, CalVer, App sync | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
 | SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | Done | — | docs/agents/PLAN-pe-data-duration.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/621 |
 | SWD-390 | Sub-task | PE page + TUNING duration guidance copy | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
 | SWD-391 | Sub-task | Tests, CalVer, App sync | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
@@ -119,6 +123,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-20 — `/define` SWD-395: PLAN `docs/agents/PLAN-nmpc-p-ff.md` (feature / feature-standard). Timing triple 2 h / 8 fast substeps / 36 h (`T_s` derived); `K_p` 0.1 /K; robust accept/reject; worker + 5 h watchdog. Sub-tasks SWD-396–399. Next `/implement SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 **accepted** (2 h, analytic Jacobian, worker thread). Supportive Task Done. Next `/define SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 3: analytic `dJ/dU` via production `dfdx`/`dfdu` (rel error 1.3e-5 vs FD). 2 h cold **22 s** / 80 iters (J=0.81, hit cap); warm **7.7 s** / 26 iters success. Inspect `sandbox/nmpc-p-ff/inspect/03_report.md`. Next `/sandbox SWD-394`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 2: operator locked **2 h**. Cold SLSQP 94 s / 47 iters (success, cap 80). Warm polish hit maxiter. NMPC must use a worker thread (today’s `compute_actions` is inline on the App asyncio loop). Inspect `sandbox/nmpc-p-ff/inspect/02_report.md`. Next `/sandbox SWD-394`.

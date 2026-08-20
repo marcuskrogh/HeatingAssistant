@@ -189,4 +189,4 @@ alignment input — not product scope/UX.
 
 ## Next
 
-`/define SWD-395` — sandbox accepted (2 h, analytic Jacobian, worker thread).
+`/implement SWD-395` — production NMPC + P per `docs/agents/PLAN-nmpc-p-ff.md`.
