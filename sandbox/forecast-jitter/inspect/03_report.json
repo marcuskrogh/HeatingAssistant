@@ -1,0 +1,88 @@
+{
+  "tag": "03",
+  "mode": "fixed_u",
+  "scenario": {
+    "now": "2026-08-21T06:00:00+00:00",
+    "room": "Living Room",
+    "T0": 25.2,
+    "setpoint": 23.5,
+    "comfort_offset": 2.0,
+    "timing": "2 h / 8 fast / 36 h",
+    "solar_exposure": "high",
+    "price": "flat",
+    "solve_n_int": 10,
+    "reference_n_int": 100,
+    "u_hold_h": 2.0,
+    "min_W": -570.7182133605749,
+    "max_W": -188.77858731350608,
+    "fun": 10.546917252947505
+  },
+  "baseline_n_int": 10,
+  "metrics": [
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.6615260669123408,
+      "rms_dT_K": 0.10816188344723172,
+      "sign_flips": 20.0,
+      "p95_abs_dT_K": 0.16364899597553517,
+      "max_abs_dT_per_h": 2.6461042676493634,
+      "label": "n_int=1",
+      "n_int": 1,
+      "max_abs_err_vs_ocp_K": 0.1676466501122107,
+      "rms_err_vs_ocp_K": 0.0282670423294547,
+      "max_abs_err_vs_ref_K": 0.19091801214197446,
+      "rms_err_vs_ref_K": 0.031728210326887996,
+      "reference_n_int": 100
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.7969822445198034,
+      "rms_dT_K": 0.11618596680677024,
+      "sign_flips": 20.0,
+      "p95_abs_dT_K": 0.16637274805941582,
+      "max_abs_dT_per_h": 3.1879289780792135,
+      "label": "n_int=10",
+      "n_int": 10,
+      "max_abs_err_vs_ocp_K": 0.0,
+      "rms_err_vs_ocp_K": 0.0,
+      "max_abs_err_vs_ref_K": 0.023271362029763765,
+      "rms_err_vs_ref_K": 0.0035057014005291545,
+      "reference_n_int": 100
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.8131274628589154,
+      "rms_dT_K": 0.11717661004521897,
+      "sign_flips": 20.0,
+      "p95_abs_dT_K": 0.16721034583048464,
+      "max_abs_dT_per_h": 3.2525098514356614,
+      "label": "n_int=40",
+      "n_int": 40,
+      "max_abs_err_vs_ocp_K": 0.019280296681849052,
+      "rms_err_vs_ocp_K": 0.0029108600218700747,
+      "max_abs_err_vs_ref_K": 0.003991065347914713,
+      "rms_err_vs_ref_K": 0.0005949251040233698,
+      "reference_n_int": 100
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.816479510580912,
+      "rms_dT_K": 0.1173840695975347,
+      "sign_flips": 20.0,
+      "p95_abs_dT_K": 0.16728688406596143,
+      "max_abs_dT_per_h": 3.265918042323648,
+      "label": "n_int=100",
+      "n_int": 100,
+      "max_abs_err_vs_ocp_K": 0.023271362029763765,
+      "rms_err_vs_ocp_K": 0.0035057014005291545,
+      "max_abs_err_vs_ref_K": 0.0,
+      "rms_err_vs_ref_K": 0.0,
+      "reference_n_int": 100
+    }
+  ],
+  "plots": [
+    "sandbox/forecast-jitter/inspect/03_forecast.png",
+    "sandbox/forecast-jitter/inspect/03_dT.png",
+    "sandbox/forecast-jitter/inspect/03_dense.png"
+  ]
+}

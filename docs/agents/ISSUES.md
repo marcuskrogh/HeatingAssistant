@@ -140,6 +140,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/sandbox` SWD-417 iteration 3: freeze production `U*`, re-roll T at n_int 1/10/40/100; n_int=10 vs 100 is 23 mK; 15 min wiggles remain on the high-fidelity path. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/sandbox` SWD-417 iteration 2: peaked price × s_rom 0.05/0.1/1/5; traces overlay; ROM does not move Forecast jitter. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/sandbox` SWD-417 from SWD-414: Forecast T jitter vs `n_int_steps`; Relates SWD-414; inspect `sandbox/forecast-jitter/inspect/01_*`. n_int=40 smoother; live 2.5 K swing not reproduced. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/ship` SWD-414 via PR #627 (`434027a`): room view plots the two-hour planner path when it beats leaving the heater off; accept at ≥0.1% better than J(u=0); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.24`. Next Done.

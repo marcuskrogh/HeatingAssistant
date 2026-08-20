@@ -2,7 +2,7 @@
 """SWD-417 measure sandbox: Forecast jitter vs integrator substeps / ROM.
 
 Isolation tree only. Wraps production ControlEngine / MeanOcp / EKF;
-does not edit production source.
+does not edit production source. `--fixed-u` solves once then re-rolls T.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from heatingassistant.engine.const import (  # noqa: E402
     DEFAULT_SMOOTHING_WEIGHT,
 )
 from heatingassistant.engine.control_loop import ControlEngine  # noqa: E402
+from heatingassistant.engine.integrator import implicit_euler_step  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 INSPECT = HERE / "inspect"
@@ -36,8 +37,10 @@ NOW = datetime(2026, 8, 21, 6, 0, tzinfo=timezone.utc)
 ROOM = "Living Room"
 BASELINE_N_INT = 10
 CANDIDATE_N_INT = (1, 10, 40)
+FIXED_U_N_INT = (1, 10, 40, 100)
 APP_SMOOTHING = 0.05  # runtime.py fallback when the option is unset
 ENGINE_SMOOTHING = DEFAULT_SMOOTHING_WEIGHT  # 0.1; Tuning UI default
+REFERENCE_N_INT = 100
 
 
 def _config(*, smoothing_weight: float | None = None) -> dict:
@@ -223,6 +226,174 @@ def run_one(
     }
 
 
+def _freeze_plan(engine: ControlEngine) -> dict:
+    """Copy U*, x0, and disturbance sequences after an accepted solve."""
+
+    ctrl = engine._controller
+    U_fast = np.asarray(ctrl._nmpc_U_fast, dtype=float).copy()
+    T_ocp = np.asarray(ctrl._nmpc_T_ref, dtype=float).copy()
+    solar = [dict(s) for s in (ctrl._solar_forecast or [])]
+    outdoor = [float(v) for v in (ctrl._outdoor_forecast or [])]
+    return {
+        "U_fast": U_fast,
+        "T_ocp": T_ocp,
+        "x0": np.asarray(ctrl._ekf.x_hat, dtype=float).copy(),
+        "outdoor": outdoor,
+        "solar": solar,
+        "room_list": list(ctrl._system._room_list),
+        "n_rooms": int(ctrl._system._n_rooms),
+        "dt_s": float(ctrl._dt),
+        "nu": int(ctrl._system.nu),
+    }
+
+
+def _roll_frozen(engine: ControlEngine, frozen: dict, n_int: int) -> np.ndarray:
+    """Open-loop nonlinear roll of a frozen U* at a chosen integrator density."""
+
+    _set_n_int(engine, n_int)
+    ctrl = engine._controller
+    x_hat = ctrl._ekf.x_hat
+    saved = np.asarray(x_hat, dtype=float).copy()
+    x_hat[:] = frozen["x0"]
+    try:
+        preds = ctrl._compute_nonlinear_predictions(
+            frozen["U_fast"],
+            frozen["outdoor"],
+            frozen["solar"],
+            frozen["room_list"],
+            frozen["n_rooms"],
+        )
+    finally:
+        x_hat[:] = saved
+    return np.array([float(step[ROOM]) for step in preds], dtype=float)
+
+
+def _dense_roll(engine: ControlEngine, frozen: dict, n_int: int) -> tuple[np.ndarray, np.ndarray]:
+    """Record air temperature after every implicit-Euler substep (same U*, d)."""
+
+    _set_n_int(engine, n_int)
+    ctrl = engine._controller
+    sde = ctrl._system
+    x = frozen["x0"].copy()
+    p = np.array([], dtype=float)
+    dt = float(frozen["dt_s"])
+    h = dt / float(n_int)
+    U_fast = frozen["U_fast"]
+    outdoor = frozen["outdoor"]
+    solar = frozen["solar"]
+    n_fast = int(U_fast.shape[0])
+    hours = np.empty(n_fast * n_int, dtype=float)
+    temps = np.empty(n_fast * n_int, dtype=float)
+    t = 0.0
+    idx = 0
+    for k in range(n_fast):
+        u_k = U_fast[k]
+        outdoor_k = outdoor[k] if k < len(outdoor) else outdoor[-1]
+        solar_k = solar[k] if k < len(solar) else solar[-1]
+        d_k = ctrl._control_system.disturbance_vector(outdoor_k, solar_k)
+        rhs = lambda xx, u=u_k, d=d_k: sde.f(xx, u, d, p, 0.0)
+        jac = lambda xx, u=u_k, d=d_k: sde.dfdx(xx, u, d, p, 0.0)
+        for _ in range(n_int):
+            x = implicit_euler_step(rhs, jac, x, h)
+            t += h
+            hours[idx] = t / 3600.0
+            temps[idx] = float(x[0])
+            idx += 1
+    return hours, temps
+
+
+def run_fixed_u(
+    *,
+    solve_n_int: int,
+    roll_n_int: list[int],
+    price_kind: str = "flat",
+) -> dict:
+    """Solve once, then re-simulate T under that U* at several n_int."""
+
+    engine = ControlEngine(_config())
+    _set_n_int(engine, solve_n_int)
+    n_fast = engine._controller.horizon
+    dt_s = float(engine._controller._dt)
+    m = int(engine._controller._timing.m)
+    outdoor = [22.0] * n_fast
+    prices = _price_series(price_kind, n_fast, dt_s)
+    engine.compute_actions(
+        {ROOM: 25.2},
+        22.0,
+        {ROOM: 23.5},
+        now=NOW,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    engine.mark_nmpc_busy()
+    plan = engine.solve_nmpc_blocking()
+    if not plan.get("accepted") or not engine.apply_nmpc_result(plan):
+        raise RuntimeError("fixed-U sandbox: production NMPC did not accept a plan")
+    snap = engine.forecast_snapshot()
+    watts = _series(snap, "heating_schedule")
+    frozen = _freeze_plan(engine)
+    hours = (np.arange(frozen["U_fast"].shape[0], dtype=float) + 1.0) * (
+        frozen["dt_s"] / 3600.0
+    )
+    solar = np.array(
+        [float(step.get(ROOM, 0.0)) for step in frozen["solar"][: hours.size]],
+        dtype=float,
+    )
+    t_ocp = np.asarray(frozen["T_ocp"][: hours.size, 0], dtype=float)
+    runs = []
+    for n_int in roll_n_int:
+        temps = _roll_frozen(engine, frozen, n_int)
+        n = min(temps.size, hours.size)
+        temps = temps[:n]
+        err_ocp = temps - t_ocp[:n]
+        metrics = _jitter(temps, frozen["dt_s"] / 3600.0)
+        metrics.update(
+            {
+                "label": f"n_int={n_int}",
+                "n_int": n_int,
+                "max_abs_err_vs_ocp_K": float(np.max(np.abs(err_ocp))),
+                "rms_err_vs_ocp_K": float(np.sqrt(np.mean(err_ocp * err_ocp))),
+            }
+        )
+        runs.append(
+            {
+                "metrics": metrics,
+                "hours": hours[:n],
+                "temps": temps,
+                "watts": watts[:n],
+                "label": f"n_int={n_int}",
+                "n_int": n_int,
+            }
+        )
+    ref_n = max(roll_n_int)
+    ref = next(run for run in runs if run["n_int"] == ref_n)
+    for run in runs:
+        n = min(run["temps"].size, ref["temps"].size)
+        err = run["temps"][:n] - ref["temps"][:n]
+        run["metrics"]["max_abs_err_vs_ref_K"] = float(np.max(np.abs(err)))
+        run["metrics"]["rms_err_vs_ref_K"] = float(np.sqrt(np.mean(err * err)))
+        run["metrics"]["reference_n_int"] = ref_n
+    dense_h, dense_t = _dense_roll(engine, frozen, ref_n)
+    return {
+        "runs": runs,
+        "hours": hours,
+        "t_ocp": t_ocp,
+        "watts": watts,
+        "solar": solar,
+        "prices": np.asarray(prices, dtype=float),
+        "dense_hours": dense_h,
+        "dense_temps": dense_t,
+        "solve_n_int": solve_n_int,
+        "reference_n_int": ref_n,
+        "accepted": True,
+        "fun": float(plan.get("fun", float("nan"))),
+        "min_W": float(np.min(watts)) if watts.size else 0.0,
+        "max_W": float(np.max(watts)) if watts.size else 0.0,
+        "u_hold_h": _u_hold_hours(watts, dt_s / 3600.0),
+        "max_slow_step_kW": _max_slow_step_kw(watts, m),
+    }
+
+
 def plot_runs(runs: list[dict], tag: str, title: str) -> Path:
     INSPECT.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(3, 1, figsize=(11, 9), sharex=True)
@@ -270,8 +441,111 @@ def plot_dt(runs: list[dict], tag: str) -> Path:
     return path
 
 
+def plot_fixed_u(pack: dict, tag: str) -> list[Path]:
+    INSPECT.mkdir(parents=True, exist_ok=True)
+    runs = pack["runs"]
+    hours = pack["hours"]
+    ref_n = int(pack["reference_n_int"])
+    solve_n = int(pack["solve_n_int"])
+
+    fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True)
+    ax_t, ax_err, ax_u = axes
+    ax_t.plot(hours, pack["t_ocp"], color="0.2", linestyle="--", linewidth=1.4, label="OCP T_ref")
+    for run in runs:
+        ax_t.plot(run["hours"], run["temps"], label=run["label"], linewidth=1.4)
+    ax_t.axhline(23.5, color="0.4", linestyle="--", linewidth=0.8)
+    ax_t.axhline(25.5, color="0.7", linestyle=":", linewidth=0.8)
+    ax_t.set_ylabel("T [°C]")
+    ax_t.set_title(
+        f"Frozen U* (solved at n_int={solve_n}) — open-loop T vs integrator density"
+    )
+    ax_t.legend(loc="best")
+    ax_t.grid(True, alpha=0.3)
+    ref = next(run for run in runs if run["n_int"] == ref_n)
+    for run in runs:
+        n = min(run["temps"].size, ref["temps"].size)
+        ax_err.plot(
+            run["hours"][:n],
+            run["temps"][:n] - ref["temps"][:n],
+            label=run["label"],
+            linewidth=1.2,
+        )
+    ax_err.axhline(0.0, color="0.3", linewidth=0.8)
+    ax_err.set_ylabel(f"T − T(n_int={ref_n}) [K]")
+    ax_err.legend(loc="best")
+    ax_err.grid(True, alpha=0.3)
+    ax_u.step(hours, pack["watts"] / 1000.0, where="post", color="#ef5350", linewidth=1.4)
+    ax_u.set_ylabel("Frozen U* [kW]")
+    ax_u.set_xlabel("Hours from now")
+    ax_u.grid(True, alpha=0.3)
+    fig.tight_layout()
+    forecast_path = INSPECT / f"{tag}_forecast.png"
+    fig.savefig(forecast_path, dpi=120)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+    for run in runs:
+        ax.plot(run["hours"][1:], np.diff(run["temps"]), label=run["label"], linewidth=1.2)
+    ax.axhline(0.0, color="0.3", linewidth=0.8)
+    ax.set_ylabel("ΔT per 15 min [K]")
+    ax.set_xlabel("Hours from now")
+    ax.set_title("Frozen U* — consecutive 15 min samples")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    dt_path = INSPECT / f"{tag}_dT.png"
+    fig.savefig(dt_path, dpi=120)
+    plt.close(fig)
+
+    mask = pack["dense_hours"] <= 12.0
+    fig, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    ax_d, ax_s = axes
+    ax_d.plot(
+        pack["dense_hours"][mask],
+        pack["dense_temps"][mask],
+        color="#90caf9",
+        linewidth=0.8,
+        label=f"substeps n_int={ref_n}",
+    )
+    prod = next((run for run in runs if run["n_int"] == solve_n), runs[0])
+    m12 = prod["hours"] <= 12.0
+    ax_d.plot(
+        prod["hours"][m12],
+        prod["temps"][m12],
+        "o",
+        color="#1565c0",
+        markersize=4,
+        label=f"15 min knots n_int={solve_n}",
+    )
+    ax_d.plot(
+        ref["hours"][ref["hours"] <= 12.0],
+        ref["temps"][ref["hours"] <= 12.0],
+        "x",
+        color="#c62828",
+        markersize=5,
+        label=f"15 min knots n_int={ref_n}",
+    )
+    ax_d.set_ylabel("T [°C]")
+    ax_d.set_title("First 12 h: high-fidelity substeps vs 15 min Forecast knots")
+    ax_d.legend(loc="best")
+    ax_d.grid(True, alpha=0.3)
+    ax_s.plot(hours[hours <= 12.0], pack["solar"][: int(np.sum(hours <= 12.0))], color="#ffa726")
+    ax_s.set_ylabel("Solar [W]")
+    ax_s.set_xlabel("Hours from now")
+    ax_s.grid(True, alpha=0.3)
+    fig.tight_layout()
+    dense_path = INSPECT / f"{tag}_dense.png"
+    fig.savefig(dense_path, dpi=120)
+    plt.close(fig)
+    return [forecast_path, dt_path, dense_path]
+
+
 def _floats(raw: str) -> list[float]:
     return [float(part) for part in raw.split(",") if part.strip()]
+
+
+def _ints(raw: str) -> list[int]:
+    return [int(part) for part in raw.split(",") if part.strip()]
 
 
 def main() -> int:
@@ -280,7 +554,7 @@ def main() -> int:
     parser.add_argument(
         "--n-int",
         default="",
-        help="comma-separated n_int_steps; default 1,10,40 unless --smoothing is set",
+        help="comma-separated n_int_steps; default 1,10,40 unless --smoothing or --fixed-u",
     )
     parser.add_argument(
         "--smoothing",
@@ -293,8 +567,55 @@ def main() -> int:
         default="flat",
         help="fast-rate price forecast (OCP sees 2 h means)",
     )
+    parser.add_argument(
+        "--fixed-u",
+        action="store_true",
+        help="solve once at --solve-n-int, then re-roll T at --n-int (no re-solve)",
+    )
+    parser.add_argument(
+        "--solve-n-int",
+        type=int,
+        default=BASELINE_N_INT,
+        help="n_int used only for the NLP when --fixed-u is set (default 10)",
+    )
     args = parser.parse_args()
     INSPECT.mkdir(parents=True, exist_ok=True)
+    if args.fixed_u:
+        n_vals = _ints(args.n_int) if args.n_int.strip() else list(FIXED_U_N_INT)
+        pack = run_fixed_u(
+            solve_n_int=args.solve_n_int,
+            roll_n_int=n_vals,
+            price_kind=args.price,
+        )
+        plots = plot_fixed_u(pack, args.tag)
+        table = [run["metrics"] for run in pack["runs"]]
+        report = {
+            "tag": args.tag,
+            "mode": "fixed_u",
+            "scenario": {
+                "now": NOW.isoformat(),
+                "room": ROOM,
+                "T0": 25.2,
+                "setpoint": 23.5,
+                "comfort_offset": 2.0,
+                "timing": "2 h / 8 fast / 36 h",
+                "solar_exposure": "high",
+                "price": args.price,
+                "solve_n_int": pack["solve_n_int"],
+                "reference_n_int": pack["reference_n_int"],
+                "u_hold_h": pack["u_hold_h"],
+                "min_W": pack["min_W"],
+                "max_W": pack["max_W"],
+                "fun": pack["fun"],
+            },
+            "baseline_n_int": BASELINE_N_INT,
+            "metrics": table,
+            "plots": [str(p.relative_to(ROOT)) for p in plots],
+        }
+        report_path = INSPECT / f"{args.tag}_report.json"
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2))
+        return 0
     if args.smoothing.strip():
         n_int = 10
         runs = [
@@ -303,11 +624,7 @@ def main() -> int:
         ]
         title = f"Production NMPC — ROM vs {args.price} price (n_int=10)"
     else:
-        n_vals = (
-            [int(part) for part in args.n_int.split(",") if part.strip()]
-            if args.n_int.strip()
-            else list(CANDIDATE_N_INT)
-        )
+        n_vals = _ints(args.n_int) if args.n_int.strip() else list(CANDIDATE_N_INT)
         runs = [run_one(n, price_kind=args.price) for n in n_vals]
         title = f"Production NMPC — integrator substeps ({args.price} price)"
     forecast_png = plot_runs(runs, args.tag, title)
