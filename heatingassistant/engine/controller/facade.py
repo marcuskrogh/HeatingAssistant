@@ -2440,8 +2440,12 @@ class HeatingMPCController:
             return False
         outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
         N = int(self._horizon)
-        if len(outdoor_seq) < N or U_fast.shape[0] < N:
+        if U_fast.shape[0] < N:
             return False
+        if len(outdoor_seq) < N:
+            if not outdoor_seq:
+                return False
+            outdoor_seq = outdoor_seq + [float(outdoor_seq[-1])] * (N - len(outdoor_seq))
         self._heating_schedule = [
             self._system.display_heating_powers(U_fast[k], outdoor_seq[k])
             for k in range(N)
@@ -2949,6 +2953,10 @@ class HeatingMPCController:
             self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
+        # The NLP worker may install a path while this tick is rolling out
+        # U=0. Prefer the installed plan so Ingress does not recache the
+        # open-loop schedule after a cooling apply.
+        self.rebuild_forecast_from_plan()
 
         return actions
 
