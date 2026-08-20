@@ -1,52 +1,47 @@
-# Iterate: Room view optimal trajectory still U=0 / 30°C free response
+# Iterate: Room view plots 15-minute steps instead of the 2-hour NMPC trajectory
 
 ## Prior work
-- Task: [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/626
-- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/ITERATE.md` (SWD-400 / SWD-405 / SWD-411)
+- Task: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/627
+- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/ITERATE.md` (SWD-414)
 
 ## Problem
-- Room view Forecast still spikes toward 30 °C while Planned Power stays at
-  0 kW. The room is inside the comfort band, so the SWD-411 fast fallback
-  also stays at `u = 0`.
-- `accept_plan` required `J < 1e-3 * J(u=0)` (a 1000× improvement). A useful
-  cooling plan that only cuts cost to 5–50% of the zero-heat cost was
-  rejected. With no installed path, `compute()` plots the open-loop `U = 0`
-  rollout (solar-driven heat spike).
-- Room view refreshed forecasts only when `last_run_ts` changed, so an
-  applied slow plan could sit unpublished in the snapshot until the next
-  15 min tick.
+- Controller Tuning preview shows the slow nonlinear model predictive
+  control (NMPC) plan: two-hour input holds and a relatively smooth
+  temperature path.
+- Room view Forecast / Planned Power instead look like the 15-minute
+  fast grid (jittery temperature, short power steps).
+- After each 15-minute `compute()`, Ingress caches the fast-grid
+  nonlinear rollout and outdoor-dependent display power, which
+  overwrites the installed slow plan (`U*` zero-order hold + `T_ref`).
 
 ## Clarifications
-- Product accept intent is “not near the zero-heat cost”, not “cost near
-  zero”. Keep rejecting idle false success at `J ≈ J(u=0)`.
-- Do not switch NLP backends. Do not add I/D terms.
+- Keep the 15-minute EKF then P loop for actuators.
+- Do not change NMPC timing defaults (2 h / 8 / 36 h).
+- Preview and room view should share the same installed-plan series.
 
 ## Acceptance criteria
-- Accept `U*` when it is in bounds, finite, and strictly better than
-  `J(u=0)` by at least `ACCEPT_J_RATIO` (0.1%).
-- Reject `J ≈ J(u=0)` (idle false success) and out-of-bounds / NaN plans.
-- After accept, Forecast / Planned Power show the installed nonlinear path
-  (cooling when a future solar/outdoor spike would leave the band).
-- Inside the band with a true zero-heat optimum, planned power may stay 0.
-- Room view refetches forecasts when `last_nmpc_ts` or `last_run_ts` changes.
-- Tests, CalVer 2026.08.24, changelog, App sync.
+- After an accepted NMPC plan, a later 15-minute `compute()` still
+  plots that plan: Planned Power holds for `nmpc_period` even when
+  outdoor temperature varies; Forecast follows `T_ref`.
+- Controller Tuning preview and room-view snapshots use the same
+  power-run length (slow interval).
+- Tests, CalVer 2026.08.25, changelog, App sync.
 
 ## Out of scope
-- Switching the NLP backend away from SLSQP.
-- I-term / D-term or QP fallback.
-- Changing default `K_p`, timing triple, or comfort-zone cost.
+- Changing the P gain or NMPC solver.
+- Plotting a closed-loop P simulation over the horizon.
 
 ## Work packages
-1. Accept NMPC plans that beat zero-heat and plot that trajectory (SWD-415)
-2. Tests, CalVer, changelog, App sync for trajectory plot (SWD-416)
+1. Keep Ingress plots on the installed 2-hour NMPC plan (SWD-422)
+2. Tests, CalVer, changelog, App sync for 2-hour room plots (SWD-423)
 
 ## Tracker
-- Task: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
-- Relates: [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
-- Sub-tasks: [SWD-415](https://marcusknielsen.atlassian.net/browse/SWD-415),
-  [SWD-416](https://marcusknielsen.atlassian.net/browse/SWD-416)
-- Branch: `cursor/swd-414-nmpc-optimal-trajectory-ce1e`
+- Task: [SWD-421](https://marcusknielsen.atlassian.net/browse/SWD-421)
+- Relates: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
+- Sub-tasks: [SWD-422](https://marcusknielsen.atlassian.net/browse/SWD-422),
+  [SWD-423](https://marcusknielsen.atlassian.net/browse/SWD-423)
+- Branch: `cursor/swd-421-room-view-nmpc-grid-7742`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/627
+`/review-fix SWD-421` — Review and auto-fix on the new delivery PR
