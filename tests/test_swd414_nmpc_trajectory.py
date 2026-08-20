@@ -13,7 +13,7 @@ from heatingassistant.engine.const import (
     DEFAULT_NMPC_PERIOD,
 )
 from heatingassistant.engine.control_loop import ControlEngine
-from heatingassistant.engine.nmpc_accept import accept_plan
+from heatingassistant.engine.nmpc_accept import ACCEPT_J_RATIO, accept_plan
 
 _NOW = datetime(2026, 8, 20, 13, 10, tzinfo=timezone.utc)
 _ROOM_JS = (
@@ -33,6 +33,7 @@ def test_accept_plan_keeps_useful_cooling_that_is_not_near_zero_heat():
     j0 = 1e6
     assert accept_plan(np.array([-0.4]), 0.05 * j0, j0, lo, hi)
     assert accept_plan(np.array([-0.4]), 0.5 * j0, j0, lo, hi)
+    assert accept_plan(np.array([-0.4]), (1.0 - ACCEPT_J_RATIO) * j0, j0, lo, hi)
     assert not accept_plan(np.array([0.0]), j0, j0, lo, hi)
     assert not accept_plan(np.array([-0.01]), 0.9995 * j0, j0, lo, hi)
 
@@ -105,7 +106,7 @@ def test_nmpc_cools_in_band_summer_solar_and_plots_plan():
     u_star = np.asarray(plan["u_star"], dtype=float)
     assert plan["accepted"] is True
     assert float(np.min(u_star)) < -0.05
-    assert float(plan["fun"]) < 0.999 * float(plan["cost_zero"])
+    assert float(plan["fun"]) <= (1.0 - ACCEPT_J_RATIO) * float(plan["cost_zero"])
     assert engine.apply_nmpc_result(plan) is True
 
     snap = engine.forecast_snapshot()

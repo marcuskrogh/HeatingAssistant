@@ -19,7 +19,7 @@ def accept_plan(
     u_min: np.ndarray,
     u_max: np.ndarray,
 ) -> bool:
-    """True when ``U*`` is in bounds and strictly better than ``J(u=0)``."""
+    """True when ``U*`` is in bounds and at least 0.1% better than ``J(u=0)``."""
 
     u = np.asarray(u_star, dtype=float)
     lo = np.asarray(u_min, dtype=float)
@@ -32,4 +32,4 @@ def accept_plan(
         return False
     if not np.isfinite(cost_zero) or cost_zero <= 0.0:
         return cost < 10.0
-    return float(cost) < float(cost_zero) * (1.0 - ACCEPT_J_RATIO)
+    return float(cost) <= float(cost_zero) * (1.0 - ACCEPT_J_RATIO)
