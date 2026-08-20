@@ -3,16 +3,18 @@
 ## Element
 Room-view Forecast (nonlinear air path) and Planned Power after an
 accepted two-hour NMPC plan. Operator reports high-frequency temperature
-jitter (~22.5–25.0 °C) and hypothesises that implicit-Euler substeps in
-the EKF/OCP simulation (`n_int_steps`, default 10 per 15 min tick) are
-too low.
+jitter (~22.5–25.0 °C). Hypotheses: (1) implicit-Euler `n_int_steps`
+too low; (2) price penalty chases price and ROM (`smoothing_weight`)
+should damp it.
 
 ## Kind
 measure
 
 ## Isolation
 - Path: `sandbox/forecast-jitter/`
-- Harness: `python3 sandbox/forecast-jitter/harness.py --tag 01`
+- Harness:
+  - `python3 sandbox/forecast-jitter/harness.py --tag 01`
+  - `python3 sandbox/forecast-jitter/harness.py --tag 02 --price peaked --smoothing 0.05,0.1,1.0,5.0`
 - Inspectables: `sandbox/forecast-jitter/inspect/`
 
 ## Representativeness
@@ -21,50 +23,47 @@ measure
     SLSQP, same App-process NLP as live).
   - **Data** — in-band summer living room: T0 25.2 °C, setpoint 23.5 °C,
     comfort ±2 °C, heat-pump heat/cool, Copenhagen lat/lon, high south
-    solar, 2 h / 8 fast / 36 h timing. Matches the Aug 21 room-view
-    screenshot’s band and NOW, not the live EKF wall state or price
-    series.
-  - **Neighbours** — production `HouseThermalSDE` + `implicit_euler_substeps`;
-    Forecast is the OCP `t_ref` / nonlinear rollout sampled every 15 min
-    (inner Euler substeps are not plotted).
-  - **Path** — same `n_int_steps` knob used by EKF `n_steps`, `MeanOcp`,
-    and `_compute_nonlinear_predictions`.
-  - **Baseline** — production default `n_int_steps=10`.
-- How reproduced: wrap `ControlEngine`; patch `n_int_steps` on the
-  controller, both SDEs, and EKF params; solve and plot Forecast +
-  Planned Power.
+    solar, 2 h / 8 fast / 36 h timing. Iteration 2 adds a two-peak price
+    forecast (~1.2–2.6) like the room-view Price Forecast.
+  - **Neighbours** — production `HouseThermalSDE` + `implicit_euler_substeps`.
+    Forecast is the OCP air path sampled every 15 min. Price enters only
+    as a 2 h mean (`mean_price_slow`). ROM penalises \(\|u_n-u_{n-1}\|^2\)
+    on that slow grid.
+  - **Path** — `n_int_steps` shared by EKF, `MeanOcp`, and the nonlinear
+    Forecast roll; `smoothing_weight` is `MeanOcp.s_rom`.
+  - **Baseline** — `n_int_steps=10`; App ROM fallback 0.05; engine/Tuning
+    ROM default 0.1.
+- How reproduced: wrap `ControlEngine`; no production edits.
 - Gaps:
-  - **Live household EKF wall state, price, and outdoor series** — named.
-    Synthetic cooling is a 2 h staircase at −0.2 to −0.57 kW, not the
-    live −1.5 kW pulses. Amplitude of live 22.5–25 °C swings is not
-    reproduced; the *shape* of 15 min kinks is.
-  - **Chart.js interpolation / dataset index** — not in this harness
-    (engine snapshot only).
+  - **Live EKF wall state and outdoor series** — named. Peaked synthetic
+    prices did not recreate the live −1.5 kW pulses.
+  - **Chart.js interpolation** — engine snapshot only.
 
 ## Bar
-- Metrics: max |ΔT| and RMS ΔT between consecutive 15 min Forecast
-  points; sign-flips of ΔT; median U hold (h).
-- Hypothesis: raising `n_int_steps` from 10 to 40 cuts Forecast jitter
-  enough to promote.
+- Metrics: max |ΔT| / RMS ΔT on consecutive 15 min Forecast points;
+  max |ΔP| between 2 h holds; median U hold (h).
+- Iteration 1 hypothesis: `n_int_steps` 10 → 40 cuts jitter enough to
+  promote.
+- Iteration 2 hypothesis: higher `smoothing_weight` damps price-driven
+  Planned Power jumps enough to promote.
 - Scenario: the representative map above.
 
 ## Promote map
 - Production targets (only after accept):
-  - `HeatingMPCController` / `HouseThermalSDE` default `n_int_steps`
-    (today 10) in `heatingassistant/engine/controller/facade.py` and
-    `heatingassistant/engine/estimation/model_build.py`.
-  - Same knob is EKF `ContinuousDiscreteEKFParams.n_steps`.
-- Copy notes: do not change the 2 h / 8 / 36 h timing triple. If the
-  analytic `dJ/dU` chain (`MeanOcp._h_sub` × `n_int`) is the real
-  chatter source, that is a separate production fix — not this knob
-  alone.
+  - `n_int_steps` default in `heatingassistant/engine/controller/facade.py`
+    and `heatingassistant/engine/estimation/model_build.py`.
+  - `smoothing_weight` / Tuning “Output Smoothing” (App options fallback
+    0.05 in `heatingassistant/app/runtime.py`).
+- Copy notes: do not change the 2 h / 8 / 36 h timing triple from this
+  sandbox. Neither iteration is a promote.
 
 ## Iterations
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
-| 1 | initial extract: n_int = 1 / 10 / 40 on production NMPC | `sandbox/forecast-jitter/inspect/01_forecast.png`, `01_dT.png`, `01_report.json` | delta: waiting — n_int=40 is smoother; n_int=10 is not the live 2.5 K swing |
+| 1 | n_int = 1 / 10 / 40, flat price | `inspect/01_*` | n_int=40 smoother; not the live 2.5 K swing |
+| 2 | peaked price; s_rom = 0.05 / 0.1 / 1 / 5, n_int=10 | `inspect/02_*` | higher ROM does not move the path |
 
-### Iteration 1 numbers
+### Iteration 1 numbers (flat price)
 
 | n_int | max \|ΔT\| [K] | RMS ΔT [K] | ΔT sign-flips | U hold [h] |
 |-------|----------------|------------|---------------|------------|
@@ -72,19 +71,27 @@ measure
 | 10 (baseline) | 0.80 | 0.116 | 20 | 2.0 |
 | 40 | 0.45 | 0.090 | 14 | 2.0 |
 
-U is already a 2 h zero-order hold. `n_int=10` is slightly *worse* than
-`n_int=1` on max |ΔT|. `n_int=40` damps the 15 min kinks (~44% on max
-|ΔT|) and picks a different cooling staircase. That is consistent with
-integrator *and* analytic-Jacobian scaling (`_h_sub = dt / n_int`)
-changing the NLP, not with an unstable EKF.
+### Iteration 2 numbers (peaked price, n_int=10)
 
-Live 22.5–25.0 °C chatter is larger than this synthetic’s 0.8 K steps.
-Bumping substeps alone would not match that screenshot.
+| s_rom | max \|ΔT\| [K] | max 2 h ΔP [kW] | U hold [h] |
+|-------|----------------|-----------------|------------|
+| 0.05 (App fallback) | 0.193 | 0.059 | 2.0 |
+| 0.1 (engine / Tuning) | 0.193 | 0.059 | 2.0 |
+| 1.0 | 0.193 | 0.059 | 2.0 |
+| 5.0 | 0.193 | 0.058 | 2.0 |
+
+Four traces overlay. Comfort dominates ROM; Δu between 2 h blocks is
+already ~0.06 kW. Price is averaged onto those blocks, so 15 min price
+ticks never reach U. Remaining Forecast kinks are 15 min solar /
+integration plus 2 h hold edges.
+
+Raising output smoothing live is safe and is unlikely to change this
+plot. It would matter only if Planned Power were already jumping by
+large 2 h steps.
 
 ## Role in pipeline
 Promotion input for `/implement`. Supportive isolation — not production
-source. Post-merge inspect-loop instead of `/iterate` because each turn
-needs the Forecast plot.
+source.
 
 ## Tracker
 - Task: [SWD-417](https://marcusknielsen.atlassian.net/browse/SWD-417)
@@ -94,6 +101,5 @@ needs the Forecast plot.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/sandbox SWD-417` — next inspect turn after the operator names a delta,
-or `/implement SWD-417` if they accept a promote (not recommended from
-iteration 1 alone)
+`/sandbox SWD-417` — next inspect turn after the operator names a delta
+(higher ROM is not a promote from iteration 2)

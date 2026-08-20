@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SWD-417 measure sandbox: Forecast jitter vs implicit-Euler substeps.
+"""SWD-417 measure sandbox: Forecast jitter vs integrator substeps / ROM.
 
 Isolation tree only. Wraps production ControlEngine / MeanOcp / EKF;
 does not edit production source.
@@ -26,6 +26,7 @@ from heatingassistant.engine.const import (  # noqa: E402
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
+    DEFAULT_SMOOTHING_WEIGHT,
 )
 from heatingassistant.engine.control_loop import ControlEngine  # noqa: E402
 
@@ -35,10 +36,12 @@ NOW = datetime(2026, 8, 21, 6, 0, tzinfo=timezone.utc)
 ROOM = "Living Room"
 BASELINE_N_INT = 10
 CANDIDATE_N_INT = (1, 10, 40)
+APP_SMOOTHING = 0.05  # runtime.py fallback when the option is unset
+ENGINE_SMOOTHING = DEFAULT_SMOOTHING_WEIGHT  # 0.1; Tuning UI default
 
 
-def _config() -> dict:
-    return {
+def _config(*, smoothing_weight: float | None = None) -> dict:
+    cfg: dict = {
         "nmpc_period": DEFAULT_NMPC_PERIOD,
         "nmpc_fast_substeps": DEFAULT_NMPC_FAST_SUBSTEPS,
         "nmpc_horizon_h": DEFAULT_NMPC_HORIZON_H,
@@ -65,6 +68,9 @@ def _config() -> dict:
             }
         ],
     }
+    if smoothing_weight is not None:
+        cfg["smoothing_weight"] = float(smoothing_weight)
+    return cfg
 
 
 def _set_n_int(engine: ControlEngine, n_int: int) -> None:
@@ -126,13 +132,45 @@ def _u_hold_hours(watts: np.ndarray, dt_h: float) -> float:
     return float(np.median(runs) * dt_h)
 
 
-def run_one(n_int: int) -> dict:
-    engine = ControlEngine(_config())
+def peaked_prices(n_fast: int, dt_s: float) -> list[float]:
+    """Two forecast peaks (~1.2→2.6), matching the room-view price shape."""
+
+    hours = (np.arange(n_fast, dtype=float) + 0.5) * (dt_s / 3600.0)
+    base = 1.15
+    p1 = 1.25 * np.exp(-0.5 * ((hours - 8.0) / 2.0) ** 2)
+    p2 = 1.45 * np.exp(-0.5 * ((hours - 20.0) / 2.5) ** 2)
+    return (base + p1 + p2).tolist()
+
+
+def _price_series(kind: str, n_fast: int, dt_s: float) -> list[float]:
+    if kind == "peaked":
+        return peaked_prices(n_fast, dt_s)
+    return [2.0] * n_fast
+
+
+def _max_slow_step_kw(watts: np.ndarray, m: int) -> float:
+    if watts.size < 2 * m:
+        return 0.0
+    slow = watts[::m]
+    if slow.size < 2:
+        return 0.0
+    return float(np.max(np.abs(np.diff(slow))) / 1000.0)
+
+
+def run_one(
+    n_int: int,
+    *,
+    smoothing_weight: float | None = None,
+    price_kind: str = "flat",
+) -> dict:
+    engine = ControlEngine(_config(smoothing_weight=smoothing_weight))
     _set_n_int(engine, n_int)
     n_fast = engine._controller.horizon
     dt_s = float(engine._controller._dt)
+    m = int(engine._controller._timing.m)
     outdoor = [22.0] * n_fast
-    prices = [2.0] * n_fast
+    prices = _price_series(price_kind, n_fast, dt_s)
+    used_s = float(engine._controller._smoothing_weight)
     engine.compute_actions(
         {ROOM: 25.2},
         22.0,
@@ -152,15 +190,22 @@ def run_one(n_int: int) -> dict:
     idle_temps = _series(idle, "predictions")
     hours = (np.arange(temps.size, dtype=float) + 1.0) * (dt_s / 3600.0)
     metrics = _jitter(temps, dt_s / 3600.0)
+    s_label = f"s_rom={used_s:g}"
+    n_label = f"n_int={n_int}"
+    label = s_label if smoothing_weight is not None else n_label
     metrics.update(
         {
+            "label": label,
             "n_int": n_int,
+            "smoothing_weight": used_s,
+            "price_kind": price_kind,
             "accepted": accepted,
             "applied": applied,
             "fun": float(plan.get("fun", float("nan"))),
             "cost_zero": float(plan.get("cost_zero", float("nan"))),
             "min_W": float(np.min(watts)) if watts.size else 0.0,
             "max_W": float(np.max(watts)) if watts.size else 0.0,
+            "max_slow_step_kW": _max_slow_step_kw(watts, m),
             "u_hold_h": _u_hold_hours(watts, dt_s / 3600.0),
             "idle_max_T": float(np.max(idle_temps)) if idle_temps.size else float("nan"),
             "plan_max_T": float(np.max(temps)) if temps.size else float("nan"),
@@ -172,39 +217,33 @@ def run_one(n_int: int) -> dict:
         "hours": hours,
         "temps": temps,
         "watts": watts,
+        "prices": np.asarray(prices, dtype=float),
         "idle_temps": idle_temps,
+        "label": label,
     }
 
 
-def plot_runs(runs: list[dict], tag: str) -> Path:
+def plot_runs(runs: list[dict], tag: str, title: str) -> Path:
     INSPECT.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-    ax_t, ax_u = axes
+    fig, axes = plt.subplots(3, 1, figsize=(11, 9), sharex=True)
+    ax_t, ax_u, ax_p = axes
     for run in runs:
-        n_int = int(run["metrics"]["n_int"])
-        lw = 2.2 if n_int == BASELINE_N_INT else 1.4
-        ax_t.plot(
-            run["hours"],
-            run["temps"],
-            label=f"n_int={n_int}",
-            linewidth=lw,
-        )
-        ax_u.plot(
-            run["hours"],
-            run["watts"] / 1000.0,
-            label=f"n_int={n_int}",
-            linewidth=lw,
-        )
+        ax_t.plot(run["hours"], run["temps"], label=run["label"], linewidth=1.6)
+        ax_u.plot(run["hours"], run["watts"] / 1000.0, label=run["label"], linewidth=1.6)
     ax_t.axhline(23.5, color="0.4", linestyle="--", linewidth=0.8, label="setpoint")
     ax_t.axhline(25.5, color="0.7", linestyle=":", linewidth=0.8)
     ax_t.axhline(21.5, color="0.7", linestyle=":", linewidth=0.8)
     ax_t.set_ylabel("Forecast T [°C]")
-    ax_t.set_title("Production NMPC path — integrator substeps per 15 min tick")
+    ax_t.set_title(title)
     ax_t.legend(loc="best")
     ax_t.grid(True, alpha=0.3)
     ax_u.set_ylabel("Planned power [kW]")
-    ax_u.set_xlabel("Hours from now")
+    ax_u.legend(loc="best")
     ax_u.grid(True, alpha=0.3)
+    ax_p.plot(runs[0]["hours"], runs[0]["prices"], color="#81c784", linewidth=1.6)
+    ax_p.set_ylabel("Price")
+    ax_p.set_xlabel("Hours from now")
+    ax_p.grid(True, alpha=0.3)
     fig.tight_layout()
     path = INSPECT / f"{tag}_forecast.png"
     fig.savefig(path, dpi=120)
@@ -215,10 +254,9 @@ def plot_runs(runs: list[dict], tag: str) -> Path:
 def plot_dt(runs: list[dict], tag: str) -> Path:
     fig, ax = plt.subplots(figsize=(11, 4))
     for run in runs:
-        n_int = int(run["metrics"]["n_int"])
         dT = np.diff(run["temps"])
         hours = run["hours"][1:]
-        ax.plot(hours, dT, label=f"n_int={n_int}", linewidth=1.2)
+        ax.plot(hours, dT, label=run["label"], linewidth=1.2)
     ax.axhline(0.0, color="0.3", linewidth=0.8)
     ax.set_ylabel("ΔT per 15 min [K]")
     ax.set_xlabel("Hours from now")
@@ -232,19 +270,47 @@ def plot_dt(runs: list[dict], tag: str) -> Path:
     return path
 
 
+def _floats(raw: str) -> list[float]:
+    return [float(part) for part in raw.split(",") if part.strip()]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", default="01")
     parser.add_argument(
         "--n-int",
-        default=",".join(str(n) for n in CANDIDATE_N_INT),
-        help="comma-separated n_int_steps values; 10 is production baseline",
+        default="",
+        help="comma-separated n_int_steps; default 1,10,40 unless --smoothing is set",
+    )
+    parser.add_argument(
+        "--smoothing",
+        default="",
+        help="comma-separated smoothing_weight (s_rom) values; production n_int=10",
+    )
+    parser.add_argument(
+        "--price",
+        choices=("flat", "peaked"),
+        default="flat",
+        help="fast-rate price forecast (OCP sees 2 h means)",
     )
     args = parser.parse_args()
-    n_vals = [int(part) for part in args.n_int.split(",") if part.strip()]
     INSPECT.mkdir(parents=True, exist_ok=True)
-    runs = [run_one(n) for n in n_vals]
-    forecast_png = plot_runs(runs, args.tag)
+    if args.smoothing.strip():
+        n_int = 10
+        runs = [
+            run_one(n_int, smoothing_weight=s, price_kind=args.price)
+            for s in _floats(args.smoothing)
+        ]
+        title = f"Production NMPC — ROM vs {args.price} price (n_int=10)"
+    else:
+        n_vals = (
+            [int(part) for part in args.n_int.split(",") if part.strip()]
+            if args.n_int.strip()
+            else list(CANDIDATE_N_INT)
+        )
+        runs = [run_one(n, price_kind=args.price) for n in n_vals]
+        title = f"Production NMPC — integrator substeps ({args.price} price)"
+    forecast_png = plot_runs(runs, args.tag, title)
     dt_png = plot_dt(runs, args.tag)
     table = [run["metrics"] for run in runs]
     report = {
@@ -257,6 +323,9 @@ def main() -> int:
             "comfort_offset": 2.0,
             "timing": "2 h / 8 fast / 36 h",
             "solar_exposure": "high",
+            "price": args.price,
+            "app_smoothing_fallback": APP_SMOOTHING,
+            "engine_smoothing_default": ENGINE_SMOOTHING,
         },
         "baseline_n_int": BASELINE_N_INT,
         "metrics": table,
