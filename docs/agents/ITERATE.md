@@ -56,4 +56,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/624
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/624
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/624 (`68d86cf`)
