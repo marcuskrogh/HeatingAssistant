@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.20
+
+- When a heat pump can cool, the two-hour planner now uses negative power
+  instead of sitting at zero.
+- Overview and room pages now show two countdowns: the 15-minute control
+  cycle and the two-hour planner cycle.
+
 # 2026.08.11
 
 - Heating now uses a two-rate planner: a slow nonlinear plan every two hours

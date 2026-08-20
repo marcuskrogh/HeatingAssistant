@@ -174,6 +174,7 @@ const room = (slug) => ({
 const ent = (state, attributes = {}) => ({ state: String(state), attributes });
 
 const rooms = [room('living'), room('kitchen')];
+const nowS = Date.now() / 1000;
 const state = {
   [rooms[0].entities.temperature_filtered]: ent('21.0'),
   [rooms[0].entities.setpoint]: ent('21.0'),
@@ -181,6 +182,13 @@ const state = {
   [rooms[0].entities.constraint_upper]: ent('22.0'),
   [rooms[1].entities.temperature_filtered]: ent('19.0'),
   [rooms[1].entities.setpoint]: ent('20.0'),
+  'sensor.heating_assistant_system_summary': ent('ok', { system_enabled: true }),
+  'sensor.heating_assistant_mpc_performance': ent('0.12', {
+    last_run_ts: nowS - 30,
+    dt_s: 900,
+    last_nmpc_ts: nowS - 600,
+    nmpc_period_s: 7200,
+  }),
 };
 
 let scheduleCalls = 0;
@@ -210,6 +218,23 @@ assert(
 );
 const tiles = container.querySelectorAll('.room-climate-tile');
 assert(tiles.length === 2, `overview must render one tile per room (got ${tiles.length})`);
+const countdownCards = container.querySelectorAll('.countdown');
+assert(
+  countdownCards.length === 2,
+  `overview must render NEXT CONTROL and NEXT NMPC rings (got ${countdownCards.length})`,
+);
+const countdownLabels = countdownCards.map((card) => {
+  const label = card.querySelector('.countdown__label');
+  return label ? label.textContent : '';
+});
+assert(
+  countdownLabels.includes('NEXT CONTROL'),
+  `control countdown label missing (got ${countdownLabels.join(', ')})`,
+);
+assert(
+  countdownLabels.includes('NEXT NMPC'),
+  `NMPC countdown label missing (got ${countdownLabels.join(', ')})`,
+);
 assert(scheduleCalls === 1, 'initial render must fetch schedules exactly once (immediate)');
 assert(experimentCalls === 1, 'initial render must fetch experiments exactly once');
 

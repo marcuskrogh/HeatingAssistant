@@ -64,6 +64,8 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const lastDuration = entityValue(s, systemEntity('mpc_performance'));
     const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_run_ts');
     const dt = entityAttr(s, systemEntity('mpc_performance'), 'dt_s');
+    const lastNmpc = entityAttr(s, systemEntity('mpc_performance'), 'last_nmpc_ts');
+    const nmpcPeriod = entityAttr(s, systemEntity('mpc_performance'), 'nmpc_period_s');
     const meanErr = entityAttr(s, systemEntity('mpc_performance'), 'mean_tracking_error');
     const hassCount = Object.keys(hass?.states || s || {}).length;
 
@@ -98,9 +100,11 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
           ${row('Fallback', fallback || 'none', fallback ? 'warning' : 'healthy')}
           ${row('MPC load', mpcLoad == null ? '—' : `${formatNumber(mpcLoad, 0)}%`)}
           ${row('Last solve', lastDuration == null ? '—' : `${formatNumber(Number(lastDuration), 2)} s`)}
-          ${row('Interval', dt == null ? '—' : `${formatNumber(Number(dt), 0)} s`)}
+          ${row('Control interval', dt == null ? '—' : `${formatNumber(Number(dt), 0)} s`)}
+          ${row('NMPC interval', nmpcPeriod == null ? '—' : `${formatNumber(Number(nmpcPeriod), 0)} s`)}
           ${row('Mean tracking err', meanErr == null ? '—' : formatNumber(Number(meanErr), 2))}
-          ${row('Last run ts', lastRun == null ? '—' : String(lastRun))}
+          ${row('Last control ts', lastRun == null ? '—' : String(lastRun))}
+          ${row('Last NMPC ts', lastNmpc == null ? '—' : String(lastNmpc))}
         </section>
         <section class="system-status__card">
           <div class="system-status__card-title">ID HISTORY</div>

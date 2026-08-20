@@ -24,7 +24,7 @@ from heatingassistant.engine.const import (
 )
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine.controller import HeatingMPCController
-from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_accept import accept_plan
 from heatingassistant.engine.nmpc_ocp import MeanOcp
 from heatingassistant.engine.nmpc_p import p_command
@@ -562,3 +562,40 @@ def test_runtime_persists_injected_nmpc_defaults(tmp_path):
     assert disk["nmpc_period"] == pytest.approx(DEFAULT_NMPC_PERIOD)
     assert disk["nmpc_fast_substeps"] == DEFAULT_NMPC_FAST_SUBSTEPS
     assert disk["nmpc_horizon_h"] == pytest.approx(DEFAULT_NMPC_HORIZON_H)
+
+
+def test_heat_pump_bounds_allow_negative_u():
+    hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=4, dt=900.0)
+    lo, hi = ctrl._control_system.u_bounds
+    assert float(lo[0]) == pytest.approx(-1.0)
+    assert float(hi[0]) == pytest.approx(1.0)
+
+
+def test_nmpc_cools_when_heat_pump_allows_negative_u():
+    hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=4, dt=900.0)
+    plan = ctrl.solve_nmpc(outdoor_temp=30.0, now=_NOW, timeout_s=10.0, maxiter=40)
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert plan["accepted"] is True
+    assert float(np.min(u_star)) < -0.1
+    assert float(plan["fun"]) < 1e-3 * float(plan["cost_zero"])
+
+
+def test_nmpc_still_heats_electric_when_cold():
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=16.0, setpoint=21.0, comfort_offset=2.0
+    )
+    ctrl = HeatingMPCController(HouseModel([room]), [heater], horizon=4, dt=900.0)
+    plan = ctrl.solve_nmpc(outdoor_temp=-5.0, now=_NOW, timeout_s=10.0, maxiter=40)
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert plan["accepted"] is True
+    assert float(np.min(u_star)) >= -1e-9
+    assert float(np.max(u_star)) > 0.1

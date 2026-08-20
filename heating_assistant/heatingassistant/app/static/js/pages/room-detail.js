@@ -1,7 +1,7 @@
 import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=124';
 import { createGauge, updateGauge } from '../components/gauge.js?v=124';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown } from '../components/countdown.js?v=124';
+import { createCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=125';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=124';
@@ -315,6 +315,8 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
+  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: true });
+  kpiGrid.appendChild(nmpcCountdown.element);
 
   // ── Schedule overview ──────────────────────────────────────────────────────
   // Mirrors the schedules index-card design; clicking opens the editable
@@ -468,7 +470,10 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, plotSettings, onChartsReady);
   });
 
-  const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
+  const countdownInterval = setInterval(() => {
+    countdown.tick(latestState);
+    nmpcCountdown.tick(latestState);
+  }, 1000);
 
   return {
     update(newState) {

@@ -292,12 +292,47 @@ def solve_mean_ocp(
     nit = 0
     success = False
     fun = float("nan")
+    # SLSQP from a zero warm-start does not search u < 0 when |J| and |∇J|
+    # are ~1e5 (comfort ρ). Scale the NLP so box bounds below zero are used.
+    # Accept still compares unscaled J.  ocp.cost / ocp.jac stay unscaled.
+    try:
+        j_ref = float(ocp.cost(u0))
+    except TimeoutError as exc:
+        ocp.deadline = None
+        elapsed = time.perf_counter() - t0
+        return {
+            "status": "timeout",
+            "success": False,
+            "elapsed_s": elapsed,
+            "nfev": ocp.nfev,
+            "njev": ocp.njev,
+            "nit": 0,
+            "fun": float(ocp.best_j) if ocp.best_u is not None else float("nan"),
+            "message": str(exc),
+            "u_star": (
+                ocp.best_u.reshape(ocp.n, ocp.nu)
+                if ocp.best_u is not None
+                else u0.reshape(ocp.n, ocp.nu)
+            ),
+            "n_decisions": ocp.n * ocp.nu,
+            "N": ocp.n,
+            "M": ocp.m,
+            "timed_out": ocp.timed_out,
+        }
+    j_scale = abs(j_ref) if np.isfinite(j_ref) and abs(j_ref) > 1.0 else 1.0
+
+    def fun_scaled(x: np.ndarray) -> float:
+        return float(ocp.cost(x)) / j_scale
+
+    def jac_scaled(x: np.ndarray) -> np.ndarray:
+        return np.asarray(ocp.jac(x), dtype=float) / j_scale
+
     solver = minimize_fn or minimize
     kwargs: dict[str, Any] = {
-        "fun": ocp.cost,
+        "fun": fun_scaled,
         "x0": u0,
         "method": "SLSQP",
-        "jac": ocp.jac,
+        "jac": jac_scaled,
         "bounds": ocp.bounds,
         "options": {"maxiter": int(maxiter), "ftol": NMPC_FTOL, "disp": False},
     }
@@ -307,6 +342,8 @@ def solve_mean_ocp(
         nit = int(getattr(res, "nit", 0) or 0)
         success = bool(getattr(res, "success", False))
         fun = float(getattr(res, "fun", float("nan")))
+        if np.isfinite(fun):
+            fun *= j_scale
         message = str(getattr(res, "message", ""))
         if not success:
             status = "nonconverged"

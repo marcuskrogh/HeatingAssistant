@@ -1,27 +1,48 @@
-import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=124';
+import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=125';
 
-export function createCountdown(state, small = false) {
+export const COUNTDOWN_CONTROL = {
+  dtAttr: 'dt_s',
+  lastRunAttr: 'last_run_ts',
+  label: 'NEXT CONTROL',
+  defaultDt: 300,
+  useEntityLastUpdated: true,
+  missingRemaining: 'period',
+};
+
+export const COUNTDOWN_NMPC = {
+  dtAttr: 'nmpc_period_s',
+  lastRunAttr: 'last_nmpc_ts',
+  label: 'NEXT NMPC',
+  defaultDt: 7200,
+  useEntityLastUpdated: false,
+  missingRemaining: 'due',
+};
+
+export function createCountdown(state, options = false) {
+  const spec = resolveSpec(options);
   const container = document.createElement('div');
-  container.className = `card countdown${small ? ' countdown--small' : ''}`;
+  container.className = `card countdown${spec.small ? ' countdown--small' : ''}`;
 
-  const dtS = getDtSeconds(state);
-  const remaining = computeRemaining(state, dtS);
+  const dtS = getDtSeconds(state, spec);
+  const remaining = computeRemaining(state, dtS, spec);
 
-  renderCountdownContent(container, remaining, dtS, small, isSystemStopped(state));
+  renderCountdownContent(container, remaining, dtS, spec.small, isSystemStopped(state), spec.label);
 
   return {
     element: container,
     _dtS: dtS,
+    _spec: spec,
     tick(currentState) {
-      const dt = getDtSeconds(currentState);
-      const rem = computeRemaining(currentState, dt);
-      updateCountdownDOM(container, rem, dt, isSystemStopped(currentState));
+      const dt = getDtSeconds(currentState, spec);
+      const rem = computeRemaining(currentState, dt, spec);
+      updateCountdownDOM(container, rem, dt, isSystemStopped(currentState), spec.label);
     },
   };
 }
 
 export function updateCountdown(countdown, state) {
-  countdown._dtS = getDtSeconds(state);
+  const spec = countdown._spec || COUNTDOWN_CONTROL;
+  countdown._dtS = getDtSeconds(state, spec);
 }
 
 // The control countdown is meaningless while the system is stopped: no control
@@ -33,26 +54,35 @@ function isSystemStopped(state) {
   return enabled === false;
 }
 
-function getDtSeconds(state) {
-  const dt = entityAttr(state, systemEntity('mpc_performance'), 'dt_s');
-  return dt ? parseFloat(dt) : 300;
+function resolveSpec(options) {
+  if (options === true || options === false) {
+    return { ...COUNTDOWN_CONTROL, small: !!options };
+  }
+  return { ...COUNTDOWN_CONTROL, ...options };
 }
 
-function computeRemaining(state, dtS) {
-  // Prefer the explicit MPC-run timestamp the coordinator publishes: it is
-  // anchored to the actual internal solve schedule and is NOT bumped by the
-  // fast UI refresh that writes entity state between solves.  Fall back to the
-  // entity's HA last_updated for older integration versions.
-  const lastRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
+function getDtSeconds(state, spec) {
+  const dt = entityAttr(state, systemEntity('mpc_performance'), spec.dtAttr);
+  return dt ? parseFloat(dt) : spec.defaultDt;
+}
+
+function computeRemaining(state, dtS, spec) {
+  // Prefer the explicit timestamp the coordinator publishes: it is anchored to
+  // the actual internal schedule and is NOT bumped by the fast UI refresh that
+  // writes entity state between solves.  Fall back to the entity's HA
+  // last_updated only for the fast control ring (older integration versions).
+  const lastRunTs = entityAttr(state, systemEntity('mpc_performance'), spec.lastRunAttr);
   let lastRunMs = null;
   if (lastRunTs != null) {
     const parsed = parseFloat(lastRunTs);
     if (!isNaN(parsed)) lastRunMs = parsed * 1000;
   }
-  if (lastRunMs == null) {
+  if (lastRunMs == null && spec.useEntityLastUpdated) {
     const lastUpdated = entityLastUpdated(state, systemEntity('mpc_performance'));
-    if (!lastUpdated) return dtS;
-    lastRunMs = lastUpdated.getTime();
+    if (lastUpdated) lastRunMs = lastUpdated.getTime();
+  }
+  if (lastRunMs == null) {
+    return spec.missingRemaining === 'due' ? 0 : dtS;
   }
 
   const elapsed = (Date.now() - lastRunMs) / 1000;
@@ -61,13 +91,13 @@ function computeRemaining(state, dtS) {
   return remaining;
 }
 
-function renderCountdownContent(container, remaining, dtS, small, stopped) {
+function renderCountdownContent(container, remaining, dtS, small, stopped, label) {
   const progress = stopped ? 0 : Math.min(1, Math.max(0, 1 - remaining / dtS));
   const circumference = 2 * Math.PI * 34;
   const dashOffset = circumference * (1 - progress);
   const ringClass = small ? 'countdown__ring countdown__ring--small' : 'countdown__ring';
   const valueText = stopped ? '—' : formatCountdown(remaining);
-  const labelText = stopped ? 'STOPPED' : 'NEXT CONTROL';
+  const labelText = stopped ? 'STOPPED' : label;
 
   container.classList.toggle('countdown--paused', !!stopped);
   container.innerHTML = `
@@ -82,7 +112,7 @@ function renderCountdownContent(container, remaining, dtS, small, stopped) {
   `;
 }
 
-function updateCountdownDOM(container, remaining, dtS, stopped) {
+function updateCountdownDOM(container, remaining, dtS, stopped, label) {
   const progress = stopped ? 0 : Math.min(1, Math.max(0, 1 - remaining / dtS));
   const circumference = 2 * Math.PI * 34;
   const dashOffset = circumference * (1 - progress);
@@ -99,5 +129,5 @@ function updateCountdownDOM(container, remaining, dtS, stopped) {
   if (valueEl) valueEl.textContent = stopped ? '—' : formatCountdown(remaining);
 
   const labelEl = container.querySelector('.countdown__label');
-  if (labelEl) labelEl.textContent = stopped ? 'STOPPED' : 'NEXT CONTROL';
+  if (labelEl) labelEl.textContent = stopped ? 'STOPPED' : label;
 }
