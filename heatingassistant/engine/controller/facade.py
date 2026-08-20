@@ -114,6 +114,7 @@ from ..const import (
 )
 from ..integrator import implicit_euler_substeps
 from ..nmpc_ocp import (
+    NMPC_IDLE_U_ABS,
     NMPC_MAXITER,
     NMPC_TIMEOUT_S,
     MeanOcp,
@@ -2337,13 +2338,23 @@ class HeatingMPCController:
 
     @property
     def nmpc_due(self) -> bool:
-        """True when a slow solve should start (no path, or one period elapsed)."""
+        """True when a slow solve should start (no path, idle zeros, or one period)."""
         if self._nmpc_busy:
             return False
         with self._nmpc_lock:
             if self._nmpc_U is None:
                 return True
+            if float(np.max(np.abs(self._nmpc_U))) < NMPC_IDLE_U_ABS:
+                return True
             return self._nmpc_k >= self._timing.m
+
+    def nmpc_plan_idle(self) -> bool:
+        """True when an installed slow plan is identically off."""
+        with self._nmpc_lock:
+            U = self._nmpc_U
+            if U is None:
+                return False
+            return float(np.max(np.abs(U))) < NMPC_IDLE_U_ABS
 
     def consume_watchdog_notification(self) -> Optional[str]:
         """Return ``create`` / ``dismiss`` once, then clear."""
@@ -2409,9 +2420,44 @@ class HeatingMPCController:
             self._solve_times.append(float(elapsed))
         if result.get("accepted"):
             self.set_accepted_path(result["u_star"], result["t_ref"], now=now)
+            self.rebuild_forecast_from_plan()
             return True
         self._record_nmpc_reject(now)
         return False
+
+    def rebuild_forecast_from_plan(self) -> bool:
+        """Rebuild plot trajectories from the installed slow plan.
+
+        ``compute()`` caches heating_schedule before the NLP worker finishes.
+        After a plan is applied, refresh the schedule and air-temperature
+        path immediately so Ingress does not keep an open-loop (U = 0)
+        forecast until the next control tick.
+        """
+        with self._nmpc_lock:
+            U_fast = None if self._nmpc_U_fast is None else self._nmpc_U_fast.copy()
+            T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
+        if U_fast is None:
+            return False
+        outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
+        N = int(self._horizon)
+        if len(outdoor_seq) < N or U_fast.shape[0] < N:
+            return False
+        self._heating_schedule = [
+            self._system.display_heating_powers(U_fast[k], outdoor_seq[k])
+            for k in range(N)
+        ]
+        if T_ref is not None and T_ref.shape[0] > 0:
+            room_list = self._system._room_list
+            n_rooms = min(int(T_ref.shape[1]), len(room_list))
+            self._predictions = [
+                {
+                    name: float(T_ref[min(k, T_ref.shape[0] - 1), i])
+                    for i, name in enumerate(room_list[:n_rooms])
+                }
+                for k in range(N)
+            ]
+            self._linearised_predictions = [dict(step) for step in self._predictions]
+        return True
 
     def _comfort_bounds_fast(
         self,
