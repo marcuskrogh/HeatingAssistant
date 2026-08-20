@@ -117,6 +117,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
       const sharedAdv = advancedSubsection(sharedCard, 'Advanced');
       sharedAdv.appendChild(paramGrid(
         numberField(src, 'emitter_time_constant', 'Emitter time constant', { step: 30, unit: 's', min: 0, hint: '0 for electric; ~600 for hydronic radiators.' }),
+        numberField(src, 'p_gain', 'P gain', { step: 0.05, unit: '/K', min: 0, hint: 'Fast tracker gain on (reference − estimated) air temperature. Default 0.1 /K.' }),
       ));
       dynamic.appendChild(sharedCard);
 
