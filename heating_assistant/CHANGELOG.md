@@ -9,6 +9,10 @@ must be the exact calendar version on its own line.
 - The two-hour planner countdown now stays on the clock from when you press
   Start. Finishing a plan no longer restarts that timer, so heating cycles
   do not drift later and later.
+- Room view Forecast and Planned Power now stay on the two-hour planner
+  path after each 15-minute control tick, matching Controller Tuning
+  preview: power holds for two hours, and the temperature forecast is
+  the planner trajectory rather than a jittery short-step re-rollout.
 
 # 2026.08.24
 
