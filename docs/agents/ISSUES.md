@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-405 | Task | [Iterate] NMPC planned power stays at 0 kW when cooling is needed | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-405` |
+| SWD-406 | Sub-task | Refresh NMPC forecast on apply and retry idle zero plans | In Progress | SWD-405 | docs/agents/ITERATE.md | — |
+| SWD-407 | Sub-task | Tests, CalVer, App sync for cooling plan plot | In Progress | SWD-405 | docs/agents/ITERATE.md | — |
 | SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623 (`61c56e7`) |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |
@@ -128,6 +131,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-20 — `/iterate` SWD-405 from SWD-400: planned cooling still 0 kW on the room plot; refresh forecast on apply + retry idle zero plans; Relates SWD-400; Sub-tasks SWD-406–407. Next `/review-fix SWD-405`.
 - 2026-08-20 — `/define` SWD-395: PLAN `docs/agents/PLAN-nmpc-p-ff.md` (feature / feature-standard). Timing triple 2 h / 8 fast substeps / 36 h (`T_s` derived); `K_p` 0.1 /K; robust accept/reject; worker + 5 h watchdog. Sub-tasks SWD-396–399. Next `/implement SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 **accepted** (2 h, analytic Jacobian, worker thread). Supportive Task Done. Next `/define SWD-395`.
 - 2026-08-19 — `/sandbox` SWD-394 iteration 3: analytic `dJ/dU` via production `dfdx`/`dfdu` (rel error 1.3e-5 vs FD). 2 h cold **22 s** / 80 iters (J=0.81, hit cap); warm **7.7 s** / 26 iters success. Inspect `sandbox/nmpc-p-ff/inspect/03_report.md`. Next `/sandbox SWD-394`.
