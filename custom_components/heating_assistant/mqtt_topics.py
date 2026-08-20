@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
@@ -63,6 +64,40 @@ def entities(instance_id: str) -> str:
 def status(instance_id: str) -> str:
     _validate_part(instance_id, "instance_id")
     return f"{TOPIC_ROOT}/{instance_id}/status"
+
+
+def cmd(instance_id: str, name: str) -> str:
+    _validate_part(instance_id, "instance_id")
+    _validate_part(name, "name")
+    return f"{TOPIC_ROOT}/{instance_id}/cmd/{name}"
+
+
+def notify_service_call(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]] | None:
+    """Map an App notify MQTT object to a persistent_notification service call.
+
+    Returns ``(create|dismiss, service_data)`` or ``None`` when the action is
+    unknown.
+    """
+
+    action = str(payload.get("action") or "").strip().lower()
+    notification_id = str(
+        payload.get("notification_id") or "heating_assistant_nmpc_plan"
+    )
+    if action == "create":
+        return (
+            "create",
+            {
+                "notification_id": notification_id,
+                "title": str(payload.get("title") or "Heating plan unavailable"),
+                "message": str(
+                    payload.get("message")
+                    or "The heating planner has not produced a usable plan."
+                ),
+            },
+        )
+    if action == "dismiss":
+        return "dismiss", {"notification_id": notification_id}
+    return None
 
 
 # Domains the Ingress entity pickers can select from.

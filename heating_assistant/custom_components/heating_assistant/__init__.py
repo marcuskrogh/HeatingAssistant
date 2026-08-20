@@ -29,7 +29,9 @@ from .mqtt_topics import (
     PICKER_DOMAINS,
     MqttTagPayload,
     bindings as bindings_topic,
+    cmd,
     entities as entities_topic,
+    notify_service_call,
     status as status_topic,
     tag_in,
     tag_out,
@@ -66,6 +68,7 @@ class _BridgeManager:
         self._event_unsubs: list[Callable[[], None]] = []
         self._catalog_task: asyncio.Task[None] | None = None
         self._status_unsub: Callable[[], None] | None = None
+        self._notify_unsub: Callable[[], None] | None = None
         self._restart_poll_unsub: Callable[[], None] | None = None
         self._inbound_bindings: list[tuple[str, str]] = []
 
@@ -99,6 +102,14 @@ class _BridgeManager:
                 qos=QOS,
             )
         )
+        self._notify_unsub = await _maybe_await(
+            mqtt.async_subscribe(
+                self.hass,
+                cmd(self.instance_id, "notify"),
+                self._async_notify_message,
+                qos=QOS,
+            )
+        )
         self._restart_poll_unsub = async_track_time_interval(
             self.hass,
             self._async_poll_restart_issue,
@@ -118,6 +129,9 @@ class _BridgeManager:
         if self._status_unsub is not None:
             self._status_unsub()
             self._status_unsub = None
+        if self._notify_unsub is not None:
+            self._notify_unsub()
+            self._notify_unsub = None
         while self._event_unsubs:
             self._event_unsubs.pop()()
         if self._binding_unsub is not None:
@@ -150,6 +164,28 @@ class _BridgeManager:
 
     async def _async_app_status_message(self, _msg: Any) -> None:
         sync_restart_issue(self.hass)
+
+    async def _async_notify_message(self, message: Any) -> None:
+        try:
+            payload = json.loads(message.payload)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            _LOGGER.warning("Ignoring invalid Heating Assistant notify payload: %s", exc)
+            return
+        if not isinstance(payload, dict):
+            _LOGGER.warning("Ignoring Heating Assistant notify payload that is not an object")
+            return
+        action = str(payload.get("action") or "").strip().lower()
+        call = notify_service_call(payload)
+        if call is None:
+            _LOGGER.debug("Ignoring Heating Assistant notify action %r", action)
+            return
+        service, data = call
+        await self.hass.services.async_call(
+            "persistent_notification",
+            service,
+            data,
+            blocking=False,
+        )
 
     async def _async_poll_restart_issue(self, _now: Any) -> None:
         sync_restart_issue(self.hass)

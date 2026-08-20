@@ -62,6 +62,7 @@ from heatingassistant.mqtt.topics import (
     DEFAULT_QOS,
     MqttTagPayload,
     bindings as bindings_topic,
+    cmd,
     entities as entities_topic,
     parse_tag_topic,
     status as status_topic,
@@ -136,6 +137,17 @@ class HeatingRuntime:
         # stores entity_ids; the thin HA bridge consumes the bindings map).
         self._apply_entity_wiring()
         self.bindings = self._load_bindings()
+        if not any(
+            self.options.get(key) is not None
+            for key in (
+                const.CONF_NMPC_PERIOD,
+                const.CONF_NMPC_FAST_SUBSTEPS,
+                const.CONF_NMPC_HORIZON_H,
+            )
+        ):
+            self.options[const.CONF_NMPC_PERIOD] = const.DEFAULT_NMPC_PERIOD
+            self.options[const.CONF_NMPC_FAST_SUBSTEPS] = const.DEFAULT_NMPC_FAST_SUBSTEPS
+            self.options[const.CONF_NMPC_HORIZON_H] = const.DEFAULT_NMPC_HORIZON_H
         save_config(self.data_dir, self.options)
         self.tag_values: dict[str, Any] = dict(self.state.get("tag_values") or {})
         self.tag_statuses: dict[str, str] = dict(self.state.get("tag_statuses") or {})
@@ -199,6 +211,8 @@ class HeatingRuntime:
         self._ticker_stop = threading.Event()
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
+        self._nmpc_thread: threading.Thread | None = None
+        self._nmpc_loop: asyncio.AbstractEventLoop | None = None
         self._history_lock = threading.Lock()
         # Open-window / door override (SWD-298): state machine + debounce timers.
         self._window_tags: dict[str, list[str]] = {}
@@ -394,16 +408,22 @@ class HeatingRuntime:
         return True
 
     def _history_tick_interval_s(self) -> float:
-        """Seconds between history samples — matches control update_interval."""
+        """Seconds between history samples — matches derived NMPC sample interval."""
 
-        update = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        update = float(self._derived_update_interval())
         return max(_HISTORY_MIN_INTERVAL_S, update)
 
     def _control_tick_interval_s(self) -> float:
         """Seconds between background control cycles."""
 
-        update = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        update = float(self._derived_update_interval())
         return max(30.0, update)
+
+    def _derived_update_interval(self) -> float:
+        try:
+            return float(self.control_engine._derived_dt(self.options))
+        except Exception:
+            return float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
 
     def _start_background_ticker(self) -> None:
         """Start wall-clock history + control when MQTT tag events are quiet."""
@@ -721,9 +741,73 @@ class HeatingRuntime:
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
+            self._schedule_nmpc_worker()
             return dict(self.actuator_outputs)
         finally:
             self._control_lock.release()
+
+    def _schedule_nmpc_worker(self) -> None:
+        """Start a slow NLP thread when due; never block the control cycle."""
+
+        if not self.control_engine.nmpc_due():
+            return
+        thread = getattr(self, "_nmpc_thread", None)
+        if thread is not None and thread.is_alive():
+            return
+        try:
+            self._nmpc_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._nmpc_loop = None
+        self.control_engine.mark_nmpc_busy()
+        self._nmpc_thread = threading.Thread(
+            target=self._nmpc_worker_thread,
+            name="heatingassistant-nmpc",
+            daemon=True,
+        )
+        self._nmpc_thread.start()
+
+    def _nmpc_worker_thread(self) -> None:
+        try:
+            result = self.control_engine.solve_nmpc_blocking()
+            self.control_engine.apply_nmpc_result(result)
+            note = self.control_engine.consume_watchdog_notification()
+            if note:
+                self._emit_nmpc_notify(note)
+        except Exception:
+            _logger.exception("NMPC worker failed")
+            controller = getattr(self.control_engine, "_controller", None)
+            if controller is not None:
+                controller._nmpc_busy = False
+                controller._record_nmpc_reject()
+                note = controller.consume_watchdog_notification()
+                if note:
+                    self._emit_nmpc_notify(note)
+
+    def _emit_nmpc_notify(self, action: str) -> None:
+        loop = self._nmpc_loop
+        coro = self.publish_nmpc_notify(action)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+        try:
+            asyncio.run(coro)
+        except Exception:
+            _logger.exception("Failed to publish NMPC watchdog notification")
+
+    async def publish_nmpc_notify(self, action: str) -> None:
+        payload: dict[str, Any] = {
+            "action": action,
+            "notification_id": const.NMPC_WATCHDOG_NOTIFICATION_ID,
+        }
+        if action == "create":
+            payload["title"] = const.NMPC_WATCHDOG_TITLE
+            payload["message"] = const.NMPC_WATCHDOG_MESSAGE
+        await self.bus.publish(
+            cmd(self.instance_id, "notify"),
+            json.dumps(payload, sort_keys=True),
+            qos=DEFAULT_QOS,
+            retain=False,
+        )
 
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""
@@ -741,6 +825,16 @@ class HeatingRuntime:
         save_config(self.data_dir, self.options)
         self._rebuild_window_maps()
         self.control_engine.update_config(self.options)
+        for key in (
+            const.CONF_UPDATE_INTERVAL,
+            const.CONF_HORIZON,
+            const.CONF_NMPC_PERIOD,
+            const.CONF_NMPC_FAST_SUBSTEPS,
+            const.CONF_NMPC_HORIZON_H,
+        ):
+            if key in self.control_engine.config:
+                self.options[key] = self.control_engine.config[key]
+        save_config(self.data_dir, self.options)
         self._restore_estimated_parameters()
         self._sync_history_retention()
         self._recompute_room_temperatures()
@@ -960,9 +1054,18 @@ class HeatingRuntime:
                 self.options.get("soft_constraint_linear_weight", 0.0)
             ),
             "terminal_weight": float(self.options.get("terminal_weight", 1.0)),
-            "horizon": int(self.options.get("horizon", const.DEFAULT_HORIZON)),
-            "update_interval": int(
-                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+            "horizon": int(self.control_engine._derived_horizon(self.options)),
+            "update_interval": int(self.control_engine._derived_dt(self.options)),
+            const.CONF_NMPC_PERIOD: float(
+                self.options.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
+            ),
+            const.CONF_NMPC_FAST_SUBSTEPS: int(
+                self.options.get(
+                    const.CONF_NMPC_FAST_SUBSTEPS, const.DEFAULT_NMPC_FAST_SUBSTEPS
+                )
+            ),
+            const.CONF_NMPC_HORIZON_H: float(
+                self.options.get(const.CONF_NMPC_HORIZON_H, const.DEFAULT_NMPC_HORIZON_H)
             ),
             "window_open_debounce": int(
                 self.options.get("window_open_debounce", const.DEFAULT_WINDOW_OPEN_DEBOUNCE)
@@ -1115,21 +1218,25 @@ class HeatingRuntime:
         if outdoor_temp is None:
             return {"error": "outdoor_temperature_unavailable"}
 
-        preview_horizon = int(
-            overrides.get(
-                const.CONF_HORIZON,
-                self.options.get("horizon", const.DEFAULT_HORIZON),
-            )
+        from heatingassistant.engine.nmpc_timing import (  # noqa: PLC0415
+            timing_from_preview_overrides,
         )
-        preview_dt = float(
-            overrides.get(
-                const.CONF_UPDATE_INTERVAL,
-                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL),
+
+        try:
+            preview_timing = timing_from_preview_overrides(
+                self.options,
+                overrides,
+                default_period=const.DEFAULT_NMPC_PERIOD,
+                default_substeps=const.DEFAULT_NMPC_FAST_SUBSTEPS,
+                default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
             )
-        )
+            preview_horizon = preview_timing.n_fast
+            preview_dt = preview_timing.dt_s
+        except ValueError:
+            return {"error": "invalid_nmpc_timing"}
         # Serialize against live control cycles — preview mutates shared model
         # comfort/temps briefly and must not race actuator publishes.
-        if not self._control_lock.acquire(blocking=True, timeout=30.0):
+        if not self._control_lock.acquire(blocking=True, timeout=90.0):
             return {"error": "controller_busy"}
         try:
             disturbances = self._mpc_disturbance_inputs(

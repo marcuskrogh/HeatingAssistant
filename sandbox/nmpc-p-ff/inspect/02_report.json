@@ -1,0 +1,57 @@
+{
+  "scenario": {
+    "rooms": 2,
+    "heaters": "one HeatPump heat_cool per room",
+    "T_s_s": 900.0,
+    "T_H_h": 36.0,
+    "n_int_steps": 10,
+    "live_traces": "waived; synthetic outdoor/solar/price",
+    "cost_eval_1h_zero_u_s": 0.050760944999638014,
+    "cost_eval_1h_zero_u_J": 3472093.706876664
+  },
+  "qp_baseline": [
+    {
+      "horizon": 100,
+      "cold_s": 0.2643727899994701,
+      "warm_s": 0.2943326660006278
+    },
+    {
+      "horizon": 144,
+      "cold_s": 0.7208318070006499,
+      "warm_s": 0.7409912189996248
+    }
+  ],
+  "nmpc": [
+    {
+      "label": "2 h",
+      "t_nmpc_s": 7200.0,
+      "N": 18,
+      "M": 8,
+      "n_decisions": 36,
+      "maxiter": 80,
+      "method": "SLSQP",
+      "cold_s": 94.02733025999987,
+      "warm_s": 162.055156548,
+      "cold_status": "ok",
+      "warm_status": "nonconverged",
+      "cold_nfev": 1903,
+      "warm_nfev": 3280,
+      "cold_nit": 47,
+      "warm_nit": 80,
+      "cold_success": true,
+      "warm_success": false,
+      "cold_fun": 0.8316407766235683,
+      "warm_fun": 0.6813557040082403,
+      "cold_message": "Optimization terminated successfully",
+      "warm_message": "Iteration limit reached",
+      "moved": true
+    }
+  ],
+  "notes": [
+    "Single shooting in U; F = production implicit Euler of HouseThermalSDE.f.",
+    "SciPy SLSQP; default FD unless --explicit-jac.",
+    "A solve that leaves J near the zero-u cost (~3.5e6) is a false success; inspectables keep only runs with J<10."
+  ],
+  "tag": "02",
+  "explicit_jac": false
+}

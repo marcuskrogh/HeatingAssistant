@@ -442,8 +442,12 @@ SHERMAN_GRIMSRUD_DT_TYPICAL = 20.0  # K
 AIR_RHO_CP = 1200.0  # J / (m³ · K)
 
 # Controller configuration keys
-CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
-CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
+CONF_HORIZON = "horizon"               # derived fast-step count (n_fast); not a primary NMPC knob
+CONF_UPDATE_INTERVAL = "update_interval"  # derived sample interval T_s [s]; EKF / P / history
+CONF_NMPC_PERIOD = "nmpc_period"  # slow NMPC cadence [s]
+CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF+P ticks per slow interval
+CONF_NMPC_HORIZON_H = "nmpc_horizon_h"  # look-ahead [hours]
+CONF_P_GAIN = "p_gain"  # heater P-law gain [1/K]
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
 # Solar-radiation (irradiance) forecast.  A sensor reporting the sun's Global
@@ -496,8 +500,19 @@ DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 22.0                # °C
 DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
 DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
-DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
-DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
+DEFAULT_NMPC_PERIOD = 7200.0           # 2 h slow NMPC cadence
+DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then P ticks per slow interval
+DEFAULT_NMPC_HORIZON_H = 36.0          # look-ahead hours
+DEFAULT_P_GAIN = 0.1                   # P-law gain [1/K]
+DEFAULT_UPDATE_INTERVAL = 900          # derived T_s = nmpc_period / M (seconds)
+DEFAULT_HORIZON = 144                  # derived n_fast = N * M (36 h / 15 min)
+NMPC_WATCHDOG_S = 5 * 3600.0           # consecutive-reject wall clock before heaters off
+NMPC_WATCHDOG_NOTIFICATION_ID = "heating_assistant_nmpc_plan"
+NMPC_WATCHDOG_TITLE = "Heating plan unavailable"
+NMPC_WATCHDOG_MESSAGE = (
+    "The heating planner has not produced a usable plan for five hours. "
+    "Heaters are off until a new plan is accepted."
+)
 DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C

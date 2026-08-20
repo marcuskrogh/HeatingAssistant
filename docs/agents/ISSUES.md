@@ -4,6 +4,14 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/ship SWD-395` — merge PR 622 (CLEAN) |
+| SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
+| SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | Done | SWD-392 | docs/agents/SANDBOX-nmpc-p-ff.md | Done — `/define SWD-395` |
+| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | In Review | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/ship SWD-395` — merge https://github.com/marcuskrogh/HeatingAssistant/pull/622 (CLEAN) |
+| SWD-396 | Sub-task | Mean OCP + analytic Jacobian + accept/reject (replace QP path) | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-397 | Sub-task | Fast P + heater K_p; EKF uses applied u | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-398 | Sub-task | NLP worker thread + 5 h fail watchdog + notify | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-399 | Sub-task | Timing triple 2 h / 8 substeps / 36 h, Tuning UI, tests, CalVer, App sync | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
 | SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | Done | — | docs/agents/PLAN-pe-data-duration.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/621 |
 | SWD-390 | Sub-task | PE page + TUNING duration guidance copy | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
 | SWD-391 | Sub-task | Tests, CalVer, App sync | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
@@ -115,6 +123,14 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-20 — `/define` SWD-395: PLAN `docs/agents/PLAN-nmpc-p-ff.md` (feature / feature-standard). Timing triple 2 h / 8 fast substeps / 36 h (`T_s` derived); `K_p` 0.1 /K; robust accept/reject; worker + 5 h watchdog. Sub-tasks SWD-396–399. Next `/implement SWD-395`.
+- 2026-08-19 — `/sandbox` SWD-394 **accepted** (2 h, analytic Jacobian, worker thread). Supportive Task Done. Next `/define SWD-395`.
+- 2026-08-19 — `/sandbox` SWD-394 iteration 3: analytic `dJ/dU` via production `dfdx`/`dfdu` (rel error 1.3e-5 vs FD). 2 h cold **22 s** / 80 iters (J=0.81, hit cap); warm **7.7 s** / 26 iters success. Inspect `sandbox/nmpc-p-ff/inspect/03_report.md`. Next `/sandbox SWD-394`.
+- 2026-08-19 — `/sandbox` SWD-394 iteration 2: operator locked **2 h**. Cold SLSQP 94 s / 47 iters (success, cap 80). Warm polish hit maxiter. NMPC must use a worker thread (today’s `compute_actions` is inline on the App asyncio loop). Inspect `sandbox/nmpc-p-ff/inspect/02_report.md`. Next `/sandbox SWD-394`.
+- 2026-08-19 — `/sandbox` SWD-394 iteration 1: approximate SLSQP solve times on synthetic two-room heat-pump house (live traces waived). QP ~0.7 s; 15 min NMPC ~112 s; 1 h ~77 s (maxiter); 2 h ~24 s. Inspect `sandbox/nmpc-p-ff/inspect/01_report.md`. Next `/sandbox SWD-394`.
+- 2026-08-19 — `/sandbox` SWD-394 representativeness: measure bar is solve-time (p95/timeouts/warm-start) + closed-loop vs `HeatingLinearisedMPC`; live household traces named as a gap; inspect-loop not started. Artifact `docs/agents/SANDBOX-nmpc-p-ff.md`. Next `/sandbox SWD-394`.
+- 2026-08-19 — `/model` SWD-393 Done: hierarchical mean OCP + P-FF; artifact `docs/agents/MODEL-nmpc-p-ff.md` on `cursor/swd-395-nmpc-p-tracker-46be` (no PR). Next `/sandbox SWD-394`.
+- 2026-08-19 — `/explore` SWD-392: hierarchical nonlinear OCP + P tracking; route SWD-393 model → SWD-394 sandbox → SWD-395 define; last-plan hold; 5 h fail → u = 0 + persistent notification. Next `/model SWD-393`.
 - 2026-08-19 — shipped SWD-389 via PR #621: PE duration guidance (one day covers categories; several days for a good model); review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.10`. Next Done.
 - 2026-08-19 — `/review-fix` SWD-389 CLEAN (focused): 0 blockers / 0 should-fix; APPROVE intent on PR #621 (`gh` review API 403, posted comment). Fast suite 885 passed, 88 skipped. Next `/ship SWD-389`.
 - 2026-08-18 — shipped SWD-385 via PR #620: System Status clears stale BAD tag quality when HA sensors already measure; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.9`. Next Done.

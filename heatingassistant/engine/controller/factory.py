@@ -33,6 +33,9 @@ class ControllerBuildConfig:
     energy_price_weight: float
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
+    nmpc_period: Optional[float] = None
+    nmpc_fast_substeps: Optional[int] = None
+    nmpc_horizon_h: Optional[float] = None
 
     @classmethod
     def from_coordinator(
@@ -43,26 +46,56 @@ class ControllerBuildConfig:
     ) -> "ControllerBuildConfig":
         """Build config from a coordinator, optionally applying tuning overrides."""
         from ..const import (  # noqa: PLC0415
-            CONF_COMFORT_OFFSET,
             CONF_ENERGY_PRICE_WEIGHT,
             CONF_ENERGY_WEIGHT,
-            CONF_HORIZON,
+            CONF_NMPC_FAST_SUBSTEPS,
+            CONF_NMPC_HORIZON_H,
+            CONF_NMPC_PERIOD,
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
             CONF_SOFT_CONSTRAINT_WEIGHT,
             CONF_TERMINAL_WEIGHT,
             CONF_TRACKING_WEIGHT,
-            CONF_UPDATE_INTERVAL,
+            DEFAULT_NMPC_FAST_SUBSTEPS,
+            DEFAULT_NMPC_HORIZON_H,
+            DEFAULT_NMPC_PERIOD,
         )
+        from ..nmpc_timing import timing_from_options  # noqa: PLC0415
 
         ov = dict(overrides or {})
-        dt = float(ov.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s))
+        timing = timing_from_options(
+            {
+                CONF_NMPC_PERIOD: ov.get(
+                    CONF_NMPC_PERIOD,
+                    getattr(coordinator, "_nmpc_period", DEFAULT_NMPC_PERIOD),
+                ),
+                CONF_NMPC_FAST_SUBSTEPS: ov.get(
+                    CONF_NMPC_FAST_SUBSTEPS,
+                    getattr(
+                        coordinator,
+                        "_nmpc_fast_substeps",
+                        DEFAULT_NMPC_FAST_SUBSTEPS,
+                    ),
+                ),
+                CONF_NMPC_HORIZON_H: ov.get(
+                    CONF_NMPC_HORIZON_H,
+                    getattr(coordinator, "_nmpc_horizon_h", DEFAULT_NMPC_HORIZON_H),
+                ),
+            },
+            default_period=DEFAULT_NMPC_PERIOD,
+            default_substeps=DEFAULT_NMPC_FAST_SUBSTEPS,
+            default_horizon_h=DEFAULT_NMPC_HORIZON_H,
+        )
+        dt = float(timing.dt_s)
         return cls(
             model=coordinator.model,
             heat_sources=coordinator.heat_sources,
-            horizon=int(ov.get(CONF_HORIZON, coordinator._horizon)),
+            horizon=int(timing.n_fast),
             dt=dt,
             measurement_dt=dt,
+            nmpc_period=timing.period_s,
+            nmpc_fast_substeps=timing.fast_substeps,
+            nmpc_horizon_h=timing.horizon_h,
             latitude=coordinator._latitude,
             longitude=coordinator._longitude,
             albedo=getattr(coordinator, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
@@ -123,4 +156,7 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_v=config.sigma_v,
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
+        nmpc_period=config.nmpc_period,
+        nmpc_fast_substeps=config.nmpc_fast_substeps,
+        nmpc_horizon_h=config.nmpc_horizon_h,
     )

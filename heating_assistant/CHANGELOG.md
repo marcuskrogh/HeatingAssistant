@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.11
+
+- Heating now uses a two-rate planner: a slow nonlinear plan every two hours
+  and a fast tracker every 15 minutes. Heaters stay at the last good plan if a
+  solve fails, and switch off with a Home Assistant notice after five hours
+  without a usable plan.
+
 # 2026.08.10
 
 - Parameter estimation now says one day can cover every recommended category,

@@ -35,16 +35,18 @@ HouseThermalSDE(ContinuousDiscreteModel)
 
 HeatingMPCController
     Application facade: builds HouseThermalSDE + _InnovationEKF (CD-EKF) +
-    CDLinearizedMPCController, adds solar/outdoor forecasting, applies
-    source set-points, and exposes the visualisation properties consumed by
-    the coordinator.
+    a two-rate NMPC + P tracker.  The linearised QP is kept only as EKF glue
+    and is not solved on the happy path.
 
-    At each control interval the controller:
-      1. Runs the CD-EKF to fuse the current temperature measurement.
-      2. Linearises the SDE model around (x̂, u_prev, d_now) using analytic
-         Jacobians and ZOH-discretises the result.
-      3. Solves a convex QP (via OSQP/HiGHS) in deviation coordinates.
-      4. Applies the first optimal action to all heat sources.
+    At each fast control interval the controller:
+      1. Runs the CD-EKF to fuse the current temperature measurement
+         (predict uses the last applied P command).
+      2. Applies ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``
+         from the last accepted slow plan (or ``u = 0`` when none).
+      3. Applies the command to all heat sources.
+
+    The slow nonlinear OCP runs on a worker thread (not inline from
+    ``compute``).
 
     Public API:
         controller = HeatingMPCController(model, heat_sources, ...)
@@ -58,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -98,14 +101,29 @@ from mbc.estimation import (
 from mbc.control import StandardLinearisedContinuousMPC
 
 from ..const import (
+    DEFAULT_NMPC_FAST_SUBSTEPS,
+    DEFAULT_NMPC_HORIZON_H,
+    DEFAULT_NMPC_PERIOD,
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     AIR_RHO_CP,
+    NMPC_WATCHDOG_S,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
     SOLAR_WALL_FRACTION,
 )
 from ..integrator import implicit_euler_substeps
+from ..nmpc_ocp import (
+    NMPC_MAXITER,
+    NMPC_TIMEOUT_S,
+    MeanOcp,
+    evaluate_zero_heat_cost,
+    mean_price_slow,
+    plan_from_solve,
+    solve_mean_ocp,
+)
+from ..nmpc_p import p_command
+from ..nmpc_timing import NmpcTiming, derive_nmpc_timing, timing_from_dt_horizon
 from ..thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
@@ -1707,25 +1725,22 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
 
 class HeatingMPCController:
     """
-    Application facade for house-heating linearised CD-MPC.
+    Application facade for house-heating NMPC + P tracking.
 
     Builds a HouseThermalSDE, _InnovationEKF (CD-EKF), and
-    CDLinearizedMPCController, then provides the coordinator-facing API:
+    HeatingLinearisedMPC (EKF glue only — the linearised QP is not solved
+    on the happy path), then provides the coordinator-facing API:
 
       actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
 
-    The control loop at each step:
-      1. CDLinearizedMPCController.step(): runs EKF predict+update, linearises
-         the model around the current operating point, ZOH-discretises, and
-         solves a convex QP via OSQP/HiGHS.
-      2. Apply the first optimal action to all heat sources.
+    The fast loop at each ``T_s``:
+      1. CD-EKF predict+update using the last applied P command.
+      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)``.
+      3. Apply the command to all heat sources.
 
-    Cost structure (QP):
-        - Quadratic output-tracking cost  ||z - z_ref||^2_Q
-        - Quadratic input cost            ||u||^2_R
-        - Optional ROM penalty            ||Delta u||^2_S
-        - Soft output constraints (comfort corridor) with penalty rho
-        - Hard input bounds               u_min <= u <= u_max
+    The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
+    :meth:`solve_nmpc`.  Cost: soft comfort zone, input ROM, energy-price.
+    No extra setpoint pull.
 
     Forecasts
     ---------
@@ -1737,21 +1752,27 @@ class HeatingMPCController:
     ----------
     model             : HouseModel
     heat_sources      : list of HeatSource
-    horizon           : prediction horizon N (number of time steps)
-    dt                : OCP step size [s]
+    horizon           : fast-step count (tests / legacy).  Ignored when the
+                        NMPC triple is given.
+    dt                : fast sample ``T_s`` [s] (tests / legacy).
+    nmpc_period       : slow NMPC cadence [s].  With the other triple keys,
+                        this wins over ``horizon`` / ``dt``.
+    nmpc_fast_substeps: fast ticks per slow interval.
+    nmpc_horizon_h    : look-ahead [hours].
     measurement_dt    : EKF measurement interval [s].  If None, falls back to dt.
     latitude          : site latitude [deg]
     longitude         : site longitude [deg]
-    tracking_weight   : weight on ||z - z_ref||^2_Q (setpoint tracking; 0 disables tracking)
-    energy_weight     : weight on ||u||^2_R (input regularisation)
-    smoothing_weight  : weight on ||Delta u||^2_S (input rate-of-movement; 0 disables)
-    soft_constraint_weight : quadratic penalty rho on soft output bound violations (rho·ε²).
-    soft_constraint_linear_weight : linear penalty rho_lin on soft output bound violations (rho_lin·ε); 0 disables.
+    tracking_weight   : weight on ||z - z_ref||^2_Q (kept for API; NMPC cost
+                        does not add setpoint pull).
+    energy_weight     : weight on ||u||^2_R (QP glue only).
+    smoothing_weight  : ROM weight on ||Delta u||^2 in the slow OCP.
+    soft_constraint_weight : quadratic penalty rho on comfort-zone violations.
+    soft_constraint_linear_weight : kept for API; unused by the NMPC cost.
     sigma_w           : process-noise std dev for the SDE / EKF [K/sqrt(s)].
     sigma_v           : measurement-noise std dev [K].
     sigma_b           : offset-state process-noise std dev [K/sqrt(s)].
-    n_int_steps       : Euler sub-steps per interval in EKF.
-    solver            : accepted for API compatibility, ignored (QP always used).
+    n_int_steps       : Euler sub-steps per interval in EKF / OCP.
+    solver            : accepted for API compatibility, ignored (SLSQP used).
     solver_options    : accepted for API compatibility, ignored.
     use_analytic_derivatives : accepted for API compatibility, ignored.
     """
@@ -1776,21 +1797,39 @@ class HeatingMPCController:
         sigma_v: float = 0.5,
         sigma_b: float = 0.002,
         n_int_steps: int = 10,
-        solver: str = "qp",
+        solver: str = "nmpc",
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
+        nmpc_period: Optional[float] = None,
+        nmpc_fast_substeps: Optional[int] = None,
+        nmpc_horizon_h: Optional[float] = None,
     ) -> None:
         self._sources = heat_sources
-        self._horizon = horizon
-        self._dt = dt
+        if (
+            nmpc_period is not None
+            or nmpc_fast_substeps is not None
+            or nmpc_horizon_h is not None
+        ):
+            timing = derive_nmpc_timing(
+                DEFAULT_NMPC_PERIOD if nmpc_period is None else float(nmpc_period),
+                DEFAULT_NMPC_FAST_SUBSTEPS
+                if nmpc_fast_substeps is None
+                else int(nmpc_fast_substeps),
+                DEFAULT_NMPC_HORIZON_H if nmpc_horizon_h is None else float(nmpc_horizon_h),
+            )
+        else:
+            timing = timing_from_dt_horizon(dt, horizon)
+        self._timing: NmpcTiming = timing
+        self._horizon = timing.n_fast
+        self._dt = timing.dt_s
         self._latitude = latitude
         self._longitude = longitude
         self._albedo = float(albedo)
 
-        # solver/derivative args accepted for API compat; QP backend always used
-        self._solver_requested = "qp"
-        self._solver_active = "qp"
+        # solver/derivative args accepted for API compat; SLSQP is the NLP.
+        self._solver_requested = "nmpc"
+        self._solver_active = "slsqp"
         self._use_analytic_derivatives = True
 
         if tracking_weight < 0.0:
@@ -1807,15 +1846,15 @@ class HeatingMPCController:
             )
 
         # The EKF must integrate over the actual wall-clock interval between
-        # compute() calls, NOT the OCP horizon step size.
-        ekf_dt = measurement_dt if measurement_dt is not None else dt
+        # compute() calls, NOT the slow OCP period.
+        ekf_dt = measurement_dt if measurement_dt is not None else self._dt
 
         # ── Build SDE models ────────────────────────────────────────────
         # The EKF (estimation) and control (linearisation) models share the
         # same un-augmented state space.  Offsets stay disabled to keep the
         # dimensions small.
         self._system = HouseThermalSDE(
-            model, heat_sources, dt,
+            model, heat_sources, self._dt,
             ts=ekf_dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
@@ -1823,7 +1862,7 @@ class HeatingMPCController:
             n_int_steps=n_int_steps,
         )
         self._control_system = HouseThermalSDE(
-            model, heat_sources, dt,
+            model, heat_sources, self._dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
             augment_offsets=False,
@@ -1885,10 +1924,10 @@ class HeatingMPCController:
         self._mpc = HeatingLinearisedMPC(
             model=self._control_system,
             estimator=self._ekf,
-            N=horizon,
+            N=self._horizon,
             Q=Q_cv,
             R=R_cv,
-            dt=dt,
+            dt=self._dt,
             u_min=u_min,
             u_max=u_max,
             x_ref=x_ref,
@@ -1907,7 +1946,7 @@ class HeatingMPCController:
 
         # ── Price-aware cost term ────────────────────────────────────────
         self._energy_price_weight: float = float(energy_price_weight)
-        self._dt_h: float = dt / 3600.0
+        self._dt_h: float = self._dt / 3600.0
         # Electrical draw per unit of u for each source (recomputed from
         # current power_scale so estimation updates are reflected).
         self._elec_heat: np.ndarray = np.array(
@@ -1947,16 +1986,32 @@ class HeatingMPCController:
         # for in the background once the override clears.
         self._mpc_actions: Dict[str, float] = {}
 
+        # ── Slow NMPC path / watchdog ────────────────────────────────────
+        self._nmpc_lock = threading.Lock()
+        self._nmpc_U: Optional[np.ndarray] = None
+        self._nmpc_T_ref: Optional[np.ndarray] = None
+        self._nmpc_U_fast: Optional[np.ndarray] = None
+        self._nmpc_k: int = 0
+        self._nmpc_warm: Optional[np.ndarray] = None
+        self._rho = float(rho)
+        self._smoothing_weight = float(smoothing_weight)
+        self._n_int_steps = int(n_int_steps)
+        self._reject_since: Optional[float] = None
+        self._watchdog_tripped: bool = False
+        self._notify_active: bool = False
+        self._watchdog_notification: Optional[str] = None
+        self._nmpc_busy: bool = False
+
     # ── Visualisation / diagnostic properties ────────────────────────────
 
     @property
     def horizon(self) -> int:
-        """MPC prediction horizon (number of steps)."""
+        """NMPC / P prediction horizon (number of fast steps)."""
         return self._horizon
 
     @property
     def solve_times(self) -> deque:
-        """Rolling buffer of recent QP solve times [s] (read-only view)."""
+        """Rolling buffer of recent NMPC solve times [s] (read-only view)."""
         return self._solve_times
 
     @property
@@ -1966,12 +2021,12 @@ class HeatingMPCController:
 
     @property
     def solver_requested(self) -> str:
-        """Configured solver backend name (always 'qp')."""
+        """Configured solver backend name (always 'nmpc')."""
         return self._solver_requested
 
     @property
     def solver_active(self) -> str:
-        """Currently active solver backend (always 'qp')."""
+        """Currently active solver backend (always 'slsqp')."""
         return self._solver_active
 
     @property
@@ -2275,6 +2330,302 @@ class HeatingMPCController:
             return np.zeros(n)
         return x[:n].copy()
 
+    @property
+    def timing(self) -> NmpcTiming:
+        """Derived two-rate grid."""
+        return self._timing
+
+    @property
+    def nmpc_due(self) -> bool:
+        """True when a slow solve should start (no path, or one period elapsed)."""
+        if self._nmpc_busy:
+            return False
+        with self._nmpc_lock:
+            if self._nmpc_U is None:
+                return True
+            return self._nmpc_k >= self._timing.m
+
+    def consume_watchdog_notification(self) -> Optional[str]:
+        """Return ``create`` / ``dismiss`` once, then clear."""
+        note = self._watchdog_notification
+        self._watchdog_notification = None
+        return note
+
+    def set_accepted_path(
+        self,
+        u_star: np.ndarray,
+        t_ref: np.ndarray,
+        *,
+        now: Optional[float] = None,
+    ) -> None:
+        """Install a slow plan for the fast P-law (tests and worker)."""
+        U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu)
+        T = np.asarray(t_ref, dtype=float)
+        n_fast = self._timing.n_fast
+        n_rooms = self._system._n_rooms
+        if T.ndim == 1:
+            T = np.tile(T.reshape(1, -1), (n_fast, 1))
+        if T.shape[0] < n_fast:
+            pad = np.tile(T[-1:], (n_fast - T.shape[0], 1))
+            T = np.vstack([T, pad])
+        T = T[:n_fast, :n_rooms]
+        with self._nmpc_lock:
+            self._nmpc_U = U
+            self._nmpc_T_ref = T
+            self._nmpc_U_fast = np.repeat(U, self._timing.m, axis=0)
+            self._nmpc_k = 0
+            self._nmpc_warm = U.reshape(-1).copy()
+            self._reject_since = None
+            if self._watchdog_tripped or self._notify_active:
+                self._watchdog_notification = "dismiss"
+            self._watchdog_tripped = False
+            self._notify_active = False
+
+    def _record_nmpc_reject(self, now: Optional[float] = None) -> None:
+        stamp = time.time() if now is None else float(now)
+        if self._reject_since is None:
+            self._reject_since = stamp
+        if (stamp - self._reject_since) >= NMPC_WATCHDOG_S:
+            self._watchdog_tripped = True
+            if not self._notify_active:
+                self._watchdog_notification = "create"
+                self._notify_active = True
+            with self._nmpc_lock:
+                self._nmpc_U = None
+                self._nmpc_T_ref = None
+                self._nmpc_U_fast = None
+                self._nmpc_k = 0
+
+    def apply_nmpc_result(
+        self,
+        result: Dict[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Accept or reject a worker result.  Returns True when the path updated."""
+        self._nmpc_busy = False
+        elapsed = result.get("elapsed_s")
+        if elapsed is not None:
+            self._solve_times.append(float(elapsed))
+        if result.get("accepted"):
+            self.set_accepted_path(result["u_star"], result["t_ref"], now=now)
+            return True
+        self._record_nmpc_reject(now)
+        return False
+
+    def _comfort_bounds_fast(
+        self,
+        control_trajectory: Optional[Any],
+        n_fast: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        room_list = self._system._room_list
+        n_rooms = self._system._n_rooms
+        t_min = np.zeros((n_fast, n_rooms), dtype=float)
+        t_max = np.zeros((n_fast, n_rooms), dtype=float)
+        for i, name in enumerate(room_list):
+            room = self._system._model.rooms[name]
+            sp = float(room.setpoint)
+            off = float(getattr(room, "comfort_offset", 2.0) or 2.0)
+            t_min[:, i] = sp - off
+            t_max[:, i] = sp + off
+        if control_trajectory is not None:
+            for i, name in enumerate(room_list):
+                sps = np.asarray(control_trajectory.setpoints[name], dtype=float)
+                offs = np.asarray(control_trajectory.comfort_offsets[name], dtype=float)
+                n = min(n_fast, sps.shape[0], offs.shape[0])
+                t_min[:n, i] = sps[:n] - offs[:n]
+                t_max[:n, i] = sps[:n] + offs[:n]
+                if n < n_fast:
+                    t_min[n:, i] = t_min[n - 1, i]
+                    t_max[n:, i] = t_max[n - 1, i]
+        return t_min, t_max
+
+    def _slow_input_bounds(
+        self,
+        u_min_seq: Optional[np.ndarray],
+        u_max_seq: Optional[np.ndarray],
+        clamp_mask: Optional[np.ndarray],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        u_min_abs, u_max_abs = self._control_system.u_bounds
+        n_slow = self._timing.n_slow
+        m = self._timing.m
+        lo = np.tile(np.asarray(u_min_abs, dtype=float).reshape(1, -1), (n_slow, 1))
+        hi = np.tile(np.asarray(u_max_abs, dtype=float).reshape(1, -1), (n_slow, 1))
+        if u_min_seq is None or u_max_seq is None or clamp_mask is None:
+            return lo, hi
+        for n in range(n_slow):
+            start = n * m
+            stop = min(start + m, clamp_mask.shape[0])
+            for j in range(self._system.nu):
+                col = clamp_mask[start:stop, j]
+                if col.any():
+                    idx = start + int(np.argmax(col))
+                    lo[n, j] = float(u_min_seq[idx, j])
+                    hi[n, j] = float(u_max_seq[idx, j])
+        return lo, hi
+
+    def solve_nmpc(
+        self,
+        outdoor_temp: float,
+        now: Optional[datetime] = None,
+        *,
+        outdoor_forecast: Optional[List[float]] = None,
+        cloud_forecast: Optional[List[float]] = None,
+        cloud_cover_now: Optional[float] = None,
+        ghi_forecast: Optional[List[Optional[float]]] = None,
+        ghi_now: Optional[float] = None,
+        price_forecast: Optional[List[float]] = None,
+        solar_gains: Optional[Dict[str, float]] = None,
+        control_trajectory: Optional[Any] = None,
+        input_clamps: Optional[Dict[str, np.ndarray]] = None,
+        x0: Optional[np.ndarray] = None,
+        u_prev: Optional[np.ndarray] = None,
+        minimize_fn: Optional[Any] = None,
+        maxiter: Optional[int] = None,
+        timeout_s: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Solve the slow mean OCP (blocking).  Does not run the EKF."""
+        if now is None:
+            now = datetime.now(tz=timezone.utc)
+        N = self._horizon
+        if outdoor_forecast is not None and len(outdoor_forecast) >= N:
+            outdoor_seq = list(outdoor_forecast[:N])
+        else:
+            outdoor_seq = self._forecast_outdoor(outdoor_temp)
+        solar_seq = self._forecast_solar(
+            now,
+            cloud_forecast=cloud_forecast,
+            cloud_cover_now=cloud_cover_now,
+            ghi_forecast=ghi_forecast,
+            ghi_now=ghi_now,
+        )
+        if solar_gains is not None:
+            solar_seq[0] = dict(solar_gains)
+        d_fast = [
+            self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
+            for k in range(N)
+        ]
+        t_min, t_max = self._comfort_bounds_fast(control_trajectory, N)
+        u_min_seq = u_max_seq = clamp_mask = None
+        if input_clamps:
+            u_min_abs, u_max_abs = self._control_system.u_bounds
+            u_min_seq = np.tile(np.asarray(u_min_abs, dtype=float).reshape(1, -1), (N, 1))
+            u_max_seq = np.tile(np.asarray(u_max_abs, dtype=float).reshape(1, -1), (N, 1))
+            clamp_mask = np.zeros((N, len(self._sources)), dtype=bool)
+            k_sig = self._system._k_sigmoid
+            for j, src in enumerate(self._sources):
+                arr = input_clamps.get(src.name)
+                if arr is None:
+                    continue
+                arr = np.asarray(arr, dtype=float).reshape(-1)
+                lo, hi = float(src.u_min), float(src.u_max)
+                for k in range(min(N, arr.shape[0])):
+                    v = arr[k]
+                    if np.isnan(v):
+                        continue
+                    u_val = src.control_for_power_fraction(float(v), outdoor_temp, k_sig)
+                    u_val = min(max(float(u_val), lo), hi)
+                    u_min_seq[k, j] = u_val
+                    u_max_seq[k, j] = u_val
+                    clamp_mask[k, j] = True
+        slow_lo, slow_hi = self._slow_input_bounds(u_min_seq, u_max_seq, clamp_mask)
+        price_slow = None
+        if price_forecast is not None and self._energy_price_weight > 0.0:
+            price_slow = mean_price_slow(
+                np.asarray(price_forecast, dtype=float),
+                self._timing.m,
+                self._timing.n_slow,
+            )
+        x_hat = self._ekf.x_hat.copy() if x0 is None else np.asarray(x0, dtype=float)
+        u0_prev = self._u_prev.copy() if u_prev is None else np.asarray(u_prev, dtype=float)
+        ocp = MeanOcp(
+            self._control_system,
+            self._sources,
+            self._timing,
+            x_hat,
+            u0_prev,
+            d_fast,
+            t_min=t_min,
+            t_max=t_max,
+            rho=self._rho,
+            s_rom=self._smoothing_weight,
+            energy_price_weight=self._energy_price_weight,
+            price_slow=price_slow,
+            u_min=slow_lo,
+            u_max=slow_hi,
+            n_int_steps=self._n_int_steps,
+        )
+        warm = self._nmpc_warm
+        if warm is None or np.asarray(warm).size != ocp.n * ocp.nu:
+            warm = np.zeros(ocp.n * ocp.nu, dtype=float)
+        _t0 = time.perf_counter()
+        raw = solve_mean_ocp(
+            ocp,
+            warm,
+            maxiter=NMPC_MAXITER if maxiter is None else int(maxiter),
+            timeout_s=NMPC_TIMEOUT_S if timeout_s is None else float(timeout_s),
+            minimize_fn=minimize_fn,
+        )
+        cost_zero = evaluate_zero_heat_cost(ocp)
+        plan = plan_from_solve(ocp, raw, cost_zero)
+        plan["elapsed_s"] = time.perf_counter() - _t0
+        self._total_computes += 1
+        return plan
+
+    def _p_command_vector(
+        self,
+        clamp_mask: Optional[np.ndarray],
+        u_min_seq: Optional[np.ndarray],
+        u_max_seq: Optional[np.ndarray],
+    ) -> np.ndarray:
+        n_u = self._system.nu
+        room_list = self._system._room_list
+        room_index = {name: i for i, name in enumerate(room_list)}
+        x_hat = self._ekf.x_hat
+        u_abs = np.zeros(n_u, dtype=float)
+        watchdog = self._watchdog_tripped
+        with self._nmpc_lock:
+            U = self._nmpc_U
+            T_ref = self._nmpc_T_ref
+            k = self._nmpc_k
+            n_fast = self._timing.n_fast
+            m = self._timing.m
+            n_slow = self._timing.n_slow
+            if not watchdog and U is not None and T_ref is not None:
+                idx = min(max(k, 0), n_fast - 1)
+                n = min(idx // m, n_slow - 1)
+                u_ref = U[n]
+                t_ref_row = T_ref[idx]
+                for j, src in enumerate(self._sources):
+                    ri = room_index.get(src.room, 0)
+                    kp = float(getattr(src, "p_gain", 0.1))
+                    t_hat = float(x_hat[ri])
+                    u_abs[j] = p_command(
+                        float(u_ref[j]),
+                        float(t_ref_row[ri]),
+                        t_hat,
+                        kp,
+                        float(src.u_min),
+                        float(src.u_max),
+                    )
+            self._nmpc_k = k + 1
+        if u_min_seq is not None and u_max_seq is not None and clamp_mask is not None:
+            for j, src in enumerate(self._sources):
+                if clamp_mask[0, j]:
+                    u_abs[j] = float(u_min_seq[0, j])
+        return u_abs
+
+    def _forecast_U(self, n_fast: int) -> np.ndarray:
+        n_u = self._system.nu
+        with self._nmpc_lock:
+            U_fast = self._nmpc_U_fast
+            if U_fast is None:
+                return np.zeros((n_fast, n_u), dtype=float)
+            if U_fast.shape[0] >= n_fast:
+                return U_fast[:n_fast].copy()
+            pad = np.tile(U_fast[-1:], (n_fast - U_fast.shape[0], 1))
+            return np.vstack([U_fast, pad])
+
     # ── Main entry point ─────────────────────────────────────────────────
 
     def compute(
@@ -2445,17 +2796,7 @@ class HeatingMPCController:
                     src.set_power(eff_frac, outdoor_temp)
             return actions
 
-        # ── Disturbance forecast matrix for the OCP ──────────────────────
-        # D_forecast[k] = disturbance during horizon step k (k=0..N-1).
-        # solar_seq has N+1 entries; solar_seq[k] = solar at now + k*dt,
-        # so solar_seq[k] describes the conditions during step k.
-        D_forecast = np.array([
-            self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
-            for k in range(N)
-        ], dtype=float)
-
-        # Horizon-mean wind for the QP linearisation (wind enters through
-        # the infiltration conductance, which the linearised model freezes).
+        # Horizon-mean wind for the infiltration overlay on the forecast rollout.
         wind_seq: Optional[List[float]] = None
         if wind_forecast:
             wind_seq = [
@@ -2467,47 +2808,7 @@ class HeatingMPCController:
             if finite:
                 self._control_system.set_wind_speed(float(np.mean(finite)))
 
-        # ── Update setpoint reference in MPC (setpoints may have changed) ──
-        # Sized to the control model (no internal-gain block in the MPC).
-        n_x = self._control_system.nx
-        x_ref_abs = np.zeros(n_x)
-        x_ref_abs[:n_rooms] = [
-            self._system._model.rooms[name].setpoint for name in room_list
-        ]
-        self._mpc.x_ref = x_ref_abs
-
-        # ── Build time-varying arrays from schedule trajectory (if provided) ──
-        # x_ref_abs_seq : (N, n_rooms)  absolute setpoints per step
-        # offset_seq    : (N, n_rooms)  comfort corridor half-widths per step
-        # q_scale_seq   : (N, n_rooms)  Q multipliers per step
-        # r_scale_seq   : (N, n_sources) R multipliers per step (mapped room → source)
-        if control_trajectory is not None:
-            x_ref_abs_seq = np.zeros((N, n_rooms), dtype=float)
-            offset_seq = np.zeros((N, n_rooms), dtype=float)
-            q_scale_seq = np.ones((N, n_rooms), dtype=float)
-            r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
-
-            for i, name in enumerate(room_list):
-                x_ref_abs_seq[:, i] = control_trajectory.setpoints[name]
-                offset_seq[:, i] = control_trajectory.comfort_offsets[name]
-                q_scale_seq[:, i] = control_trajectory.q_scales[name]
-
-            for j, src in enumerate(self._sources):
-                r_scale_seq[:, j] = control_trajectory.r_scales[src.room]
-        else:
-            x_ref_abs_seq = None
-            offset_seq = None
-            q_scale_seq = None
-            r_scale_seq = None
-
         # ── Per-step input clamps (e.g. identification experiment) ───────────
-        # Pin the absolute input box bounds of clamped sources to the prescribed
-        # signal over the horizon (u_min = u_max = value).  The MPC then plans
-        # the rest of the house around it, and the planned trajectory used by the
-        # forecast plots already carries the experiment signal.  ``clamp_mask``
-        # records which (step, source) entries are pinned so the disabled-source
-        # zeroing below leaves the clamped steps intact (an experiment overrides
-        # the comfort schedule's off periods).
         u_min_seq: Optional[np.ndarray] = None
         u_max_seq: Optional[np.ndarray] = None
         clamp_mask: Optional[np.ndarray] = None
@@ -2527,10 +2828,6 @@ class HeatingMPCController:
                     v = arr[k]
                     if np.isnan(v):
                         continue
-                    # The clamp value is a *power* fraction of the source's
-                    # capacity; convert to the control input that delivers it so
-                    # the step is linear in delivered power (inverts the heat
-                    # pump's smooth sigmoid; identity for linear sources).
                     u_val = src.control_for_power_fraction(float(v), outdoor_temp, k_sig)
                     u_val = min(max(float(u_val), lo), hi)
                     u_min_seq[k, j] = u_val
@@ -2539,85 +2836,37 @@ class HeatingMPCController:
             if not clamp_mask.any():
                 u_min_seq = u_max_seq = clamp_mask = None
 
-        # ── Price forecast aligned to horizon ────────────────────────────
-        price_seq_np: Optional[np.ndarray] = None
-        if (price_forecast is not None
-                and len(price_forecast) > 0
-                and self._energy_price_weight > 0.0):
-            raw = np.asarray(price_forecast, dtype=float)
-            # Clamp to N steps, padding with last value if shorter.
-            if len(raw) >= N:
-                price_seq_np = raw[:N]
-            else:
-                price_seq_np = np.concatenate([
-                    raw, np.full(N - len(raw), raw[-1])
-                ])
-
-        # ── QP solve with disturbance forecast ───────────────────────────
-        _t0 = time.perf_counter()
-        u_abs, U_abs, X_abs = self._mpc.step(
-            y, d, p, 0.0,
-            D_forecast=D_forecast,
-            x_ref_abs_seq=x_ref_abs_seq,
-            offset_seq=offset_seq,
-            q_scale_seq=q_scale_seq,
-            r_scale_seq=r_scale_seq,
-            u_min_seq=u_min_seq,
-            u_max_seq=u_max_seq,
-            price_seq=price_seq_np,
-            elec_heat=self._elec_heat,
-            elec_cool=self._elec_cool,
-            bid_mask=self._bid_mask,
-            price_weight=self._energy_price_weight,
-            dt_h=self._dt_h,
-        )
-        self._solve_times.append(time.perf_counter() - _t0)
+        # ── EKF then P (no linearised QP on the happy path) ──────────────
+        self._mpc.estimate_only(y, d, p, 0.0)
+        self._last_innovation = self._ekf.last_innovation
         self._total_computes += 1
 
-        # Capture innovation from the EKF wrapper
-        self._last_innovation = self._ekf.last_innovation
-
-        # Capture the unconstrained MPC optimum for every source *before* the
-        # disabled-source zeroing below.  The coordinator uses this as the
-        # value to resume a heater at when an open-window override clears: the
-        # MPC keeps solving for the room while its heater is forced off, and the
-        # room should pick up that intended actuation the moment the
-        # window-settle timer expires (rather than waiting a full update
-        # interval for the next scheduled solve).
+        u_abs = self._p_command_vector(clamp_mask, u_min_seq, u_max_seq)
         self._mpc_actions = {
             src.name: float(np.clip(u_abs[j], src.u_min, src.u_max))
             for j, src in enumerate(self._sources)
         }
+        if disabled_sources:
+            for j, src in enumerate(self._sources):
+                if src.name not in disabled_sources:
+                    continue
+                if clamp_mask is not None and clamp_mask[0, j]:
+                    continue
+                u_abs[j] = 0.0
 
-        # ── Zero out disabled sources ─────────────────────────────────────
-        # Rooms in off-mode (schedule, user toggle, or window override) must
-        # always produce 0 W.  Zero both the first-step action and the full
-        # horizon trajectory so that the heating schedule sensors show 0 for
-        # all future steps as well.  _u_prev is set from u_abs below, so the
-        # EKF automatically picks up the correct applied value next cycle.
+        U_abs = self._forecast_U(N)
         if disabled_sources:
             for j, src in enumerate(self._sources):
                 if src.name not in disabled_sources:
                     continue
                 if clamp_mask is None:
-                    u_abs[j] = 0.0
                     U_abs[:, j] = 0.0
                 else:
-                    # An active experiment clamp owns its steps even when the
-                    # comfort schedule has the room off; zero only the rest.
                     col = clamp_mask[:, j]
-                    if not col[0]:
-                        u_abs[j] = 0.0
                     U_abs[~col, j] = 0.0
+        if clamp_mask is not None and u_min_seq is not None:
+            U_abs[clamp_mask] = u_min_seq[clamp_mask]
 
-        # ── Apply actions to heat sources ────────────────────────────────
-        # For the commanded actions dict (sent to heaters and stored in the
-        # history buffer) use the raw MPC output u_abs.  For current_power
-        # (read by heating_power_measured sensors) use the EKF's emitter-state
-        # estimate phi so the recorded sensor value reflects the actual thermal
-        # delivery to the room, not the instantaneous command.  Sources with no
-        # emitter time constant (tau_em = 0, _filter_idx < 0) are unaffected —
-        # their commanded fraction equals the delivered fraction.
         _nx_phys = self._system._nx_phys
         _x_hat = self._ekf.x_hat
         _filter_idx = self._system._filter_idx_for_source
@@ -2642,17 +2891,14 @@ class HeatingMPCController:
                 src.set_power(eff_frac, outdoor_temp)
 
         self._u_prev = u_abs.copy()
+        self._mpc._u_prev = u_abs.copy()
 
-        # ── Build predicted trajectory using nonlinear model simulation ────
         self._predictions = self._compute_nonlinear_predictions(
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
             wind_seq=wind_seq,
         )
-        self._linearised_predictions = self._extract_linearised_predictions(
-            X_abs, room_list, n_rooms
-        )
+        self._linearised_predictions = [dict(step) for step in self._predictions]
 
-        # ── Heating schedule ─────────────────────────────────────────────
         self._heating_schedule = [
             self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)

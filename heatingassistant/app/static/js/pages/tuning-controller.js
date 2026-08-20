@@ -28,19 +28,23 @@ const LIVE_PARAM_DEFS = [
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
 ];
 
-// Changing these rebuilds the MPC problem (sample interval / prediction horizon).
+// Changing these rebuilds the NMPC problem (slow period / substeps / look-ahead).
 const RESTART_PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample Interval', unit: 's', hint: 'Re-planning cadence — changing this rebuilds the controller', step: 30, parse: parseInt },
-  { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead — changing this rebuilds the controller', step: 1, parse: parseInt },
+  { key: 'nmpc_period', label: 'NMPC period', unit: 's', hint: 'Slow planner cadence (default 7200 = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
+  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then P ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
+  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'Planner look-ahead in hours (default 36). Must be an integer number of NMPC periods.', step: 1, parse: parseFloat },
 ];
 
 const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
+  nmpc_period: 7200,
+  nmpc_fast_substeps: 8,
+  nmpc_horizon_h: 36,
   update_interval: 900,
   comfort_offset: 2.0,
-  horizon: 100,
+  horizon: 144,
   tracking_weight: 0.0,
   energy_weight: 0.01,
   energy_price_weight: 1.0,
@@ -150,9 +154,19 @@ function renderTuningIndex(container, rooms, connection, hass) {
   );
   appendParamSubsection(
     'Restart required',
-    'Sample interval and prediction horizon — the MPC problem is rebuilt when these change.',
+    'NMPC period, fast substeps, and look-ahead — the planner is rebuilt when these change. Sample interval is derived (period / substeps).',
     RESTART_PARAM_DEFS,
   );
+  const derivedGroup = document.createElement('div');
+  derivedGroup.className = 'form-group';
+  derivedGroup.innerHTML = `
+    <label class="form-label" for="ctrl-update_interval">Sample interval</label>
+    <input class="form-input" type="number" id="ctrl-update_interval" value="" readonly>
+    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and P run at this cadence)</span>
+  `;
+  formSection.querySelector('.tuning-params-grid:last-of-type')?.appendChild(derivedGroup)
+    || formSection.appendChild(derivedGroup);
+  inputs.update_interval = derivedGroup.querySelector('input');
   container.appendChild(formSection);
 
   // --- Window Configuration section ---
@@ -301,7 +315,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     const needsRestart = hasPendingRestartChanges();
     pendingBanner.classList.toggle('tuning-pending-banner--restart', needsRestart);
     pendingBanner.textContent = needsRestart
-      ? 'Unsaved changes include sample interval or prediction horizon — applying will rebuild the MPC controller.'
+      ? 'Unsaved changes include the NMPC period, fast substeps, or look-ahead — applying will rebuild the planner.'
       : 'Unsaved changes — penalty weights and window settings apply to the live controller on the next cycle.';
   }
 
@@ -317,6 +331,30 @@ function renderTuningIndex(container, rooms, connection, hass) {
     }
   }
 
+  function updateDerivedSampleInterval() {
+    const period = Number(inputs.nmpc_period?.value);
+    const substeps = Number(inputs.nmpc_fast_substeps?.value);
+    const derived = inputs.update_interval;
+    if (!derived) return;
+    if (Number.isFinite(period) && Number.isFinite(substeps) && substeps > 0) {
+      derived.value = String(period / substeps);
+    }
+  }
+
+  function nmpcTimingError() {
+    const period = Number(inputs.nmpc_period?.value);
+    const substeps = Number(inputs.nmpc_fast_substeps?.value);
+    const horizonH = Number(inputs.nmpc_horizon_h?.value);
+    if (!(period > 0) || !(substeps >= 1) || !(horizonH > 0)) {
+      return 'NMPC period, fast substeps, and look-ahead must be positive.';
+    }
+    const nSlow = horizonH * 3600 / period;
+    if (Math.abs(nSlow - Math.round(nSlow)) > 1e-6) {
+      return 'Look-ahead must be an integer number of NMPC periods.';
+    }
+    return null;
+  }
+
   function populate(config) {
     for (const def of PARAM_DEFS) {
       const val = config[def.key];
@@ -326,12 +364,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
+    updateDerivedSampleInterval();
     updatePendingIndicators();
   }
 
   function populateDefaults() {
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
+    updateDerivedSampleInterval();
     updatePendingIndicators();
   }
 
@@ -346,7 +386,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     for (const [id, s] of Object.entries(states)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
-        if (a.tracking_weight !== undefined && a.update_interval !== undefined) return a;
+        if (a.tracking_weight !== undefined && (a.nmpc_period !== undefined || a.update_interval !== undefined)) return a;
       }
     }
     return null;
@@ -381,6 +421,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   allParamInputs.forEach((inp) => {
     inp.addEventListener('input', () => {
       userEditing = true;
+      updateDerivedSampleInterval();
       updatePendingIndicators();
     });
   });
@@ -521,6 +562,11 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   btnApply.addEventListener('click', async () => {
+    const timingErr = nmpcTimingError();
+    if (timingErr) {
+      setStatus(timingErr, 'error');
+      return;
+    }
     setStatus('Applying…', 'running');
     btnApply.disabled = true;
     try {

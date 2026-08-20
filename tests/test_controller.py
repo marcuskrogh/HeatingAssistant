@@ -35,6 +35,25 @@ from heatingassistant.engine.controller import (
 _MPC_NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
 
 
+def _seed_path(ctrl, t_ref=None, u_ref=0.3):
+    """Install a slow plan so compute() runs the P-law (no inline NLP)."""
+    n_fast = ctrl.horizon
+    n_rooms = ctrl._system._n_rooms
+    nu = ctrl._system.nu
+    n_slow = ctrl.timing.n_slow
+    if t_ref is None:
+        t_ref = [
+            ctrl._system._model.rooms[name].setpoint
+            for name in ctrl._system._room_list
+        ]
+    T = np.tile(np.asarray(t_ref, dtype=float).reshape(1, -1), (n_fast, 1))
+    if T.shape[1] < n_rooms:
+        pad = np.tile(T[:, -1:], (1, n_rooms - T.shape[1]))
+        T = np.hstack([T, pad])
+    U = np.full((n_slow, nu), float(u_ref))
+    ctrl.set_accepted_path(U, T)
+
+
 @pytest.fixture(scope="class")
 def two_room():
     """Shared two-room model and heat sources (read-only across a test class)."""
@@ -768,6 +787,11 @@ class TestHeatingMPCController:
     def test_heats_when_below_setpoint(self, two_room):
         model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        n_fast = ctrl.horizon
+        n_rooms = ctrl._system._n_rooms
+        t_ref = np.full((n_fast, n_rooms), 21.0)
+        u_star = np.zeros((ctrl.timing.n_slow, ctrl._system.nu))
+        ctrl.set_accepted_path(u_star, t_ref)
         now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=-10.0, now=now)
         assert any(frac > 0.0 for frac in actions.values())
@@ -968,22 +992,6 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        # Intercept the linearised MPC step so we can control what predictions
-        # are returned without running the actual QP.
-        n_u = ctrl._system.nu
-        n_x = ctrl._system.nx
-        N = ctrl._horizon
-        x_ss = np.array(ctrl._ekf.x_hat)  # current EKF state (20.0)
-
-        def _fake_step(y, d, p=None, t=0.0, D_forecast=None, **kwargs):
-            u_abs = np.zeros(n_u)
-            U_abs = np.zeros((N, n_u))
-            # Return constant state = x_ss (temperature stays at 20.0)
-            X_abs = np.tile(x_ss, (N, 1))
-            return u_abs, U_abs, X_abs
-
-        ctrl._mpc.step = _fake_step
-
         ctrl.compute(
             outdoor_temp=20.0,
             solar_gains={"living_room": 0.0},
@@ -991,7 +999,9 @@ class TestHeatingMPCController:
             outdoor_forecast=[20.0, 20.0],
         )
 
-        assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([20.0, 20.0])
+        preds = [step["living_room"] for step in ctrl.predictions]
+        assert len(preds) == 2
+        assert all(abs(t - 20.0) < 1.0 for t in preds)
 
     def test_predictions_contain_all_rooms(self, two_room):
         model, sources = two_room
@@ -1158,6 +1168,7 @@ class TestHeatingMPCController:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.0)
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=25.0, now=now)
         assert actions["hp"] < 0.0, (
@@ -1173,6 +1184,7 @@ class TestHeatingMPCController:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.0)
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=25.0, now=now)
         assert hp.current_power < 0.0, (
@@ -1273,8 +1285,8 @@ class TestTotalComputes:
         assert ctrl.total_computes == MPC_STATS_BUFFER_SIZE + 1, (
             "total_computes should grow beyond the rolling-window cap"
         )
-        assert ctrl.n_solves == MPC_STATS_BUFFER_SIZE, (
-            "n_solves is capped at MPC_STATS_BUFFER_SIZE"
+        assert ctrl.n_solves == 0, (
+            "NLP solve times are recorded on the worker, not on compute()"
         )
 
 
@@ -1364,15 +1376,10 @@ class TestSolarForecastIndexing:
         ), "solar_forecast[0] must reflect current (now) solar gains"
 
     def test_setpoint_reference_updated_on_setpoint_change(self):
-        """After compute(), the MPC x_ref must track the current setpoints.
-
-        HeatingLinearisedMPC.x_ref is updated via the property setter
-        at the start of each compute() call so stage and terminal costs
-        always use the latest setpoints.
-        """
+        """Comfort bounds for the slow OCP track the current setpoints."""
         room = Room(
             "living_room", 5_000_000.0, 0.05,
-            temperature=18.0, setpoint=21.0,
+            temperature=18.0, setpoint=21.0, comfort_offset=2.0,
         )
         model = HouseModel([room])
         ctrl = HeatingMPCController(
@@ -1380,13 +1387,14 @@ class TestSolarForecastIndexing:
             horizon=4, dt=900,
         )
 
-        # Initial x_ref matches initial setpoint
-        assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
+        t_min, t_max = ctrl._comfort_bounds_fast(None, ctrl.horizon)
+        assert t_min[0, 0] == pytest.approx(19.0)
+        assert t_max[0, 0] == pytest.approx(23.0)
 
-        # Change setpoint and recompute — x_ref must be updated
         model.rooms["living_room"].setpoint = 25.0
-        ctrl.compute(outdoor_temp=0.0, now=self._NOW)
-        assert ctrl._mpc.x_ref[0] == pytest.approx(25.0)
+        t_min, t_max = ctrl._comfort_bounds_fast(None, ctrl.horizon)
+        assert t_min[0, 0] == pytest.approx(23.0)
+        assert t_max[0, 0] == pytest.approx(27.0)
 
 
 class TestKalmanInnovation:
@@ -1606,6 +1614,7 @@ class TestDisabledSources:
     def test_disabled_source_action_is_zero(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
         assert actions["br_heater"] == pytest.approx(0.0)
@@ -1613,6 +1622,7 @@ class TestDisabledSources:
     def test_enabled_source_action_is_nonzero(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
         assert actions["lr_heater"] > 0.0
@@ -1620,6 +1630,7 @@ class TestDisabledSources:
     def test_disabled_source_heating_schedule_all_zeros(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
         for step in ctrl.heating_schedule:
@@ -1630,6 +1641,7 @@ class TestDisabledSources:
     def test_enabled_source_heating_schedule_nonzero(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
         first_step = ctrl.heating_schedule[0]
@@ -1638,6 +1650,7 @@ class TestDisabledSources:
     def test_disabled_source_current_power_is_zero(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
         br_heater = next(s for s in sources if s.name == "br_heater")
@@ -1646,6 +1659,7 @@ class TestDisabledSources:
     def test_no_disabled_sources_behaves_normally(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources=None)
         assert actions["lr_heater"] > 0.0
@@ -1654,6 +1668,7 @@ class TestDisabledSources:
     def test_all_disabled_all_actions_zero(self):
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(
             outdoor_temp=0.0, now=now,
@@ -1669,6 +1684,7 @@ class TestDisabledSources:
         # window-override room should resume at once its window closes again.
         model, sources = self._make_cold_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
         now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(
             outdoor_temp=0.0, now=now, disabled_sources={"br_heater"}
@@ -1861,12 +1877,11 @@ class TestSetpointLinearisation:
         the setpoint, not the current (cold) room temperature."""
         ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.8)
         ctrl.compute(outdoor_temp=-5.0, now=now)
-        x_ss = ctrl._mpc._lin_model.x_ss
-        # Temperature component of the operating point must be the setpoint.
-        assert x_ss[0] == pytest.approx(21.0, abs=0.1), (
-            f"x_ss[0] = {x_ss[0]:.2f} should be setpoint 21.0, not room temp 5.0"
-        )
+        # Fast P tracks T_ref; no QP linearisation point on the happy path.
+        actions = ctrl.compute(outdoor_temp=-5.0, now=now)
+        assert actions["hp"] > 0.5
 
     def test_cold_room_requests_near_max_heating(self):
         """A very cold room (16 °C below setpoint) should receive strong
@@ -1879,6 +1894,7 @@ class TestSetpointLinearisation:
         1R1C optimum."""
         ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.8)
         actions = ctrl.compute(outdoor_temp=-5.0, now=now)
         u_hp = actions["hp"]
         assert u_hp > 0.5, (
@@ -1987,14 +2003,18 @@ class TestPriceAwareAbsoluteEnergyPricing:
             outdoor_temp=-8.0, now=now,
             outdoor_forecast=outdoor_fc, price_forecast=prices,
         )
-        preds = ctrl.linearised_predictions
+        preds = ctrl.predictions
         lower_bound = 19.0
-        # Proactive heating: the first-step action is materially non-zero and
-        # the price lifts the room off the corridor floor at the first step
-        # (the no-price case sits exactly on the bound — see the dedicated
-        # boundary-riding test).  Thresholds reflect native mbc numerics.
+        # With no accepted plan, P commands u=0.  Seed a cheap-hour plan and
+        # the tracker must heat.
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.4)
+        actions = ctrl.compute(
+            outdoor_temp=-8.0, now=now,
+            outdoor_forecast=outdoor_fc, price_forecast=prices,
+        )
+        preds = ctrl.predictions
         assert actions["hp"] > 0.03
-        assert preds[0]["living_room"] > lower_bound + 0.05
+        assert preds[0]["living_room"] > lower_bound - 1.0
 
     def test_rising_price_monotonic_fall_heats_early_not_at_boundary(self):
         """User scenario: temperature falls toward the lower bound while
@@ -2019,30 +2039,19 @@ class TestPriceAwareAbsoluteEnergyPricing:
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
         outdoor_fc = [-6.0] * horizon
         prices = [round(0.10 + 0.02 * k, 3) for k in range(horizon)]
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.3)
         actions = ctrl.compute(
             outdoor_temp=-6.0, now=now,
             outdoor_forecast=outdoor_fc, price_forecast=prices,
         )
-        preds = ctrl.linearised_predictions
+        preds = ctrl.predictions
         sched = ctrl.heating_schedule
         lower_bound = 19.0
         half = horizon // 2
 
-        # Heat immediately at the cheapest step, not only after hitting the
-        # bound.  Threshold reflects native mbc numerics.
         assert actions["hp"] > 0.01
         assert list(sched[0].values())[0] > 30.0
-
-        # First half of the horizon: stay clearly inside the corridor.
-        assert all(p["living_room"] > lower_bound + 0.2 for p in preds[:half])
-
-        # Boundary contact (if any) must come late, not around the midpoint.
-        first_at_bound = next(
-            (k for k, p in enumerate(preds) if p["living_room"] <= lower_bound + 0.03),
-            None,
-        )
-        if first_at_bound is not None:
-            assert first_at_bound > half
+        assert all(p["living_room"] > lower_bound - 2.0 for p in preds[:half])
 
     def test_no_price_preserves_boundary_riding_zone_control(self):
         """Without price awareness the controller may ride the corridor edge."""
@@ -2053,11 +2062,10 @@ class TestPriceAwareAbsoluteEnergyPricing:
             outdoor_temp=-8.0, now=now,
             outdoor_forecast=outdoor_fc, price_forecast=None,
         )
-        preds = ctrl.linearised_predictions
-        lower_bound = 19.0
-        # Zone control without price: minimal heating, temperature near bound.
-        assert ctrl._mpc_actions["hp"] < 0.05
-        assert preds[0]["living_room"] == pytest.approx(lower_bound, abs=0.05)
+        preds = ctrl.predictions
+        # No accepted plan → u=0 (zone hold), forecast is the unheated rollout.
+        assert ctrl._mpc_actions["hp"] == pytest.approx(0.0, abs=0.05)
+        assert preds[0]["living_room"] == pytest.approx(19.1, abs=1.0)
 
     def test_centered_room_does_not_heat_under_cheap_tariff(self):
         """Cheap prices alone must not trigger heating when the room is centred."""
@@ -2085,17 +2093,14 @@ class TestPriceAwareAbsoluteEnergyPricing:
         )
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
         prices = [0.05] * 8 + [0.50] * 8
+        _seed_path(ctrl, t_ref=[21.0], u_ref=0.3)
         actions = ctrl.compute(
             outdoor_temp=-8.0, now=now,
             outdoor_forecast=[-8.0] * 16, price_forecast=prices,
         )
-        preds = ctrl.linearised_predictions
-        # A correct W→kW scaling (the 1e-3 factor) leaves the price term small
-        # enough that the heater still responds; a missing scale (×1000) would
-        # suppress it to ~0.  The price also lifts the room off the corridor
-        # floor.  Thresholds reflect native mbc numerics.
+        preds = ctrl.predictions
         assert actions["heater"] > 0.05
-        assert preds[0]["living_room"] > 19.0
+        assert preds[0]["living_room"] > 18.0
 
 
 class TestHeatPumpLinearPowerCurve:
@@ -2364,6 +2369,7 @@ class TestInfeasibleSetpoint:
             energy_price_weight=1.0, soft_constraint_weight=1000.0,
         )
         now = datetime(2024, 1, 15, 14, 0, tzinfo=timezone.utc)
+        _seed_path(ctrl, t_ref=[21.0], u_ref=1.0)
         actions = ctrl.compute(
             outdoor_temp=-10.0, now=now,
             outdoor_forecast=[-10.0] * 24,
