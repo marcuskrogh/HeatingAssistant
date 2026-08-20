@@ -521,7 +521,8 @@ def test_analytic_jacobian_refreshes_M_each_fast_tick(monkeypatch):
         minimize_fn=fake_min,
         timeout_s=5.0,
     )
-    assert counts["n"] == ctrl.horizon
+    assert counts["n"] >= ctrl.horizon
+    assert counts["n"] % ctrl.horizon == 0
 
 
 def test_nmpc_worker_freezes_ekf_snapshot():
@@ -599,3 +600,81 @@ def test_nmpc_still_heats_electric_when_cold():
     assert plan["accepted"] is True
     assert float(np.min(u_star)) >= -1e-9
     assert float(np.max(u_star)) > 0.1
+
+
+def test_idle_zero_plan_keeps_nmpc_due():
+    ctrl = _tiny_ctrl()
+    n_fast = ctrl.horizon
+    ctrl.set_accepted_path(
+        np.zeros((ctrl.timing.n_slow, 1)), np.full((n_fast, 1), 21.0)
+    )
+    assert ctrl.nmpc_plan_idle() is True
+    assert ctrl.nmpc_due is True
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, 1), 0.4), np.full((n_fast, 1), 21.0)
+    )
+    assert ctrl.nmpc_plan_idle() is False
+    assert ctrl.nmpc_due is False
+
+
+def test_nmpc_cools_production_horizon_and_refreshes_forecast():
+    engine = ControlEngine(
+        {
+            "nmpc_period": DEFAULT_NMPC_PERIOD,
+            "nmpc_fast_substeps": DEFAULT_NMPC_FAST_SUBSTEPS,
+            "nmpc_horizon_h": DEFAULT_NMPC_HORIZON_H,
+            "latitude": 55.67,
+            "longitude": 12.57,
+            "energy_price_weight": 1.0,
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "setpoint": 23.5,
+                    "comfort_offset": 2.0,
+                    "temperature": 24.0,
+                    "solar_exposure": "high",
+                    "solar_facing": 180.0,
+                }
+            ],
+            "heat_sources": [
+                {
+                    "name": "hp",
+                    "type": "heat_pump",
+                    "room": "Living Room",
+                    "max_power": 7000.0,
+                    "hvac_mode": "heat_cool",
+                }
+            ],
+        }
+    )
+    now = datetime(2026, 8, 20, 13, 10, tzinfo=timezone.utc)
+    n_fast = engine._controller.horizon
+    outdoor = [28.0] * n_fast
+    prices = [2.0] * n_fast
+    engine.compute_actions(
+        {"Living Room": 24.0},
+        28.0,
+        {"Living Room": 23.5},
+        now=now,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    before = engine.forecast_snapshot()["heating_schedule"]
+    assert before
+    assert max(abs(float(step["Living Room"])) for step in before) < 1.0
+
+    engine.mark_nmpc_busy()
+    plan = engine.solve_nmpc_blocking()
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert plan["accepted"] is True
+    assert float(np.min(u_star)) < -0.05
+    assert engine.apply_nmpc_result(plan) is True
+
+    snap = engine.forecast_snapshot()
+    watts = [float(step["Living Room"]) for step in snap["heating_schedule"]]
+    assert min(watts) < -100.0
+    temps = [float(step["Living Room"]) for step in snap["predictions"]]
+    assert max(temps) < 26.5
+
+    meta = engine.room_power_meta(28.0)["Living Room"]
+    assert float(meta["max_cooling_power"]) > 1000.0

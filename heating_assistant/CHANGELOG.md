@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.21
+
+- Heat/cool planned power now shows cooling (negative kW) as soon as the
+  two-hour planner finishes, instead of staying at zero through a heat spike.
+
 # 2026.08.20
 
 - When a heat pump can cool, the two-hour planner now uses negative power
