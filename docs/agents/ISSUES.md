@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-411 | Task | [Iterate] Heat and cool on the fast loop when comfort bounds are already violated | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-411` |
+| SWD-411 | Task | [Iterate] Heat and cool on the fast loop when comfort bounds are already violated | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626 |
 | SWD-412 | Sub-task | Fast P comfort fallback and publish actuators on NMPC apply | Done | SWD-411 | docs/agents/ITERATE.md | — |
 | SWD-413 | Sub-task | Tests, CalVer, App sync for comfort fallback | Done | SWD-411 | docs/agents/ITERATE.md | — |
 | SWD-405 | Task | [Iterate] NMPC planned power stays at 0 kW when cooling is needed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/624 (`68d86cf`) |
@@ -134,6 +134,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-20 — `/ship` SWD-411: review-fix CLEAN (focused) then closeout; dead-loop `asyncio.run` fallback so accepted plans publish off the ticker path; PR https://github.com/marcuskrogh/HeatingAssistant/pull/626. Next Done.
+- 2026-08-20 — `/review-fix` SWD-411: 1 blocker / 3 should-fix (ephemeral `_nmpc_loop` skipped post-accept publish; lock wait; tests; changelog). Fix-forward on PR #626.
 - 2026-08-20 — `/iterate` SWD-411 In Review: fast P comfort fallback + publish actuators on NMPC apply; PR https://github.com/marcuskrogh/HeatingAssistant/pull/626; CalVer 2026.08.22. Next `/review-fix SWD-411`.
 - 2026-08-20 — `/iterate` SWD-411 from SWD-405: live heat/cool idle at `u = 0` while comfort bounds are already violated; fast P fallback + publish actuators on NMPC apply; Relates SWD-405; Sub-tasks SWD-412–413. Next `/implement SWD-411`.
 - 2026-08-20 — `/iterate` SWD-405 from SWD-400: planned cooling still 0 kW on the room plot; refresh forecast on apply + retry idle zero plans; Relates SWD-400; Sub-tasks SWD-406–407. Next `/review-fix SWD-405`.

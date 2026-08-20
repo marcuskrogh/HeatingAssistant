@@ -52,4 +52,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/626
 
 ## Next
-`/review-fix SWD-411` — Review and auto-fix on the new delivery PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626
