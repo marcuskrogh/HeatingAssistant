@@ -57,4 +57,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/623
 
 ## Next
-`/review-fix SWD-400` — Review and auto-fix on the delivery PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623

@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-400` — https://github.com/marcuskrogh/HeatingAssistant/pull/623 |
+| SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/623 |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-403 | Sub-task | Publish NMPC cycle attrs and dual countdown rings in the UI | Done | SWD-400 | docs/agents/ITERATE.md | — |
