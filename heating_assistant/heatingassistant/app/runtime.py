@@ -685,10 +685,14 @@ class HeatingRuntime:
         self._record_identification_sample()
         self._save_runtime_state()
 
-    async def run_control_cycle(self) -> dict[str, float]:
+    async def run_control_cycle(self, *, wait_for_lock: bool = False) -> dict[str, float]:
         """Compute and publish actuator outputs for the current runtime state."""
 
-        if not self._control_lock.acquire(blocking=False):
+        if wait_for_lock:
+            if not self._control_lock.acquire(blocking=True, timeout=30.0):
+                _logger.warning("Control cycle after NMPC timed out waiting for lock")
+                return dict(self.actuator_outputs)
+        elif not self._control_lock.acquire(blocking=False):
             # Another cycle (MQTT tag or ticker) is already running.
             return dict(self.actuator_outputs)
         try:
@@ -799,11 +803,31 @@ class HeatingRuntime:
 
         The NLP worker only installs ``U*`` / ``T_ref``.  Without this, heaters
         stay at the previous (often zero) command until the next 15 min tick.
+
+        App start and the wall-clock ticker drive control through ephemeral
+        ``asyncio.run`` loops.  Those are closed before the NLP returns, so a
+        captured ``_nmpc_loop`` is often dead — fall back to ``asyncio.run``
+        the same way ``_emit_nmpc_notify`` does.
         """
 
+        coro = self.run_control_cycle(wait_for_lock=True)
         loop = getattr(self, "_nmpc_loop", None)
         if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.run_control_cycle(), loop)
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+
+            def _log_done(done: Any) -> None:
+                if getattr(done, "cancelled", lambda: False)():
+                    return
+                exc = done.exception()
+                if exc is not None:
+                    _logger.error("Control cycle after NMPC apply failed: %s", exc)
+
+            fut.add_done_callback(_log_done)
+            return
+        try:
+            asyncio.run(coro)
+        except Exception:
+            _logger.exception("Control cycle after NMPC apply failed")
 
     def _note_nmpc_cycle_complete(self) -> None:
         """Stamp the slow planner cycle so the UI can count down to the next one.

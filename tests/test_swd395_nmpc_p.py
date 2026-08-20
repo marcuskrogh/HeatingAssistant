@@ -868,6 +868,69 @@ def test_nmpc_worker_requests_control_cycle_on_accept(tmp_path):
     assert requested == [True]
 
 
+def test_request_control_cycle_runs_when_loop_missing(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_runs_when_loop_closed(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    loop = asyncio.new_event_loop()
+    loop.close()
+    runtime._nmpc_loop = loop
+    called: list[bool] = []
+
+    async def _fake_cycle(*, wait_for_lock: bool = False):
+        called.append(wait_for_lock)
+        return {}
+
+    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
+    runtime._request_control_cycle_after_nmpc()
+    assert called == [True]
+
+
+def test_request_control_cycle_waits_for_held_lock(tmp_path):
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    runtime._nmpc_loop = None
+    assert runtime._control_lock.acquire(blocking=False)
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            runtime._request_control_cycle_after_nmpc()
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, name="nmpc-followup-lock")
+    thread.start()
+    assert not done.wait(timeout=0.3)
+    runtime._control_lock.release()
+    assert done.wait(timeout=15.0)
+    thread.join(timeout=2.0)
+    assert runtime._last_control_ts is not None
+
+
 def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):
     runtime = HeatingRuntime(
         tmp_path,
