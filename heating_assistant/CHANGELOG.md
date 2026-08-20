@@ -8,6 +8,8 @@ must be the exact calendar version on its own line.
 
 - When a heat pump can cool, the two-hour planner now uses negative power
   instead of sitting at zero.
+- Overview and room pages now show two countdowns: the 15-minute control
+  cycle and the two-hour planner cycle.
 
 # 2026.08.11
 

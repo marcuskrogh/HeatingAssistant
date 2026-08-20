@@ -4,9 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-400` — https://github.com/marcuskrogh/HeatingAssistant/pull/623 |
+| SWD-400 | Task | [Iterate] NMPC must choose negative heater power when cooling is allowed | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-400` — https://github.com/marcuskrogh/HeatingAssistant/pull/623 |
 | SWD-401 | Sub-task | Scale NMPC NLP so SLSQP can choose negative u | Done | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-402 | Sub-task | Tests, CalVer, App sync for signed NMPC u | Done | SWD-400 | docs/agents/ITERATE.md | — |
+| SWD-403 | Sub-task | Publish NMPC cycle attrs and dual countdown rings in the UI | In Progress | SWD-400 | docs/agents/ITERATE.md | — |
+| SWD-404 | Sub-task | Tests, cache-bust, changelog, App sync for dual countdown | In Progress | SWD-400 | docs/agents/ITERATE.md | — |
 | SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | Done | — | docs/ROADMAP.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/622 (`c1701de`) |
 | SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
 | SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | Done | SWD-392 | docs/agents/SANDBOX-nmpc-p-ff.md | Done — `/define SWD-395` |
