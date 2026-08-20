@@ -5,6 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 
+# Minimum relative improvement versus J(u=0).  Idle SciPy “success” at U = 0
+# has J ≈ J(u=0) and is rejected.  A useful cooling/heating plan that only
+# cuts cost to 5–50% of the zero-heat cost is accepted.  The PLAN phrase
+# “J < 1e-3 · J(u=0)” was a mis-encoding of “not near the zero-heat cost”.
 ACCEPT_J_RATIO = 1e-3
 
 
@@ -15,7 +19,7 @@ def accept_plan(
     u_min: np.ndarray,
     u_max: np.ndarray,
 ) -> bool:
-    """True when ``U*`` is in bounds and ``J`` is in-band versus ``J(u=0)``."""
+    """True when ``U*`` is in bounds and at least 0.1% better than ``J(u=0)``."""
 
     u = np.asarray(u_star, dtype=float)
     lo = np.asarray(u_min, dtype=float)
@@ -28,4 +32,4 @@ def accept_plan(
         return False
     if not np.isfinite(cost_zero) or cost_zero <= 0.0:
         return cost < 10.0
-    return float(cost) < float(ACCEPT_J_RATIO) * float(cost_zero)
+    return float(cost) <= float(cost_zero) * (1.0 - ACCEPT_J_RATIO)

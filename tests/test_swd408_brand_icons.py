@@ -65,8 +65,8 @@ def test_brands_lift_copy_matches_readme() -> None:
 def test_ingress_uses_shared_svg_and_favicon() -> None:
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
-    assert 'rel="icon" href="static/img/logo.svg?v=135"' in index
-    assert 'rel="apple-touch-icon" href="static/img/favicon.png?v=135"' in index
+    assert 'rel="icon" href="static/img/logo.svg?v=136"' in index
+    assert 'rel="apple-touch-icon" href="static/img/favicon.png?v=136"' in index
     assert png_size(STATIC / "img" / "favicon.png") == (128, 128)
     assert "img/logo.svg" in dashboard
     assert "panel-nav__logo" in dashboard

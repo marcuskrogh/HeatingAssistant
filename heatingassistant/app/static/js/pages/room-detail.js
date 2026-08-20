@@ -432,8 +432,8 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // Defaults match the backend until the WS fetch below resolves.
   const plotSettings = { historyHours: 12, forecastHours: 0 };
 
-  // lastRunTs tracks the MPC solve timestamp; when it changes we know new
-  // forecast data is available and re-fetch via the WS endpoint.
+  // lastRunTs tracks control + NMPC stamps; when either changes we re-fetch
+  // forecasts (a slow plan can land without a new 15 min control tick).
   const lastRunTs = { value: null, sensorEntities: [] };
   const onChartsReady = (roomForecast, priceForecast) => {
     // Scale the power gauge to rated heating/cooling capacity (no sysid scale).
@@ -583,8 +583,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   }
 
   // Seed lastRunTs so the first state-change event that matches the initial
-  // MPC timestamp is treated as a no-op rather than an immediate re-fetch.
-  lastRunTs.value = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
+  // control / NMPC stamps is treated as a no-op rather than an immediate re-fetch.
+  lastRunTs.value = mpcForecastStamp(state);
 
   // HA's history_during_period returns the initial boundary state with its
   // original lu (last_updated) timestamp, which may predate the chart window by
@@ -724,8 +724,8 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
   // Keep measured history lines flush with the moving NOW marker on every update.
   extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart, lastRunTs.sensorEntities || []);
 
-  // Forecast data only changes when the MPC runs; detect that via last_run_ts.
-  const currentRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
+  // Forecast data changes on a control tick or when the slow NMPC plan lands.
+  const currentRunTs = mpcForecastStamp(state);
   if (currentRunTs === lastRunTs.value) return;
   lastRunTs.value = currentRunTs;
 
@@ -750,8 +750,8 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
       const ds = tempChart._chart.data.datasets;
       const now = Date.now();
 
-      if (ds[2]) ds[2].data = tempForecast;
-      if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
+      replaceChartDataset(ds, 'Forecast', tempForecast);
+      if (tempLinearised.length > 0) replaceChartDataset(ds, 'Linearised', tempLinearised);
 
       const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');
       const constraintLowerForecast = forecastToEnabledPoints(forecastData, 'constraint_lower');
@@ -778,7 +778,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     if (powerChart._chart) {
       const ds = powerChart._chart.data.datasets;
-      if (ds[1]) ds[1].data = wattsToKwPoints(powerForecast);
+      replaceChartDataset(ds, 'Planned Power', wattsToKwPoints(powerForecast));
 
       const priceIdx = ds.findIndex((d) => d.label === 'Price');
       const priceForecastIdx = ds.findIndex((d) => d.label === 'Price Forecast');
@@ -801,9 +801,19 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     if (disturbChart._chart) {
       const ds = disturbChart._chart.data.datasets;
-      if (ds[1]) ds[1].data = outdoorForecast;
-      if (ds[3]) ds[3].data = wattsToKwPoints(solarForecast);
+      replaceChartDataset(ds, 'Outdoor Forecast', outdoorForecast);
+      replaceChartDataset(ds, 'Solar Gain Forecast', wattsToKwPoints(solarForecast));
       disturbChart._chart.update('none');
     }
   });
+}
+
+function mpcForecastStamp(state) {
+  const entity = systemEntity('mpc_performance');
+  return `${entityAttr(state, entity, 'last_run_ts')}|${entityAttr(state, entity, 'last_nmpc_ts')}`;
+}
+
+function replaceChartDataset(datasets, label, data) {
+  const idx = datasets.findIndex((d) => d.label === label);
+  if (idx >= 0) datasets[idx].data = data;
 }
