@@ -94,9 +94,9 @@
 - Relates: [SWD-400](https://marcusknielsen.atlassian.net/browse/SWD-400),
   [SWD-395](https://marcusknielsen.atlassian.net/browse/SWD-395)
 - Branch: `cursor/swd-418-nmpc-timer-drift-9728`
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/628
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-418` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-418` — focused review on the delivery PR (same branch/PR)
