@@ -49,7 +49,7 @@
 - Sub-tasks: [SWD-412](https://marcusknielsen.atlassian.net/browse/SWD-412),
   [SWD-413](https://marcusknielsen.atlassian.net/browse/SWD-413)
 - Branch: `cursor/swd-411-nmpc-comfort-fallback-8856`
-- PR:
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/626
 
 ## Next
-`/implement SWD-411` — build the comfort fallback and actuator publish
+`/review-fix SWD-411` — Review and auto-fix on the new delivery PR
