@@ -26,6 +26,7 @@ from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater
 from heatingassistant.engine.nmpc_accept import accept_plan
+from heatingassistant.engine.nmpc_ocp import MeanOcp
 from heatingassistant.engine.nmpc_p import p_command
 from heatingassistant.engine.nmpc_timing import (
     derive_nmpc_timing,
@@ -36,6 +37,7 @@ from heatingassistant.engine.nmpc_timing import (
 from heatingassistant.engine.thermal_model import HouseModel, Room
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
 from heatingassistant.mqtt.topics import cmd as mqtt_cmd
+from heatingassistant.persistence import load_config
 
 _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -430,3 +432,133 @@ def test_tuning_ui_exposes_nmpc_triple():
         / "config-source-editor.js"
     ).read_text(encoding="utf-8")
     assert "p_gain" in source_editor
+
+
+def test_plan_roll_survives_expired_nlp_deadline():
+    ctrl = _tiny_ctrl()
+
+    class _Res:
+        def __init__(self, x):
+            self.x = x
+            self.fun = 1.0
+            self.success = True
+            self.nit = 1
+            self.message = "ok"
+
+    def fake_min(**kwargs):
+        return _Res(np.asarray(kwargs["x0"], dtype=float))
+
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=5.0,
+        now=_NOW,
+        minimize_fn=fake_min,
+        timeout_s=-1.0,
+    )
+    t_ref = np.asarray(plan["t_ref"], dtype=float)
+    assert t_ref.size > 0
+    assert np.isfinite(t_ref).all()
+    assert not np.allclose(t_ref, 0.0)
+    assert float(np.mean(t_ref)) > 5.0
+
+
+def test_timed_out_plan_roll_is_rejected(monkeypatch):
+    def boom(self, _u_flat):
+        raise TimeoutError("NMPC wall-clock timeout")
+
+    monkeypatch.setattr(MeanOcp, "roll", boom)
+    ctrl = _tiny_ctrl()
+
+    class _Res:
+        def __init__(self, x):
+            self.x = x
+            self.fun = 1.0
+            self.success = True
+            self.nit = 1
+            self.message = "ok"
+
+    def fake_min(**kwargs):
+        return _Res(np.asarray(kwargs["x0"], dtype=float))
+
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=5.0,
+        now=_NOW,
+        minimize_fn=fake_min,
+        timeout_s=5.0,
+    )
+    assert plan["accepted"] is False
+    assert not np.isfinite(plan["fun"])
+    assert np.allclose(plan["t_ref"], 0.0)
+
+
+def test_analytic_jacobian_refreshes_M_each_fast_tick(monkeypatch):
+    counts = {"n": 0}
+    orig = MeanOcp._refresh_M
+
+    def counted(self, x, u, d):
+        counts["n"] += 1
+        return orig(self, x, u, d)
+
+    monkeypatch.setattr(MeanOcp, "_refresh_M", counted)
+    ctrl = _tiny_ctrl()
+
+    class _Res:
+        def __init__(self, x):
+            self.x = x
+            self.fun = 1.0
+            self.success = True
+            self.nit = 1
+            self.message = "ok"
+
+    def fake_min(**kwargs):
+        jac = kwargs["jac"]
+        x0 = np.asarray(kwargs["x0"], dtype=float)
+        jac(x0)
+        return _Res(x0)
+
+    ctrl.solve_nmpc(
+        outdoor_temp=5.0,
+        now=_NOW,
+        minimize_fn=fake_min,
+        timeout_s=5.0,
+    )
+    assert counts["n"] == ctrl.horizon
+
+
+def test_nmpc_worker_freezes_ekf_snapshot():
+    engine = ControlEngine(
+        {
+            "update_interval": 900,
+            "horizon": 2,
+            "rooms": [{"name": "Living Room", "setpoint": 21.0}],
+            "heat_sources": [
+                {
+                    "name": "heater",
+                    "type": "electric_heater",
+                    "room": "Living Room",
+                    "max_power": 1500.0,
+                }
+            ],
+        }
+    )
+    ctrl = engine._controller
+    assert ctrl is not None
+    frozen = ctrl._ekf.x_hat.copy()
+    engine.mark_nmpc_busy()
+    ctrl._ekf.x_hat[:] = frozen + 50.0
+    ctrl._u_prev[:] = 0.9
+    snapshot = engine._nmpc_worker_kwargs
+    assert np.allclose(snapshot["x0"], frozen)
+    assert not np.allclose(snapshot["x0"], ctrl._ekf.x_hat)
+    assert np.allclose(snapshot["u_prev"], np.zeros_like(ctrl._u_prev))
+
+
+def test_runtime_persists_injected_nmpc_defaults(tmp_path):
+    HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "haos"},
+    )
+    disk = load_config(tmp_path)
+    assert disk["nmpc_period"] == pytest.approx(DEFAULT_NMPC_PERIOD)
+    assert disk["nmpc_fast_substeps"] == DEFAULT_NMPC_FAST_SUBSTEPS
+    assert disk["nmpc_horizon_h"] == pytest.approx(DEFAULT_NMPC_HORIZON_H)

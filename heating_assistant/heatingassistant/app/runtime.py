@@ -137,6 +137,17 @@ class HeatingRuntime:
         # stores entity_ids; the thin HA bridge consumes the bindings map).
         self._apply_entity_wiring()
         self.bindings = self._load_bindings()
+        if not any(
+            self.options.get(key) is not None
+            for key in (
+                const.CONF_NMPC_PERIOD,
+                const.CONF_NMPC_FAST_SUBSTEPS,
+                const.CONF_NMPC_HORIZON_H,
+            )
+        ):
+            self.options[const.CONF_NMPC_PERIOD] = const.DEFAULT_NMPC_PERIOD
+            self.options[const.CONF_NMPC_FAST_SUBSTEPS] = const.DEFAULT_NMPC_FAST_SUBSTEPS
+            self.options[const.CONF_NMPC_HORIZON_H] = const.DEFAULT_NMPC_HORIZON_H
         save_config(self.data_dir, self.options)
         self.tag_values: dict[str, Any] = dict(self.state.get("tag_values") or {})
         self.tag_statuses: dict[str, str] = dict(self.state.get("tag_statuses") or {})
@@ -155,17 +166,6 @@ class HeatingRuntime:
             self.state.get("room_temperatures") or {}
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
-        if not any(
-            self.options.get(key) is not None
-            for key in (
-                const.CONF_NMPC_PERIOD,
-                const.CONF_NMPC_FAST_SUBSTEPS,
-                const.CONF_NMPC_HORIZON_H,
-            )
-        ):
-            self.options[const.CONF_NMPC_PERIOD] = const.DEFAULT_NMPC_PERIOD
-            self.options[const.CONF_NMPC_FAST_SUBSTEPS] = const.DEFAULT_NMPC_FAST_SUBSTEPS
-            self.options[const.CONF_NMPC_HORIZON_H] = const.DEFAULT_NMPC_HORIZON_H
         self.control_engine = ControlEngine(self.options)
         self._restore_estimated_parameters()
         self.sysid_results: dict[str, Any] = {}

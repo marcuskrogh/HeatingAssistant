@@ -106,6 +106,7 @@ class ControlEngine:
         self._last_compute_ts: datetime | None = None
         self._forecast_lock = threading.Lock()
         self._nmpc_last_kwargs: dict[str, Any] = {}
+        self._nmpc_worker_kwargs: dict[str, Any] = {}
         self.update_config(config or {})
 
     def update_config(self, config: Mapping[str, Any]) -> None:
@@ -269,16 +270,27 @@ class ControlEngine:
         return bool(controller is not None and getattr(controller, "nmpc_due", False))
 
     def mark_nmpc_busy(self) -> None:
+        """Mark the NLP in-flight and freeze the worker's EKF / input snapshot."""
+
         controller = self._controller
+        kwargs = dict(self._nmpc_last_kwargs)
         if controller is not None:
+            x_hat = getattr(getattr(controller, "_ekf", None), "x_hat", None)
+            if x_hat is not None:
+                kwargs["x0"] = x_hat.copy()
+            u_prev = getattr(controller, "_u_prev", None)
+            if u_prev is not None:
+                kwargs["u_prev"] = u_prev.copy()
             controller._nmpc_busy = True
+        self._nmpc_worker_kwargs = kwargs
 
     def solve_nmpc_blocking(self) -> dict[str, Any]:
         """Run the slow NLP on the caller thread (worker / tests)."""
         controller = self._controller
         if controller is None:
             return {"accepted": False, "fun": float("nan"), "u_star": None}
-        return controller.solve_nmpc(**dict(self._nmpc_last_kwargs))
+        kwargs = dict(self._nmpc_worker_kwargs or self._nmpc_last_kwargs)
+        return controller.solve_nmpc(**kwargs)
 
     def apply_nmpc_result(self, result: Mapping[str, Any]) -> bool:
         controller = self._controller

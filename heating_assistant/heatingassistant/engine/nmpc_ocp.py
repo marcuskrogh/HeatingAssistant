@@ -194,8 +194,6 @@ class MeanOcp:
         n_dec = self.n * self.nu
         sx = np.zeros((self.sde.nx, n_dec)) if with_jac else None
         g = np.zeros(n_dec) if with_jac else None
-        d0 = self._d_fast[0]
-        self._refresh_M(x, U[0], d0)
         for n in range(self.n):
             u_n = U[n]
             col = n * self.nu
@@ -212,6 +210,7 @@ class MeanOcp:
                 viol = np.maximum(0.0, lo - ta) + np.maximum(0.0, ta - hi)
                 cost += self.rho * float(np.dot(viol, viol))
                 if with_jac:
+                    self._refresh_M(x, u_n, d_k)
                     b_u = self.sde.dfdu(x, u_n, d_k, self.p, 0.0)
                     hmb = self._h_sub * (self._M @ b_u)
                     for _ in range(self.n_int):
@@ -318,6 +317,8 @@ def solve_mean_ocp(
         if ocp.best_u is not None:
             u_star = ocp.best_u.reshape(-1)
             fun = float(ocp.best_j)
+    finally:
+        ocp.deadline = None
     elapsed = time.perf_counter() - t0
     u_mat = np.asarray(u_star, dtype=float).reshape(ocp.n, ocp.nu)
     return {
@@ -357,17 +358,16 @@ def plan_from_solve(
 
     u_star = np.asarray(solve_result["u_star"], dtype=float).reshape(ocp.n, ocp.nu)
     cost = float(solve_result["fun"])
-    if not np.isfinite(cost):
-        try:
-            cost, _, air = ocp.roll(u_star)
-        except TimeoutError:
-            air = np.zeros((ocp.n * ocp.m, ocp.n_rooms), dtype=float)
-            cost = float("nan")
-    else:
-        try:
-            cost, _, air = ocp.roll(u_star)
-        except TimeoutError:
-            air = np.zeros((ocp.n * ocp.m, ocp.n_rooms), dtype=float)
+    saved_deadline = ocp.deadline
+    ocp.deadline = None
+    try:
+        rolled_cost, _, air = ocp.roll(u_star)
+        cost = float(rolled_cost)
+    except TimeoutError:
+        air = np.zeros((ocp.n * ocp.m, ocp.n_rooms), dtype=float)
+        cost = float("nan")
+    finally:
+        ocp.deadline = saved_deadline
     accepted = accept_plan(u_star, cost, cost_zero, ocp.u_min, ocp.u_max)
     return {
         **solve_result,
