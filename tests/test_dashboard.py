@@ -874,9 +874,9 @@ def test_room_detail_js_price_series_use_stepped_before():
     js_path = os.path.join(
         os.path.dirname(__file__),
         "..",
-        "custom_components",
-        "heating_assistant",
-        "www",
+        "heatingassistant",
+        "app",
+        "static",
         "js",
         "charts",
         "room-charts.js",
@@ -910,9 +910,9 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
     js_path = os.path.join(
         os.path.dirname(__file__),
         "..",
-        "custom_components",
-        "heating_assistant",
-        "www",
+        "heatingassistant",
+        "app",
+        "static",
         "js",
         "charts",
         "room-charts.js",
@@ -920,9 +920,9 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
     room_detail_path = os.path.join(
         os.path.dirname(__file__),
         "..",
-        "custom_components",
-        "heating_assistant",
-        "www",
+        "heatingassistant",
+        "app",
+        "static",
         "js",
         "pages",
         "room-detail.js",
@@ -930,9 +930,9 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
     chart_js_path = os.path.join(
         os.path.dirname(__file__),
         "..",
-        "custom_components",
-        "heating_assistant",
-        "www",
+        "heatingassistant",
+        "app",
+        "static",
         "js",
         "components",
         "time-series-chart.js",
@@ -1001,9 +1001,9 @@ def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spe
     js_path = os.path.join(
         os.path.dirname(__file__),
         "..",
-        "custom_components",
-        "heating_assistant",
-        "www",
+        "heatingassistant",
+        "app",
+        "static",
         "js",
         "pages",
         "room-detail.js",
@@ -1014,13 +1014,14 @@ def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spe
     assert "function extendLiveChartHistory" in source
     assert "extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart, lastRunTs.sensorEntities || [])" in source
 
-    # extendLiveChartHistory must run before the MPC last_run_ts early return.
+    # extendLiveChartHistory must run before the MPC forecast-stamp early return.
     update_fn = source.split("function updateChartsFromState", 1)[1]
     extend_pos = update_fn.index("extendLiveChartHistory")
     early_return_pos = update_fn.index("if (currentRunTs === lastRunTs.value) return")
     assert extend_pos < early_return_pos, (
         "extendLiveChartHistory must run on every update, before the MPC early return"
     )
+    assert "mpcForecastStamp" in source
 
     # Temperature datasets are the primary fix (CON-60).
     assert "'Filtered'" in source and "'Measured'" in source

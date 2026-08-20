@@ -1,55 +1,52 @@
-# Iterate: Heat and cool on the fast loop when comfort bounds are already violated
+# Iterate: Room view optimal trajectory still U=0 / 30°C free response
 
 ## Prior work
-- Task: [SWD-405](https://marcusknielsen.atlassian.net/browse/SWD-405)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/624
-- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/ITERATE.md` (SWD-400 / SWD-405)
+- Task: [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/626
+- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/ITERATE.md` (SWD-400 / SWD-405 / SWD-411)
 
 ## Problem
-- Live heating and cooling stay at `u = 0` while rooms already violate the
-  comfort band (too cold and too hot). Isolated production-horizon SLSQP
-  *does* choose signed `U*` and accept succeeds.
-- The fast loop tracks `T_ref` from NMPC only. With no accepted path it
-  commands `u = 0`, so it never acts on a live band violation. Climate
-  writes then set the unit to the current temperature and hold the
-  violation.
-- The NLP worker installs a plan on the forecast but does not re-run P or
-  publish actuators, so commands stay at 0 until the next 15 min tick.
+- Room view Forecast still spikes toward 30 °C while Planned Power stays at
+  0 kW. The room is inside the comfort band, so the SWD-411 fast fallback
+  also stays at `u = 0`.
+- `accept_plan` required `J < 1e-3 * J(u=0)` (a 1000× improvement). A useful
+  cooling plan that only cuts cost to 5–50% of the zero-heat cost was
+  rejected. With no installed path, `compute()` plots the open-loop `U = 0`
+  rollout (solar-driven heat spike).
+- Room view refreshed forecasts only when `last_run_ts` changed, so an
+  applied slow plan could sit unpublished in the snapshot until the next
+  15 min tick.
 
 ## Clarifications
-- Keep SLSQP and the accept ratio vs `J(u=0)`.
-- Fast fallback is zone-gated: P toward the setpoint only while air is
-  outside the band. Inside the band with no path stays `u = 0`.
-- Watchdog still forces `u = 0`.
-- After an accepted plan, request a control cycle immediately so climate
-  / number / switch writes follow `U*`.
+- Product accept intent is “not near the zero-heat cost”, not “cost near
+  zero”. Keep rejecting idle false success at `J ≈ J(u=0)`.
+- Do not switch NLP backends. Do not add I/D terms.
 
 ## Acceptance criteria
-- No NMPC path, room below the lower band: heat (`u > 0`) on the fast tick.
-- No NMPC path, room above the upper band, cooling-capable source: cool
-  (`u < 0`) on the fast tick.
-- Inside the band with no path: `u = 0`.
-- Watchdog still forces `u = 0`.
-- Accepted NMPC result schedules a control cycle (actuator publish) without
-  waiting for the next period.
-- Tests, CalVer 2026.08.22, changelog, App sync.
+- Accept `U*` when it is in bounds, finite, and strictly better than
+  `J(u=0)` by at least `ACCEPT_J_RATIO` (0.1%).
+- Reject `J ≈ J(u=0)` (idle false success) and out-of-bounds / NaN plans.
+- After accept, Forecast / Planned Power show the installed nonlinear path
+  (cooling when a future solar/outdoor spike would leave the band).
+- Inside the band with a true zero-heat optimum, planned power may stay 0.
+- Room view refetches forecasts when `last_nmpc_ts` or `last_run_ts` changes.
+- Tests, CalVer 2026.08.24, changelog, App sync.
 
 ## Out of scope
 - Switching the NLP backend away from SLSQP.
-- Changing the accept ratio vs `J(u=0)`.
 - I-term / D-term or QP fallback.
+- Changing default `K_p`, timing triple, or comfort-zone cost.
 
 ## Work packages
-1. Fast P comfort fallback and publish actuators on NMPC apply (SWD-412)
-2. Tests, CalVer, App sync for comfort fallback (SWD-413)
+1. Accept NMPC plans that beat zero-heat and plot that trajectory (SWD-415)
+2. Tests, CalVer, changelog, App sync for trajectory plot (SWD-416)
 
 ## Tracker
-- Task: [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
-- Relates: [SWD-405](https://marcusknielsen.atlassian.net/browse/SWD-405)
-- Sub-tasks: [SWD-412](https://marcusknielsen.atlassian.net/browse/SWD-412),
-  [SWD-413](https://marcusknielsen.atlassian.net/browse/SWD-413)
-- Branch: `cursor/swd-411-nmpc-comfort-fallback-8856`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/626
+- Task: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
+- Relates: [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
+- Sub-tasks: [SWD-415](https://marcusknielsen.atlassian.net/browse/SWD-415),
+  [SWD-416](https://marcusknielsen.atlassian.net/browse/SWD-416)
+- Branch: `cursor/swd-414-nmpc-optimal-trajectory-ce1e`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626 (`ae030d9`)
+`/implement SWD-414` — Build the accept-bar and room-view forecast refresh

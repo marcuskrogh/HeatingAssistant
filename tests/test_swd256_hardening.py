@@ -34,7 +34,7 @@ def test_thin_integration_has_no_heavy_requirements():
             / "manifest.json"
         ).read_text(encoding="utf-8")
     )
-    assert manifest["version"] == "2026.08.23"
+    assert manifest["version"] == "2026.08.24"
     assert "mqtt" in manifest.get("dependencies", [])
     reqs = manifest.get("requirements") or []
     joined = " ".join(reqs).lower()

@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.24
+
+- Room view now plots the two-hour planner's path (Forecast and Planned
+  Power) when that plan is better than leaving the heater off. A useful
+  cooling plan is no longer dropped, so the next-day heat spike is not
+  shown as if it were the optimum.
+
 # 2026.08.23
 
 - Heating Assistant now has its own icon in the App store and in
