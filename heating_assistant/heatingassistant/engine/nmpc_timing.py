@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,37 @@ class NmpcTiming:
     @property
     def m(self) -> int:
         return self.fast_substeps
+
+
+def grid_slot_index(epoch_s: float, period_s: float, now_s: float) -> int:
+    """Zero-based index of the grid slot containing ``now_s``.
+
+    Slot 0 is ``[epoch, epoch+period)``. Times before the epoch map to 0.
+    """
+
+    period = float(period_s)
+    if period <= 0.0:
+        raise ValueError(f"period must be > 0; got {period}")
+    elapsed = float(now_s) - float(epoch_s)
+    if elapsed <= 0.0:
+        return 0
+    return int(elapsed // period)
+
+
+def next_grid_ts(epoch_s: float, period_s: float, now_s: float) -> float:
+    """Return the next exclusive grid time after ``now_s``.
+
+    If ``now_s`` is exactly on a slot, the following slot is returned so a
+    just-finished tick does not schedule immediately again.
+    """
+
+    period = float(period_s)
+    if period <= 0.0:
+        raise ValueError(f"period must be > 0; got {period}")
+    n = math.floor((float(now_s) - float(epoch_s)) / period) + 1
+    if n < 1:
+        n = 1
+    return float(epoch_s) + n * period
 
 
 def derive_nmpc_timing(

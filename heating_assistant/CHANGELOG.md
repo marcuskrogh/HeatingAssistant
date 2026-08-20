@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.25
+
+- The two-hour planner countdown now stays on the clock from when you press
+  Start. Finishing a plan no longer restarts that timer, so heating cycles
+  do not drift later and later.
+
 # 2026.08.24
 
 - Room view now plots the two-hour planner's path (Forecast and Planned

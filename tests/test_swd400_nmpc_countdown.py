@@ -69,7 +69,7 @@ def test_last_nmpc_ts_persists_across_restart(tmp_path: Path) -> None:
     assert attrs["last_nmpc_ts"] == pytest.approx(1_700_000_000.0)
 
 
-def test_nmpc_worker_stamps_last_nmpc_ts_on_reject(tmp_path: Path) -> None:
+def test_nmpc_worker_does_not_restamp_last_nmpc_ts_on_reject(tmp_path: Path) -> None:
     runtime = HeatingRuntime(
         tmp_path,
         bus=InMemoryMqttBus(),
@@ -95,10 +95,13 @@ def test_nmpc_worker_stamps_last_nmpc_ts_on_reject(tmp_path: Path) -> None:
             ],
         },
     )
+    epoch = 1_700_000_000.0
+    runtime._anchor_schedule_epoch(epoch)
     started = threading.Event()
 
     def _fake_solve():
         started.set()
+        time.sleep(0.05)
         return {
             "accepted": False,
             "u_star": np.zeros((1, 1)),
@@ -108,19 +111,17 @@ def test_nmpc_worker_stamps_last_nmpc_ts_on_reject(tmp_path: Path) -> None:
 
     runtime.control_engine.solve_nmpc_blocking = _fake_solve  # type: ignore[method-assign]
     runtime.control_engine.mark_nmpc_busy = lambda: None  # type: ignore[method-assign]
-    before = time.time()
     runtime._schedule_nmpc_worker()
     assert started.wait(timeout=2.0)
     thread = runtime._nmpc_thread
     assert thread is not None
     thread.join(timeout=2.0)
     assert not thread.is_alive()
-    assert runtime._last_nmpc_ts is not None
-    assert runtime._last_nmpc_ts >= before
+    assert runtime._last_nmpc_ts == pytest.approx(epoch)
     attrs = runtime.hass_states()["sensor.heating_assistant_mpc_performance"][
         "attributes"
     ]
-    assert attrs["last_nmpc_ts"] == pytest.approx(runtime._last_nmpc_ts)
+    assert attrs["last_nmpc_ts"] == pytest.approx(epoch)
 
 
 def test_concurrent_runtime_state_saves_do_not_raise(tmp_path: Path) -> None:
