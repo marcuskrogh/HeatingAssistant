@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.23
+
+- Heating Assistant now has its own icon in the App store and in
+  Home Assistant Settings.
+
 # 2026.08.22
 
 - Heaters and heat pumps now heat or cool on the 15-minute loop when the

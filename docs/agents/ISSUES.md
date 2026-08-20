@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | Done | — | docs/agents/PLAN-heating-assistant-icon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/625 |
+| SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
+| SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-411 | Task | [Iterate] Heat and cool on the fast loop when comfort bounds are already violated | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626 (`ae030d9`) |
 | SWD-412 | Sub-task | Fast P comfort fallback and publish actuators on NMPC apply | Done | SWD-411 | docs/agents/ITERATE.md | — |
 | SWD-413 | Sub-task | Tests, CalVer, App sync for comfort fallback | Done | SWD-411 | docs/agents/ITERATE.md | — |
@@ -133,7 +136,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/ship` SWD-408: review-fix CLEAN (focused) then closeout; CalVer 2026.08.23 after merging main; PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next Done.
+- 2026-08-20 — `/review-fix` SWD-408 CLEAN (focused): 1 blocker / 6 should-fix (CalVer behind main; brands README; font fallbacks; favicon size + cache-bust; Python `copytree brand/`; PLAN logo 500×200). Fix-forward on PR #625. Next `/ship SWD-408`.
 
+- 2026-08-20 — `/implement` SWD-408 In Review: brand SVG/PNGs, Supervisor icon/logo, HA `brand/` folder, Ingress favicon; CalVer 2026.08.21. Fast suite 928 passed, 88 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next `/review-fix SWD-408`.
+- 2026-08-20 — `/define` SWD-408: PLAN `docs/agents/PLAN-heating-assistant-icon.md` (tweak / delta-fast). Shared house + settling-curve mark; Supervisor icon/logo; HA 2026.3+ `brand/` folder; brands lift copy. Sub-tasks SWD-409–410. Next `/implement SWD-408`.
 - 2026-08-20 — `/ship` SWD-411 via PR #626 (`ae030d9`): heat/cool on the 15 min loop when already out of band; post-accept publish works off ticker/start ephemeral loops; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.22`. Next Done.
 - 2026-08-20 — `/review-fix` SWD-411: 1 blocker / 3 should-fix (ephemeral `_nmpc_loop` skipped post-accept publish; lock wait; tests; changelog). Fix-forward on PR #626.
 - 2026-08-20 — `/iterate` SWD-411 In Review: fast P comfort fallback + publish actuators on NMPC apply; PR https://github.com/marcuskrogh/HeatingAssistant/pull/626; CalVer 2026.08.22. Next `/review-fix SWD-411`.

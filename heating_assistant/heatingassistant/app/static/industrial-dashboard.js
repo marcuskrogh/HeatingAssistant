@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '134';
+  return '135';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -649,12 +649,7 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#config">CONFIGURATION</a>
           </div>
           <div class="panel-nav__brand">
-            <svg class="panel-nav__logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <line x1="31" y1="52" x2="71" y2="52" stroke="#00d4aa" stroke-width="2.5" stroke-linecap="round" opacity="0.32"/>
-              <path d="M 31 72 C 42 72, 45 53.5, 57 52.5 C 63 52, 67 52, 71 52" fill="none" stroke="#00d4aa" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="71" cy="52" r="3.6" fill="#00d4aa"/>
-              <path d="M 20 84 L 20 47 L 50 19 L 80 47 L 80 84 Z" fill="none" stroke="#00d4aa" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
-            </svg>
+            <img class="panel-nav__logo" src="${BASE_PATH}/img/logo.svg?v=${PANEL_VERSION}" alt="" width="24" height="24" aria-hidden="true"/>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
           <span class="panel-nav__fill"></span>
