@@ -544,7 +544,7 @@ def test_nmpc_worker_freezes_ekf_snapshot():
     assert ctrl is not None
     frozen = ctrl._ekf.x_hat.copy()
     engine.mark_nmpc_busy()
-    ctrl._ekf.x_hat[:] = frozen + 50.0
+    ctrl._ekf._x[:] = frozen + 50.0
     ctrl._u_prev[:] = 0.9
     snapshot = engine._nmpc_worker_kwargs
     assert np.allclose(snapshot["x0"], frozen)
