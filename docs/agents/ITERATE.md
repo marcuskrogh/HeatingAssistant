@@ -42,6 +42,7 @@
 - Sub-tasks: [SWD-401](https://marcusknielsen.atlassian.net/browse/SWD-401),
   [SWD-402](https://marcusknielsen.atlassian.net/browse/SWD-402)
 - Branch: `cursor/swd-400-nmpc-signed-u-46be`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/623
 
 ## Next
-`/implement SWD-400` — scale the NLP and add the cooling regression
+`/review-fix SWD-400` — Review and auto-fix on the new delivery PR
