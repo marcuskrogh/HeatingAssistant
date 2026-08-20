@@ -99,4 +99,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review-fix SWD-418` — focused review on the delivery PR (same branch/PR)
+`/ship SWD-418` — review-fix CLEAN; merge PR #628 after pytest-fast is green
