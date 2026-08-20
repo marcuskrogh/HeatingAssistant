@@ -776,10 +776,12 @@ class HeatingRuntime:
     def _nmpc_worker_thread(self) -> None:
         try:
             result = self.control_engine.solve_nmpc_blocking()
-            self.control_engine.apply_nmpc_result(result)
+            applied = self.control_engine.apply_nmpc_result(result)
             note = self.control_engine.consume_watchdog_notification()
             if note:
                 self._emit_nmpc_notify(note)
+            if applied:
+                self._request_control_cycle_after_nmpc()
         except Exception:
             _logger.exception("NMPC worker failed")
             controller = getattr(self.control_engine, "_controller", None)
@@ -791,6 +793,17 @@ class HeatingRuntime:
                     self._emit_nmpc_notify(note)
         finally:
             self._note_nmpc_cycle_complete()
+
+    def _request_control_cycle_after_nmpc(self) -> None:
+        """Recompute and publish P commands as soon as a slow plan is applied.
+
+        The NLP worker only installs ``U*`` / ``T_ref``.  Without this, heaters
+        stay at the previous (often zero) command until the next 15 min tick.
+        """
+
+        loop = getattr(self, "_nmpc_loop", None)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.run_control_cycle(), loop)
 
     def _note_nmpc_cycle_complete(self) -> None:
         """Stamp the slow planner cycle so the UI can count down to the next one.
