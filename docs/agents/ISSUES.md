@@ -4,14 +4,14 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/implement SWD-395` |
+| SWD-392 | Story | [Explore] Hierarchical nonlinear OCP + P tracking | To Do | — | docs/ROADMAP.md | `/review-fix SWD-395` |
 | SWD-393 | Task | [Model] Formulate hierarchical NMPC + P-FF, hold/fail/watchdog | Done | SWD-392 | docs/agents/MODEL-nmpc-p-ff.md | Done — `/sandbox SWD-394` |
 | SWD-394 | Task | [Sandbox] Offline NMPC period + closed-loop P eval | Done | SWD-392 | docs/agents/SANDBOX-nmpc-p-ff.md | Done — `/define SWD-395` |
-| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | To Do | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/implement SWD-395` — https://github.com/marcuskrogh/HeatingAssistant/pull/622 |
-| SWD-396 | Sub-task | Mean OCP + analytic Jacobian + accept/reject (replace QP path) | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
-| SWD-397 | Sub-task | Fast P + heater K_p; EKF uses applied u | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
-| SWD-398 | Sub-task | NLP worker thread + 5 h fail watchdog + notify | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
-| SWD-399 | Sub-task | Timing triple 2 h / 8 substeps / 36 h, Tuning UI, tests, CalVer, App sync | To Do | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-395 | Task | [Define] Production NMPC + P, single heater, last-plan hold, 5 h → off + notify | In Review | SWD-392 | docs/agents/PLAN-nmpc-p-ff.md | `/review-fix SWD-395` — https://github.com/marcuskrogh/HeatingAssistant/pull/622 |
+| SWD-396 | Sub-task | Mean OCP + analytic Jacobian + accept/reject (replace QP path) | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-397 | Sub-task | Fast P + heater K_p; EKF uses applied u | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-398 | Sub-task | NLP worker thread + 5 h fail watchdog + notify | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
+| SWD-399 | Sub-task | Timing triple 2 h / 8 substeps / 36 h, Tuning UI, tests, CalVer, App sync | Done | SWD-395 | docs/agents/PLAN-nmpc-p-ff.md | — |
 | SWD-389 | Task | [Tweak] Guide PE users on how much data to gather | Done | — | docs/agents/PLAN-pe-data-duration.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/621 |
 | SWD-390 | Sub-task | PE page + TUNING duration guidance copy | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |
 | SWD-391 | Sub-task | Tests, CalVer, App sync | Done | SWD-389 | docs/agents/PLAN-pe-data-duration.md | — |

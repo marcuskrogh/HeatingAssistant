@@ -167,6 +167,8 @@ def test_control_engine_preview_builds_with_overrides(_mock_unused) -> None:
     assert kwargs["horizon"] == 2
     cfg = build.call_args.args[0]
     assert cfg["tracking_weight"] == 3.5
+    preview_ctrl.solve_nmpc.assert_called_once()
+    preview_ctrl.apply_nmpc_result.assert_called_once()
     preview_ctrl.compute.assert_called_once()
     assert preview_ctrl.compute.call_args.kwargs.get("run_optimization") is True
     assert snapshot["predictions"][0]["Living Room"] == pytest.approx(21.5)

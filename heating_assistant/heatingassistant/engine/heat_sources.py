@@ -61,6 +61,7 @@ class HeatSource(ABC):
         heater_entity: Optional[str] = None,
         power_scale: float = 1.0,
         emitter_time_constant: float = 0.0,
+        p_gain: float = 0.1,
     ) -> None:
         self.name = name
         self.room = room                     # name of the room this source heats
@@ -92,6 +93,8 @@ class HeatSource(ABC):
         # OCP, so the controller can anticipate the lag rather than
         # treating commanded power as instantaneous.
         self.emitter_time_constant: float = float(emitter_time_constant)
+        # Fast P-law gain [1/K] on (T_ref − T_hat).  One gain for heat and cool.
+        self.p_gain: float = float(p_gain)
         self._current_power: float = 0.0    # W
 
     # ------------------------------------------------------------------

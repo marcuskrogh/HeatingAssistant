@@ -23,6 +23,7 @@ def test_topic_builders_follow_contract() -> None:
     assert tag_in("haos", "living_temp_1") == "heatingassistant/haos/tag/living_temp_1/in"
     assert tag_out("haos", "living_setpoint") == "heatingassistant/haos/tag/living_setpoint/out"
     assert cmd("haos", "reload") == "heatingassistant/haos/cmd/reload"
+    assert cmd("haos", "notify") == "heatingassistant/haos/cmd/notify"
     assert status("haos") == "heatingassistant/haos/status"
     assert bindings("haos") == "heatingassistant/haos/bindings"
     assert entities("haos") == "heatingassistant/haos/entities"

@@ -143,9 +143,8 @@
 4. Timing triple (2 h / 8 substeps / 36 h), Tuning UI, tests, CalVer, App sync — [SWD-399](https://marcusknielsen.atlassian.net/browse/SWD-399)
 
 ## Open items
-- Exact persistent-notification copy (implement may tune wording).
-- MQTT command shape for `persistent_notification.create` / dismiss if
-  the thin bridge has no such command yet.
+- Persistent-notification copy: "Heating plan unavailable" / five hours without a usable plan.
+- MQTT `heatingassistant/<instance>/cmd/notify` with `action` `create` or `dismiss` is implemented.
 
 ## Tracker
 - Provider: jira
@@ -161,4 +160,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/implement SWD-395` — build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-395` — Review and auto-fix per Workflow binding

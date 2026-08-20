@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from heatingassistant.app import window_override as window_ov
@@ -248,8 +249,15 @@ async def test_runtime_brief_open_does_not_clamp(tmp_path: Path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
     window_tag = runtime._window_tags["Living Room"][0]
+    ctrl = runtime.control_engine._controller
+    assert ctrl is not None
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, ctrl._system.nu), 0.5),
+        np.full((ctrl.horizon, 1), 22.0),
+    )
+    await runtime.run_control_cycle()
     # start() already ran one control cycle; seed a known non-zero command.
-    runtime.actuator_outputs["living_heater"] = 0.8
+    assert runtime.actuator_outputs.get("living_heater") != 0.0
 
     await publish_tag_in(runtime, window_tag, True)
     assert runtime.get_window_state("Living Room") == "pending_open"

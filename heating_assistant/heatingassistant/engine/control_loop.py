@@ -10,6 +10,7 @@ from typing import Any
 
 from . import const
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
+from .nmpc_timing import timing_from_dt_horizon, timing_from_options, timing_from_preview_overrides
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +28,9 @@ _PREVIEW_TUNING_KEYS = frozenset(
         const.CONF_TERMINAL_WEIGHT,
         const.CONF_UPDATE_INTERVAL,
         const.CONF_HORIZON,
+        const.CONF_NMPC_PERIOD,
+        const.CONF_NMPC_FAST_SUBSTEPS,
+        const.CONF_NMPC_HORIZON_H,
     }
 )
 
@@ -101,12 +105,22 @@ class ControlEngine:
         self._last_filtered_temperatures: dict[str, float] = {}
         self._last_compute_ts: datetime | None = None
         self._forecast_lock = threading.Lock()
+        self._nmpc_last_kwargs: dict[str, Any] = {}
         self.update_config(config or {})
 
     def update_config(self, config: Mapping[str, Any]) -> None:
         """Rebuild model/controller state from an App config dictionary."""
 
         self.config = dict(config)
+        try:
+            timing = self._nmpc_timing(self.config)
+            self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
+            self.config[const.CONF_HORIZON] = timing.n_fast
+            self.config[const.CONF_NMPC_PERIOD] = timing.period_s
+            self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
+            self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
+        except ValueError:
+            _LOGGER.warning("Invalid NMPC timing triple in config; controller build may fail")
         self.model = _build_house_model(_list_of_mappings(self.config.get("rooms")))
         self.heat_sources = _build_heat_sources(
             _list_of_mappings(self.config.get("heat_sources"))
@@ -168,6 +182,17 @@ class ControlEngine:
                     control_trajectory=control_trajectory,
                     disabled_sources=disabled_sources,
                 )
+                self._nmpc_last_kwargs = {
+                    "outdoor_temp": outdoor,
+                    "now": now or datetime.now(timezone.utc),
+                    "outdoor_forecast": outdoor_forecast,
+                    "cloud_forecast": cloud_forecast,
+                    "cloud_cover_now": cloud_cover_now,
+                    "ghi_forecast": ghi_forecast,
+                    "ghi_now": ghi_now,
+                    "price_forecast": price_forecast,
+                    "control_trajectory": control_trajectory,
+                }
                 self._cache_controller_forecast(self._controller)
                 self.mode = "mpc"
                 self.fallback_reason = None
@@ -197,8 +222,8 @@ class ControlEngine:
                 "solar_forecast": [dict(item) for item in self._last_solar_forecast],
                 "price_forecast": list(self._last_price_forecast),
                 "filtered_temperatures": dict(self._last_filtered_temperatures),
-                "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
-                "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
+                "dt": float(self._derived_dt()),
+                "horizon": int(self._derived_horizon()),
             }
 
     def mpc_actions_by_tag(self) -> dict[str, float]:
@@ -212,6 +237,60 @@ class ControlEngine:
             return {}
         actions = dict(raw() if callable(raw) else raw)
         return self._actions_to_tags(actions)
+
+    def _nmpc_timing(self, config: Mapping[str, Any] | None = None):
+        return timing_from_options(
+            config if config is not None else self.config,
+            default_period=const.DEFAULT_NMPC_PERIOD,
+            default_substeps=const.DEFAULT_NMPC_FAST_SUBSTEPS,
+            default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
+        )
+
+    def _derived_dt(self, config: Mapping[str, Any] | None = None) -> float:
+        try:
+            return float(self._nmpc_timing(config).dt_s)
+        except ValueError:
+            return float(
+                (config or self.config).get(
+                    "update_interval", const.DEFAULT_UPDATE_INTERVAL
+                )
+            )
+
+    def _derived_horizon(self, config: Mapping[str, Any] | None = None) -> int:
+        try:
+            return int(self._nmpc_timing(config).n_fast)
+        except ValueError:
+            return int(
+                (config or self.config).get("horizon", const.DEFAULT_HORIZON)
+            )
+
+    def nmpc_due(self) -> bool:
+        controller = self._controller
+        return bool(controller is not None and getattr(controller, "nmpc_due", False))
+
+    def mark_nmpc_busy(self) -> None:
+        controller = self._controller
+        if controller is not None:
+            controller._nmpc_busy = True
+
+    def solve_nmpc_blocking(self) -> dict[str, Any]:
+        """Run the slow NLP on the caller thread (worker / tests)."""
+        controller = self._controller
+        if controller is None:
+            return {"accepted": False, "fun": float("nan"), "u_star": None}
+        return controller.solve_nmpc(**dict(self._nmpc_last_kwargs))
+
+    def apply_nmpc_result(self, result: Mapping[str, Any]) -> bool:
+        controller = self._controller
+        if controller is None:
+            return False
+        return bool(controller.apply_nmpc_result(dict(result)))
+
+    def consume_watchdog_notification(self) -> str | None:
+        controller = self._controller
+        if controller is None:
+            return None
+        return controller.consume_watchdog_notification()
 
     def applied_solar_gains(
         self,
@@ -287,15 +366,19 @@ class ControlEngine:
             for key, value in dict(overrides or {}).items()
             if key in _PREVIEW_TUNING_KEYS and value is not None
         }
-        preview_dt = float(
-            ov.get(
-                const.CONF_UPDATE_INTERVAL,
-                self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL),
+        try:
+            timing = timing_from_preview_overrides(
+                self.config,
+                ov,
+                default_period=const.DEFAULT_NMPC_PERIOD,
+                default_substeps=const.DEFAULT_NMPC_FAST_SUBSTEPS,
+                default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
             )
-        )
-        preview_horizon = int(
-            ov.get(const.CONF_HORIZON, self.config.get("horizon", const.DEFAULT_HORIZON))
-        )
+            preview_dt = timing.dt_s
+            preview_horizon = timing.n_fast
+        except ValueError as exc:
+            _LOGGER.warning("preview_tuning_forecast: invalid NMPC timing: %s", exc)
+            return {"error": "invalid_nmpc_timing"}
 
         comfort_override = ov.get(const.CONF_COMFORT_OFFSET)
         saved_comfort: dict[str, float] = {}
@@ -311,6 +394,7 @@ class ControlEngine:
             try:
                 preview_ctrl = self._build_controller_from_config(
                     {**self.config, **ov},
+                    timing=timing,
                     horizon=preview_horizon,
                     dt=preview_dt,
                 )
@@ -335,6 +419,17 @@ class ControlEngine:
             self._apply_measurements(room_temps, dict(setpoints or {}))
             compute_now = now or datetime.now(timezone.utc)
             try:
+                plan = preview_ctrl.solve_nmpc(
+                    outdoor_temp,
+                    now=compute_now,
+                    outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
+                    price_forecast=price_forecast,
+                )
+                preview_ctrl.apply_nmpc_result(plan)
                 preview_ctrl.compute(
                     outdoor_temp,
                     solar_gains=None,
@@ -481,6 +576,7 @@ class ControlEngine:
         *,
         horizon: int | None = None,
         dt: float | None = None,
+        timing: Any | None = None,
     ) -> Any:
         """Construct an MPC controller from a config mapping (may raise)."""
 
@@ -492,23 +588,23 @@ class ControlEngine:
             build_mpc_controller,
         )
 
-        preview_dt = float(
-            dt
-            if dt is not None
-            else config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
-        )
+        if timing is None:
+            if dt is not None or horizon is not None:
+                base = self._nmpc_timing(config)
+                timing = timing_from_dt_horizon(
+                    float(dt if dt is not None else base.dt_s),
+                    int(horizon if horizon is not None else base.n_fast),
+                )
+            else:
+                timing = self._nmpc_timing(config)
+        preview_dt = float(timing.dt_s)
+        preview_horizon = int(timing.n_fast)
         build_config = ControllerBuildConfig(
             model=self.model,
             heat_sources=self.heat_sources,
-            horizon=int(
-                horizon
-                if horizon is not None
-                else config.get("horizon", const.DEFAULT_HORIZON)
-            ),
+            horizon=preview_horizon,
             dt=preview_dt,
-            measurement_dt=float(
-                config.get("measurement_dt", preview_dt)
-            ),
+            measurement_dt=float(config.get("measurement_dt", preview_dt)),
             latitude=float(config.get("latitude", 0.0)),
             longitude=float(config.get("longitude", 0.0)),
             tracking_weight=float(
@@ -545,6 +641,9 @@ class ControlEngine:
                 )
             ),
             albedo=float(config.get("ground_albedo", const.DEFAULT_GROUND_ALBEDO)),
+            nmpc_period=timing.period_s,
+            nmpc_fast_substeps=timing.fast_substeps,
+            nmpc_horizon_h=timing.horizon_h,
         )
         return build_mpc_controller(build_config)
 
@@ -685,6 +784,7 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
             "power_scale": _as_float(source_cfg.get("power_scale"), 1.0),
             "emitter_time_constant": emitter_tau,
         }
+        p_gain = _as_float(source_cfg.get(const.CONF_P_GAIN), const.DEFAULT_P_GAIN)
         try:
             if source_type == const.SOURCE_TYPE_HEAT_PUMP:
                 sources.append(
@@ -741,6 +841,8 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
                 )
         except (TypeError, ValueError) as exc:
             _LOGGER.warning("Skipping invalid heat source %r: %s", source_cfg, exc)
+        else:
+            sources[-1].p_gain = p_gain
     return sources
 
 
