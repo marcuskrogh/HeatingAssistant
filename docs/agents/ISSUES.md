@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | In Review | — | docs/agents/PLAN-heating-assistant-icon.md | `/review-fix SWD-408` |
+| SWD-408 | Task | [Tweak] Proper Heating Assistant icon for App and HA integration | Done | — | docs/agents/PLAN-heating-assistant-icon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/625 |
 | SWD-409 | Sub-task | Brand mark SVG/PNGs + App and integration wiring | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-410 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-408 | docs/agents/PLAN-heating-assistant-icon.md | — |
 | SWD-411 | Task | [Iterate] Heat and cool on the fast loop when comfort bounds are already violated | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/626 (`ae030d9`) |
@@ -136,6 +136,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-20 — `/ship` SWD-408: review-fix CLEAN (focused) then closeout; CalVer 2026.08.23 after merging main; PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next Done.
+- 2026-08-20 — `/review-fix` SWD-408 CLEAN (focused): 1 blocker / 6 should-fix (CalVer behind main; brands README; font fallbacks; favicon size + cache-bust; Python `copytree brand/`; PLAN logo 500×200). Fix-forward on PR #625. Next `/ship SWD-408`.
 
 - 2026-08-20 — `/implement` SWD-408 In Review: brand SVG/PNGs, Supervisor icon/logo, HA `brand/` folder, Ingress favicon; CalVer 2026.08.21. Fast suite 928 passed, 88 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/625. Next `/review-fix SWD-408`.
 - 2026-08-20 — `/define` SWD-408: PLAN `docs/agents/PLAN-heating-assistant-icon.md` (tweak / delta-fast). Shared house + settling-curve mark; Supervisor icon/logo; HA 2026.3+ `brand/` folder; brands lift copy. Sub-tasks SWD-409–410. Next `/implement SWD-408`.

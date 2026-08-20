@@ -106,4 +106,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-408` — Focused review then fix-forward on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/625
