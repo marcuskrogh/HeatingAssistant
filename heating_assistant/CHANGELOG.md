@@ -10,7 +10,8 @@ must be the exact calendar version on its own line.
   stay on the same Start clock, so they meet at every planner slot. While
   a new plan is being computed, heaters keep following the previous plan
   until the next 15-minute tick, and the compute KPI cards show a loading
-  animation until the new values arrive.
+  animation until the new values arrive. Room Forecast and Planned Power
+  refresh when that plan lands, even if heaters wait for the next tick.
 
 # 2026.08.26
 

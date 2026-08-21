@@ -109,4 +109,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-426` — Review and auto-fix per Workflow binding
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/631
