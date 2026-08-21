@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sandbox: compute KPI loading overlay</title>
+  <title>Sandbox: compute timer loading overlay</title>
   <style>
     html, body {
       margin: 0;
@@ -12,10 +12,10 @@
     }
     .page {
       padding: 20px 24px 32px;
-      max-width: 1100px;
+      max-width: 1180px;
     }
     h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
-    .lead { color: #9aa0a8; font-size: 13px; margin: 0 0 20px; max-width: 72ch; }
+    .lead { color: #9aa0a8; font-size: 13px; margin: 0 0 20px; max-width: 78ch; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .panel-label {
       font-size: 10px;
@@ -24,17 +24,17 @@
       color: #6b7280;
       margin: 0 0 8px;
     }
-    ha-kpi-host { display: block; min-height: 140px; }
+    ha-kpi-host { display: block; min-height: 220px; }
     @media (max-width: 800px) { .row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="page">
-    <h1>Compute KPI loading overlay</h1>
+    <h1>Compute timer loading overlay</h1>
     <p class="lead" id="lead">
-      Room-view compute cards (POWER, ENERGY PRICE, SOLAR GAIN, HEAT LOSS, MODEL FIT)
-      on the production industrial theme. Left is the shipped overlay.
-      Right is the sandbox candidate.
+      Overview CONTROLLER KPIS: live values (HEATING POWER, ENERGY PRICE) plus
+      NEXT CONTROL and NEXT NMPC rings. Left is shipped (KPI shimmer, timers
+      idle). Right is the candidate (timers load per flag; KPIs stay live).
     </p>
     <div class="row">
       <section>
