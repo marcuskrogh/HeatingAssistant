@@ -1982,6 +1982,7 @@ class HeatingMPCController:
         self._linearised_predictions: List[Dict[str, float]] = []
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
+        self._wind_forecast: List[float] = []
         self._heating_schedule: List[Dict[str, float]] = []
         self._price_forecast: List[float] = []
         # Unconstrained MPC optimum per source from the last compute(), captured
@@ -2449,6 +2450,14 @@ class HeatingMPCController:
             solar_seq = solar_seq + [dict(last) for _ in range(n - len(solar_seq))]
         return [dict(step) for step in solar_seq[:n]]
 
+    def _pad_wind_forecast(self, n: int) -> Optional[List[float]]:
+        wind_seq = list(getattr(self, "_wind_forecast", []) or [])
+        if not wind_seq:
+            return None
+        if len(wind_seq) < n:
+            wind_seq = wind_seq + [float(wind_seq[-1])] * (n - len(wind_seq))
+        return [float(v) for v in wind_seq[:n]]
+
     def _heating_schedule_from_u(
         self,
         U_abs: np.ndarray,
@@ -2506,7 +2515,9 @@ class HeatingMPCController:
         U_abs = self._forecast_U(n)
         solar_seq = self._pad_solar_forecast(n)
         if solar_seq is not None:
-            self._publish_plan_rollout(U_abs, outdoor_seq, solar_seq)
+            self._publish_plan_rollout(
+                U_abs, outdoor_seq, solar_seq, wind_seq=self._pad_wind_forecast(n),
+            )
             return True
         self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
         if T_ref is not None and T_ref.shape[0] > 0:
@@ -2884,6 +2895,7 @@ class HeatingMPCController:
         self._outdoor_forecast = list(outdoor_seq)
         self._solar_forecast = [dict(s) for s in solar_seq]
         self._price_forecast = list(price_forecast) if price_forecast is not None else []
+        self._wind_forecast = []
 
         # ── Current measurement y = room temperatures ────────────────────
         room_list = self._system._room_list
@@ -2944,6 +2956,7 @@ class HeatingMPCController:
             finite = [w for w in wind_seq if np.isfinite(w)]
             if finite:
                 self._control_system.set_wind_speed(float(np.mean(finite)))
+            self._wind_forecast = list(wind_seq)
 
         # ── Per-step input clamps (e.g. identification experiment) ───────────
         u_min_seq: Optional[np.ndarray] = None
@@ -2991,6 +3004,8 @@ class HeatingMPCController:
                     continue
                 u_abs[j] = 0.0
 
+        with self._nmpc_lock:
+            plan_identity = self._nmpc_U_fast
         U_abs = self._forecast_U(N)
         if disabled_sources:
             for j, src in enumerate(self._sources):
@@ -3034,12 +3049,19 @@ class HeatingMPCController:
             U_abs, outdoor_seq, solar_seq, wind_seq=wind_seq,
         )
         # The NLP worker may install a path while this tick rolled out U=0.
-        # Refresh only then so disabled-source zeros in U_abs are not replaced
-        # by the unmasked plan.
-        if float(np.max(np.abs(U_abs))) < 1e-9:
+        # Do not refresh when zeros come from disabled_sources — that would
+        # republish the unmasked remaining plan as Planned Power.
+        disabled = bool(disabled_sources)
+        if float(np.max(np.abs(U_abs))) < 1e-9 and not disabled:
             self.rebuild_forecast_from_plan()
+        plan_replaced = False
         with self._nmpc_lock:
-            self._nmpc_k += 1
+            if self._nmpc_U_fast is plan_identity:
+                self._nmpc_k += 1
+            else:
+                plan_replaced = True
+        if plan_replaced and not disabled:
+            self.rebuild_forecast_from_plan()
 
         return actions
 

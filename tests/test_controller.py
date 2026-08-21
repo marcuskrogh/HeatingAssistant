@@ -1677,6 +1677,19 @@ class TestDisabledSources:
         assert actions["lr_heater"] == pytest.approx(0.0)
         assert actions["br_heater"] == pytest.approx(0.0)
 
+    def test_all_disabled_heating_schedule_stays_zero_with_plan(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        _seed_path(ctrl)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        ctrl.compute(
+            outdoor_temp=0.0, now=now,
+            disabled_sources={"lr_heater", "br_heater"},
+        )
+        for step in ctrl.heating_schedule:
+            assert step.get("living_room", 0.0) == pytest.approx(0.0)
+            assert step.get("bedroom", 0.0) == pytest.approx(0.0)
+
     def test_mpc_actions_holds_unzeroed_optimum_for_disabled_source(self):
         # The MPC keeps solving for a disabled source in the background; the
         # returned ``actions`` are zeroed for it, but ``mpc_actions`` exposes

@@ -161,6 +161,72 @@ def test_compute_publishes_remaining_u_then_advances_plan_index():
     remaining = ctrl._forecast_U(n_fast)
     assert np.allclose(remaining[0], U_fast[1])
 
+    expected = ctrl._compute_nonlinear_predictions(
+        U_fast[:n_fast],
+        list(ctrl._outdoor_forecast),
+        [dict(step) for step in ctrl._solar_forecast],
+        ctrl._system._room_list,
+        ctrl._system._n_rooms,
+        wind_seq=list(ctrl._wind_forecast) or None,
+    )
+    published_t = np.array(
+        [float(step["living_room"]) for step in ctrl.predictions], dtype=float
+    )
+    expected_t = np.array(
+        [float(step["living_room"]) for step in expected], dtype=float
+    )
+    assert float(np.max(np.abs(published_t - expected_t))) < 0.05
+
+
+def test_rebuild_without_solar_uses_shifted_t_ref():
+    ctrl = _ctrl()
+    U = _distinct_U(ctrl)
+    n_fast = ctrl.horizon
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(-1, 1)
+    ctrl.set_accepted_path(U, t_ref)
+    ctrl._outdoor_forecast = [5.0] * n_fast
+    ctrl._solar_forecast = []
+    start = 3
+    ctrl._nmpc_k = start
+    assert ctrl.rebuild_forecast_from_plan() is True
+    published = [float(step["living_room"]) for step in ctrl.predictions]
+    last = n_fast - 1
+    expected = [float(t_ref[min(start + k, last), 0]) for k in range(n_fast)]
+    assert published == pytest.approx(expected)
+    watts = [float(step["living_room"]) for step in ctrl.heating_schedule]
+    remaining = ctrl._forecast_U(n_fast)
+    first = ctrl._system.display_heating_powers(remaining[0], 5.0)["living_room"]
+    assert watts[0] == pytest.approx(first, abs=1.0)
+
+
+def test_compute_keeps_new_plan_index_when_apply_lands_during_roll():
+    ctrl = _ctrl()
+    U = _distinct_U(ctrl)
+    _install_plan(ctrl, U)
+    n_fast = ctrl.horizon
+    m = ctrl.timing.m
+    new_U = U + 0.35
+    new_T = np.full((n_fast, 1), 21.0)
+    orig = ctrl._publish_plan_rollout
+    fired = {"n": 0}
+
+    def inject(*args, **kwargs):
+        if fired["n"] == 0:
+            fired["n"] += 1
+            ctrl.set_accepted_path(new_U, new_T)
+        return orig(*args, **kwargs)
+
+    ctrl._publish_plan_rollout = inject  # type: ignore[method-assign]
+    ctrl.compute(
+        outdoor_temp=5.0,
+        solar_gains={"living_room": 0.0},
+        now=_NOW,
+        outdoor_forecast=[5.0] * n_fast,
+    )
+    assert ctrl._nmpc_k == 0
+    remaining = ctrl._forecast_U(n_fast)
+    assert np.allclose(remaining[0], np.repeat(new_U, m, axis=0)[0])
+
 
 def test_rebuild_forecast_pads_short_outdoor_on_remaining_u():
     ctrl = _ctrl()
