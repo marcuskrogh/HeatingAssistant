@@ -81,11 +81,16 @@
     const pack = await (await fetch('/inspect/payloads.json')).json();
     const m = pack.metrics;
     const o = pack.ocp_metrics || {};
-    const ocp = o.max_abs_dT_K == null ? "" : `  vsOCP=${Number(o.max_abs_dT_K).toFixed(3)} K`;
+    const vsResim = o.resim_max_abs_dT_K == null
+      ? ""
+      : `  vsResim=${Number(o.resim_max_abs_dT_K).toFixed(4)} K`;
+    const vsFrozen = o.max_abs_dT_K == null
+      ? ""
+      : `  vsFrozenTref=${Number(o.max_abs_dT_K).toFixed(3)} K`;
     document.getElementById('metrics').textContent =
       `k=${pack.nmpc_k}  max|ΔT|=${m.max_abs_dT_K.toFixed(3)} K  rms|ΔT|=${m.rms_dT_K.toFixed(3)} K  `
       + `max|ΔP|=${(m.max_abs_dP_W / 1000).toFixed(2)} kW  Urem=${pack.max_abs_U_remaining.toFixed(3)}`
-      + ocp;
+      + vsResim + vsFrozen;
 
     const previewOpts = { forecastOnly: true };
     const previewRoot = document.getElementById('preview-charts');

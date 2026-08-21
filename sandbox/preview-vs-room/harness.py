@@ -36,6 +36,7 @@ from heatingassistant.engine.const import (  # noqa: E402
 )
 from heatingassistant.engine.control_loop import ControlEngine  # noqa: E402
 from heatingassistant.engine.naming import room_slug  # noqa: E402
+from heatingassistant.engine.nmpc_ocp import roll_fast_air_path  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 INSPECT = HERE / "inspect"
@@ -164,6 +165,22 @@ def _payload_metrics(room_payload: dict[str, Any], preview_payload: dict[str, An
         "p_room_head_W": p_room[:8].tolist(),
         "p_preview_head_W": p_prev[:8].tolist(),
     }
+
+
+def _remaining_u(ctrl: Any, n_fast: int, k: int) -> np.ndarray:
+    """Remaining accepted U* as of plan index k (does not mutate the controller)."""
+    n_u = int(ctrl._system.nu)
+    U = np.asarray(ctrl._nmpc_U_fast, dtype=float)
+    if U.ndim == 1:
+        U = U.reshape(-1, n_u)
+    start = min(max(int(k), 0), int(U.shape[0]))
+    if start >= U.shape[0]:
+        return np.tile(U[-1:], (n_fast, 1))
+    tail = U[start:]
+    if tail.shape[0] >= n_fast:
+        return tail[:n_fast].copy()
+    pad = np.tile(tail[-1:], (n_fast - tail.shape[0], 1))
+    return np.vstack([tail, pad])
 
 
 def _source_power(engine: ControlEngine) -> float:
@@ -329,6 +346,29 @@ def run(*, ticks_into_plan: int = TICKS_INTO_PLAN) -> dict[str, Any]:
         dtype=float,
     )
     dT_ocp = t_room_plot - t_ocp_rem if n_cmp else np.array([])
+    plant = ctrl._control_system
+    outdoor_now = list(ctrl._outdoor_forecast)[:n_fast]
+    solar_now = [dict(s) for s in ctrl._solar_forecast][:n_fast]
+    if not solar_now:
+        solar_now = [{ROOM: 0.0} for _ in outdoor_now]
+    d_now = []
+    n_d = min(len(outdoor_now), n_fast)
+    for i in range(n_d):
+        s = solar_now[i] if i < len(solar_now) else solar_now[-1]
+        d_now.append(plant.disturbance_vector(float(outdoor_now[i]), s))
+    U_rem_now = _remaining_u(ctrl, n_d, k_pub)
+    air_resim = roll_fast_air_path(
+        plant,
+        ctrl._ekf.x_hat,
+        U_rem_now,
+        d_now,
+        dt_s=float(ctrl._timing.dt_s),
+        n_int=int(ctrl._n_int_steps),
+        n_rooms=int(ctrl._system._n_rooms),
+    )
+    t_resim = air_resim[:n_cmp, 0]
+    n_r = int(min(t_room_plot.size, t_resim.size))
+    dT_resim = t_room_plot[:n_r] - t_resim[:n_r] if n_r else np.array([])
     ocp_metrics = {
         "k_pub": k_pub,
         "n": n_cmp,
@@ -336,6 +376,8 @@ def run(*, ticks_into_plan: int = TICKS_INTO_PLAN) -> dict[str, Any]:
         "rms_dT_K": float(np.sqrt(np.mean(dT_ocp * dT_ocp))) if n_cmp else 0.0,
         "t_ocp_head": t_ocp_rem[:8].tolist(),
         "t_room_head": t_room_plot[:8].tolist(),
+        "resim_max_abs_dT_K": float(np.max(np.abs(dT_resim))) if n_r else 0.0,
+        "resim_rms_dT_K": float(np.sqrt(np.mean(dT_resim * dT_resim))) if n_r else 0.0,
     }
 
     preview = engine.preview_tuning_forecast(
@@ -434,7 +476,8 @@ def main() -> int:
         f"tag={args.tag} k={pack['nmpc_k']} solve={pack['solve_s']:.1f}s "
         f"max|dT|={m['max_abs_dT_K']:.3f}K rms|dT|={m['rms_dT_K']:.3f}K "
         f"max|dP|={m['max_abs_dP_W']:.1f}W Urem={pack['max_abs_U_remaining']:.3f} "
-        f"vsOCP={pack.get('ocp_metrics', {}).get('max_abs_dT_K', float('nan')):.4f}K"
+        f"vsResim={pack.get('ocp_metrics', {}).get('resim_max_abs_dT_K', float('nan')):.4e}K "
+        f"vsFrozenTref={pack.get('ocp_metrics', {}).get('max_abs_dT_K', float('nan')):.4f}K"
     )
     print(f"wrote {payload_path}")
     print(f"wrote {tagged_payload}")
