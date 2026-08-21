@@ -28,9 +28,9 @@ visual
   - **Neighbours** — production `build_app_forecast_payload`, Chart.js 4.4.7,
     `nowLinePlugin`, forecast-only Tuning charts vs history+forecast room
     charts, industrial dark theme and room selector.
-  - **Path** — Tuning preview re-solved a throwaway NLP; room view published
-    remaining `U*` from `_nmpc_k`. After the candidate, matching draft
-    weights reuse `forecast_snapshot()`.
+  - **Path** — Room view publishes remaining OCP `T_ref` (implicit-Euler
+    `n_int` inside each fast interval). Matching Tuning sliders reuse that
+    snapshot; unapplied slider changes still re-solve.
   - **Baseline** — production before the short-circuit (iteration 1).
 - How reproduced: wrap `ControlEngine`; no production edits in the harness.
   Iteration 2 measures the promoted short-circuit in production.
@@ -48,6 +48,8 @@ visual
 
 ## Promote map
 - Production targets:
+  - `heatingassistant/engine/controller/facade.py`
+    (Forecast = shifted NMPC `T_ref`; Planned Power = remaining `U*`).
   - `heatingassistant/engine/control_loop.py`
     (`preview_tuning_forecast` reuses the live snapshot when draft weights
     and timing match the installed controller).
@@ -58,7 +60,20 @@ visual
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
 | 1 | initial extract: live remaining-`U*` vs Tuning re-solve | `inspect/01_*` | **delta:** same sliders must plot the live remaining plan |
-| 2 | matching-params preview returns `forecast_snapshot()` | `inspect/02_*` | **accept** — max \|ΔT\| 0.000 K, max \|ΔP\| 0 W |
+| 2 | matching-params preview returns `forecast_snapshot()` | `inspect/02_*` | overlay — does not by itself show the optimiser air path |
+| 3 | room Forecast is remaining OCP `T_ref` (n_int substeps), not EKF remaining-U* resim | `inspect/03_*` | **accept** — vs OCP max \|ΔT\| **0.000 K**; matching preview still 0.000 K |
+
+### Iteration 3 numbers (optimiser air path)
+
+| Series | max \|ΔT\| [K] | rms ΔT [K] |
+|--------|----------------|------------|
+| room view vs remaining OCP `T_ref` | 0.000 | 0.000 |
+| room view vs matching Tuning preview | 0.000 | 0.000 |
+
+Room-view Forecast is the NMPC air path (`MeanOcp.roll`, implicit Euler
+`n_int` inside each 15 min tick), shifted to the current plan index.
+Planned Power is still leftover `U*` with two-hour holds. That is the
+solution the optimiser saw, not a later roll from the live estimator.
 
 ### Iteration 1 numbers (production split)
 
@@ -82,7 +97,7 @@ are the same series.
 
 ## Role in pipeline
 Promotion input for `/implement`. Supportive isolation — not production
-source. This session also promoted the accepted short-circuit.
+source. This session also promoted the OCP air-path Forecast.
 
 ## Tracker
 - Task: [SWD-431](https://marcusknielsen.atlassian.net/browse/SWD-431)

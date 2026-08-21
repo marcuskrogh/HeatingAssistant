@@ -314,6 +314,30 @@ def run(*, ticks_into_plan: int = TICKS_INTO_PLAN) -> dict[str, Any]:
         engine, snap_room, outdoor=od_now, price=pr_now, now=wall_now
     )
 
+    t_ocp = np.asarray(plan.get("t_ref"), dtype=float)
+    if t_ocp.ndim == 1:
+        t_ocp = t_ocp.reshape(-1, 1)
+    k_pub = max(int(ctrl._nmpc_k) - 1, 0)
+    last = int(t_ocp.shape[0]) - 1
+    t_room_plot = np.array(
+        [float(step[ROOM]) for step in snap_room.get("predictions", [])],
+        dtype=float,
+    )
+    n_cmp = int(t_room_plot.size)
+    t_ocp_rem = np.array(
+        [float(t_ocp[min(k_pub + i, last), 0]) for i in range(n_cmp)],
+        dtype=float,
+    )
+    dT_ocp = t_room_plot - t_ocp_rem if n_cmp else np.array([])
+    ocp_metrics = {
+        "k_pub": k_pub,
+        "n": n_cmp,
+        "max_abs_dT_K": float(np.max(np.abs(dT_ocp))) if n_cmp else 0.0,
+        "rms_dT_K": float(np.sqrt(np.mean(dT_ocp * dT_ocp))) if n_cmp else 0.0,
+        "t_ocp_head": t_ocp_rem[:8].tolist(),
+        "t_room_head": t_room_plot[:8].tolist(),
+    }
+
     preview = engine.preview_tuning_forecast(
         _preview_overrides(),
         {ROOM: t_meas},
@@ -347,6 +371,7 @@ def run(*, ticks_into_plan: int = TICKS_INTO_PLAN) -> dict[str, Any]:
         "filtered_now": float(ctrl.filtered_temperatures[ROOM]),
         "measured_now": float(t_meas),
         "metrics": metrics,
+        "ocp_metrics": ocp_metrics,
         "room": room_payload,
         "preview": preview_payload,
         "history": {
@@ -378,8 +403,11 @@ def main() -> int:
     INSPECT.mkdir(parents=True, exist_ok=True)
     pack = run(ticks_into_plan=int(args.ticks))
     payload_path = INSPECT / "payloads.json"
+    tagged_payload = INSPECT / f"{args.tag}_payloads.json"
     metrics_path = INSPECT / f"{args.tag}_metrics.json"
-    payload_path.write_text(json.dumps(pack, indent=2), encoding="utf-8")
+    blob = json.dumps(pack, indent=2)
+    payload_path.write_text(blob, encoding="utf-8")
+    tagged_payload.write_text(blob, encoding="utf-8")
     metrics_path.write_text(
         json.dumps(
             {
@@ -392,6 +420,7 @@ def main() -> int:
                 "u_star": pack["u_star"],
                 "u_remaining_head": pack["u_remaining_head"],
                 "metrics": pack["metrics"],
+                "ocp_metrics": pack.get("ocp_metrics"),
                 "apply_t_head": pack["apply_t_head"],
                 "room_t_head": pack["room_t_head"],
                 "preview_t_head": pack["preview_t_head"],
@@ -404,9 +433,11 @@ def main() -> int:
     print(
         f"tag={args.tag} k={pack['nmpc_k']} solve={pack['solve_s']:.1f}s "
         f"max|dT|={m['max_abs_dT_K']:.3f}K rms|dT|={m['rms_dT_K']:.3f}K "
-        f"max|dP|={m['max_abs_dP_W']:.1f}W Urem={pack['max_abs_U_remaining']:.3f}"
+        f"max|dP|={m['max_abs_dP_W']:.1f}W Urem={pack['max_abs_U_remaining']:.3f} "
+        f"vsOCP={pack.get('ocp_metrics', {}).get('max_abs_dT_K', float('nan')):.4f}K"
     )
     print(f"wrote {payload_path}")
+    print(f"wrote {tagged_payload}")
     print(f"wrote {metrics_path}")
     return 0
 

@@ -6,9 +6,10 @@ must be the exact calendar version on its own line.
 
 # 2026.08.28
 
-- Controller Tuning preview with the same weights as the live controller now
-  shows the same Forecast and Planned Power as the room view, instead of a
-  second planner solve that could disagree by a few degrees.
+- Room-view Forecast now shows the optimiser's air-temperature path for
+  the accepted plan (the same implicit-Euler substeps the planner uses),
+  instead of a later re-simulation from the live estimator. Controller
+  Tuning preview with matching weights uses that same series.
 
 # 2026.08.27
 

@@ -9,7 +9,6 @@ import pytest
 
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater
-from heatingassistant.engine.integrator import implicit_euler_substeps
 from heatingassistant.engine.thermal_model import HouseModel, Room
 
 _NOW = datetime(2026, 8, 21, 6, 0, tzinfo=timezone.utc)
@@ -51,32 +50,22 @@ def _install_plan(ctrl: HeatingMPCController, U: np.ndarray) -> np.ndarray:
     )
 
 
-def _roll_state(
-    ctrl: HeatingMPCController,
-    U_fast: np.ndarray,
-    n_steps: int,
-) -> np.ndarray:
-    x = ctrl._ekf.x_hat.copy()
-    p = np.array([], dtype=float)
-    outdoor = 5.0
-    solar = {"living_room": 0.0}
-    for k in range(n_steps):
-        u_k = U_fast[k]
-        d_k = ctrl._control_system.disturbance_vector(outdoor, solar)
-        rhs = lambda xx, u=u_k, d=d_k: ctrl._system.f(xx, u, d, p, 0.0)
-        jac = lambda xx, u=u_k, d=d_k: ctrl._system.dfdx(xx, u, d, p, 0.0)
-        x = implicit_euler_substeps(rhs, jac, x, ctrl._dt, ctrl._n_int_steps)
-    return x
-
-
-def test_apply_resim_matches_full_remaining_u_from_x0():
+def test_apply_publishes_ocp_air_path_not_ekf_reroll():
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
-    temps = _install_plan(ctrl, U)
     n_fast = ctrl.horizon
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(-1, 1)
+    ctrl.set_accepted_path(U, t_ref)
+    ctrl._outdoor_forecast = [5.0] * n_fast
+    ctrl._solar_forecast = [{"living_room": 0.0} for _ in range(n_fast)]
+    assert ctrl.rebuild_forecast_from_plan() is True
+    temps = np.array(
+        [float(step["living_room"]) for step in ctrl.predictions], dtype=float
+    )
     U_rem = ctrl._forecast_U(n_fast)
     U_fast = np.repeat(U, ctrl.timing.m, axis=0)
     assert np.allclose(U_rem, U_fast[:n_fast])
+    assert temps == pytest.approx(t_ref.ravel().tolist())
     reroll = ctrl._compute_nonlinear_predictions(
         U_rem,
         [5.0] * n_fast,
@@ -85,7 +74,7 @@ def test_apply_resim_matches_full_remaining_u_from_x0():
         ctrl._system._n_rooms,
     )
     reroll_t = np.array([float(step["living_room"]) for step in reroll])
-    assert float(np.max(np.abs(reroll_t - temps))) < 0.05
+    assert float(np.max(np.abs(reroll_t - temps))) > 0.05
 
 
 def test_remaining_u_is_two_hour_zoh_shifted_by_plan_index():
@@ -108,37 +97,25 @@ def test_remaining_u_is_two_hour_zoh_shifted_by_plan_index():
     assert np.allclose(remaining[first_hold : first_hold + m], U[1 + start // m])
 
 
-def test_remaining_resim_matches_t_ref_tail_when_state_followed_the_plan():
+def test_remaining_forecast_is_shifted_ocp_air_path():
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
-    t_full = _install_plan(ctrl, U)
     n_fast = ctrl.horizon
-    U_fast = np.repeat(U, ctrl.timing.m, axis=0)
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(-1, 1)
+    ctrl.set_accepted_path(U, t_ref)
+    ctrl._outdoor_forecast = [5.0] * n_fast
+    ctrl._solar_forecast = [{"living_room": 0.0} for _ in range(n_fast)]
     start = 3
-    x3 = _roll_state(ctrl, U_fast, start)
-    _, P = ctrl.ekf_state
-    assert ctrl.restore_ekf_state(x3, P) is True
     ctrl._nmpc_k = start
     assert ctrl.rebuild_forecast_from_plan() is True
     t_rem = np.array(
         [float(step["living_room"]) for step in ctrl.predictions], dtype=float
     )
-    n_overlap = n_fast - start
-    err = float(np.max(np.abs(t_rem[:n_overlap] - t_full[start:])))
-    assert err < 0.05
-
-    ctrl._nmpc_k = 0
-    U_unshifted = np.asarray(ctrl._nmpc_U_fast[:n_fast], dtype=float)
-    t_wrong = ctrl._compute_nonlinear_predictions(
-        U_unshifted,
-        [5.0] * n_fast,
-        [{"living_room": 0.0} for _ in range(n_fast)],
-        ctrl._system._room_list,
-        ctrl._system._n_rooms,
+    last = n_fast - 1
+    expected = np.array(
+        [float(t_ref[min(start + k, last), 0]) for k in range(n_fast)]
     )
-    t_wrong_v = np.array([float(step["living_room"]) for step in t_wrong])
-    wrong_err = float(np.max(np.abs(t_wrong_v[:n_overlap] - t_full[start:])))
-    assert wrong_err > err + 0.1
+    assert t_rem == pytest.approx(expected)
 
 
 def test_compute_publishes_remaining_u_then_advances_plan_index():
@@ -161,21 +138,10 @@ def test_compute_publishes_remaining_u_then_advances_plan_index():
     remaining = ctrl._forecast_U(n_fast)
     assert np.allclose(remaining[0], U_fast[1])
 
-    expected = ctrl._compute_nonlinear_predictions(
-        U_fast[:n_fast],
-        list(ctrl._outdoor_forecast),
-        [dict(step) for step in ctrl._solar_forecast],
-        ctrl._system._room_list,
-        ctrl._system._n_rooms,
-        wind_seq=list(ctrl._wind_forecast) or None,
-    )
     published_t = np.array(
         [float(step["living_room"]) for step in ctrl.predictions], dtype=float
     )
-    expected_t = np.array(
-        [float(step["living_room"]) for step in expected], dtype=float
-    )
-    assert float(np.max(np.abs(published_t - expected_t))) < 0.05
+    assert published_t == pytest.approx(np.full(n_fast, 22.0))
 
 
 def test_rebuild_without_solar_uses_shifted_t_ref():
@@ -240,3 +206,45 @@ def test_rebuild_forecast_pads_short_outdoor_on_remaining_u():
     watts = [float(step["living_room"]) for step in ctrl.heating_schedule]
     assert max(abs(w) for w in watts) > 1.0
     assert np.ptp(watts) < 1.0
+
+
+def test_forecast_matches_mean_ocp_air_path_after_ticks() -> None:
+    ctrl = _ctrl()
+    n_fast = ctrl.horizon
+    outdoor = [5.0] * n_fast
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=5.0,
+        now=_NOW,
+        outdoor_forecast=outdoor,
+        solar_gains={"living_room": 0.0},
+    )
+    if not plan.get("accepted"):
+        pytest.skip("NMPC did not accept a plan")
+    t_ocp = np.asarray(plan["t_ref"], dtype=float).reshape(-1, ctrl._system._n_rooms)
+    assert t_ocp.shape[0] == n_fast
+    ctrl._outdoor_forecast = list(outdoor)
+    ctrl._solar_forecast = [{"living_room": 0.0} for _ in range(n_fast)]
+    assert ctrl.apply_nmpc_result(plan, now=_NOW.timestamp()) is True
+    plotted = np.array(
+        [float(step["living_room"]) for step in ctrl.predictions], dtype=float
+    )
+    assert float(np.max(np.abs(plotted - t_ocp[:, 0]))) < 1e-9
+
+    ticks = 3
+    for i in range(ticks):
+        ctrl.compute(
+            outdoor_temp=5.0,
+            solar_gains={"living_room": 0.0},
+            now=_NOW,
+            outdoor_forecast=outdoor,
+        )
+    plotted = np.array(
+        [float(step["living_room"]) for step in ctrl.predictions], dtype=float
+    )
+    start = ticks - 1
+    last = n_fast - 1
+    expected = np.array(
+        [float(t_ocp[min(start + k, last), 0]) for k in range(n_fast)]
+    )
+    assert plotted == pytest.approx(expected)
+    assert ctrl._nmpc_k == ticks

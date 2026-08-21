@@ -2523,27 +2523,60 @@ class HeatingMPCController:
         solar_seq: List[Dict[str, float]],
         wind_seq: Optional[List[float]] = None,
     ) -> None:
-        """Roll remaining U* from the current EKF and publish T / Planned Power."""
+        """Publish remaining U* watts and the optimiser air path.
+
+        Temperature is ``T_ref`` from the NMPC roll (same implicit-Euler
+        substeps the NLP used). Fall back to a remaining-U* plant roll only
+        when no air path is installed.
+        """
+        n = min(int(self._horizon), len(U_abs), len(outdoor_seq))
+        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
+        preds = self._shift_t_ref_predictions(n)
+        if preds is not None:
+            self._predictions = preds
+            self._linearised_predictions = [dict(step) for step in preds]
+            return
         room_list = self._system._room_list
         n_rooms = self._system._n_rooms
         self._predictions = self._compute_nonlinear_predictions(
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
         )
         self._linearised_predictions = [dict(step) for step in self._predictions]
-        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
+
+    def _shift_t_ref_predictions(self, n: int) -> Optional[List[Dict[str, float]]]:
+        """Remaining optimiser air path ``T_ref[k:]``, padded to ``n`` steps."""
+        with self._nmpc_lock:
+            T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
+            k0 = int(self._nmpc_k)
+        if T_ref is None or T_ref.size == 0:
+            return None
+        if T_ref.ndim == 1:
+            T_ref = T_ref.reshape(-1, 1)
+        room_list = self._system._room_list
+        n_rooms = min(int(T_ref.shape[1]), len(room_list))
+        last = int(T_ref.shape[0]) - 1
+        if last < 0:
+            return None
+        start = min(max(k0, 0), last)
+        return [
+            {
+                name: float(T_ref[min(start + k, last), i])
+                for i, name in enumerate(room_list[:n_rooms])
+            }
+            for k in range(n)
+        ]
 
     def rebuild_forecast_from_plan(self) -> bool:
-        """Resimulate the remaining accepted U* from the current EKF state.
+        """Publish remaining U* watts and the optimiser air path.
 
-        Room view may re-roll leftover two-hour holds. It must not replay U*
-        from slow index 0 against a later state and a solar series from now.
-        Display power uses one outdoor sample per leftover hold so COP does
-        not invent 15-minute watt steps.
+        Forecast is the NMPC ``T_ref`` (implicit-Euler substeps inside each
+        fast interval), shifted to the current plan index. Planned Power is
+        leftover ``U*`` with one outdoor sample per two-hour hold. Do not
+        replace that air path with a later EKF roll and a solar series from
+        now — that is not the solution the optimiser saw.
         """
         with self._nmpc_lock:
             has_plan = self._nmpc_U_fast is not None
-            T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
-            k0 = int(self._nmpc_k)
         if not has_plan:
             return False
         n = int(self._horizon)
@@ -2551,26 +2584,10 @@ class HeatingMPCController:
         if outdoor_seq is None:
             return False
         U_abs = self._forecast_U(n)
-        solar_seq = self._pad_solar_forecast(n)
-        if solar_seq is not None:
-            self._publish_plan_rollout(
-                U_abs, outdoor_seq, solar_seq, wind_seq=self._pad_wind_forecast(n),
-            )
-            return True
-        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
-        if T_ref is not None and T_ref.shape[0] > 0:
-            room_list = self._system._room_list
-            n_rooms = min(int(T_ref.shape[1]), len(room_list))
-            last = T_ref.shape[0] - 1
-            start = min(max(k0, 0), last)
-            self._predictions = [
-                {
-                    name: float(T_ref[min(start + k, last), i])
-                    for i, name in enumerate(room_list[:n_rooms])
-                }
-                for k in range(n)
-            ]
-            self._linearised_predictions = [dict(step) for step in self._predictions]
+        solar_seq = self._pad_solar_forecast(n) or []
+        self._publish_plan_rollout(
+            U_abs, outdoor_seq, solar_seq, wind_seq=self._pad_wind_forecast(n),
+        )
         return True
 
     def _comfort_bounds_fast(
@@ -3278,24 +3295,28 @@ class HeatingMPCController:
         predictions = []
         x_curr = self._ekf.x_hat.copy()
         p = np.array([], dtype=float)
+        plant = self._control_system
 
-        wind_restore = self._system._wind_speed
+        wind_restore = plant._wind_speed
 
         N = len(outdoor_seq)
         try:
             for k in range(N):
                 u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
                 outdoor_temp = outdoor_seq[k]
-                solar_gains = solar_seq[k] if k < len(solar_seq) else solar_seq[-1]
+                if k < len(solar_seq):
+                    solar_gains = solar_seq[k]
+                elif solar_seq:
+                    solar_gains = solar_seq[-1]
+                else:
+                    solar_gains = {}
                 if wind_seq is not None and k < len(wind_seq):
-                    self._system.set_wind_speed(wind_seq[k])
+                    plant.set_wind_speed(wind_seq[k])
 
-                d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
+                d_k = plant.disturbance_vector(outdoor_temp, solar_gains)
 
-                # Simulate one step forward using the nonlinear model
-                # Use default arguments to capture current values in closures
-                rhs = lambda x, u=u_k, d=d_k: self._system.f(x, u, d, p, 0.0)
-                jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
+                rhs = lambda x, u=u_k, d=d_k: plant.f(x, u, d, p, 0.0)
+                jacobian = lambda x, u=u_k, d=d_k: plant.dfdx(x, u, d, p, 0.0)
 
                 x_next = implicit_euler_substeps(
                     rhs, jacobian, x_curr, self._dt, self._n_int_steps
@@ -3309,6 +3330,6 @@ class HeatingMPCController:
 
                 x_curr = x_next
         finally:
-            self._system.set_wind_speed(wind_restore)
+            plant.set_wind_speed(wind_restore)
 
         return predictions

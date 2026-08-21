@@ -153,7 +153,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-21 — `/sandbox`+implement SWD-431: matching-params Tuning preview reuses the live remaining-plan snapshot (max \|ΔT\| 3.09 K → 0.000 K). HA-format inspect `sandbox/preview-vs-room/inspect/02_*`. CalVer 2026.08.28. PR https://github.com/marcuskrogh/HeatingAssistant/pull/633. Next `/review-fix SWD-431`.
+- 2026-08-21 — `/sandbox`+implement SWD-431: room-view Forecast is remaining OCP `T_ref` (implicit-Euler `n_int`), vs OCP 0.000 K. Matching Tuning preview still overlays. Inspect `sandbox/preview-vs-room/inspect/03_*`. CalVer 2026.08.28. PR https://github.com/marcuskrogh/HeatingAssistant/pull/633. Next `/review-fix SWD-431`.
 - 2026-08-21 — `/ship` SWD-426 via PR #631 (`507873f`): shared NMPC/P Start epoch; independent solves (no extra P after NLP); KPI loading; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.27`. Next Done.
 - 2026-08-21 — `/review-fix` SWD-426 CLEAN (focused): 0 blockers / 4 should-fix (accept index from plan origin; lock P sync; room forecast stamp; System Status last P ts). Fix-forward on PR #631. Fast suite 970 passed, 88 skipped, 18 deselected. Next `/ship SWD-426`.
 - 2026-08-21 — `/implement` SWD-426 In Review: shared NMPC/P Start epoch; independent solves (no extra P after NLP); KPI loading; PR https://github.com/marcuskrogh/HeatingAssistant/pull/631; CalVer 2026.08.27. Fast suite 969 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-426`.
