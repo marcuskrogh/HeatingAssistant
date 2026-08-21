@@ -131,4 +131,4 @@ Freeze-`T_ref` (iteration 3) was withdrawn.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/633
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/633
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/633 (`eb3fa55`)
