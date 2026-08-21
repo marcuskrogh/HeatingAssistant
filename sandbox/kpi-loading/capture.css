@@ -1,0 +1,16 @@
+/* Harness-only freeze so stills land mid-animation. Not for promotion. */
+
+.gauge--computing.capture-mid::after {
+  animation: none !important;
+  background-position: 40% 0 !important;
+}
+
+.countdown--computing.capture-mid .countdown__ring-track {
+  animation: none !important;
+  transform: rotate(110deg);
+}
+
+.countdown--computing.capture-mid .countdown__ring-fill {
+  animation: none !important;
+  stroke-opacity: 0.75;
+}

@@ -1,6 +1,6 @@
-import { createGauge, updateGauge, setGaugeComputing } from '../components/gauge.js?v=126';
+import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=126';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=127';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
 import {
@@ -16,8 +16,8 @@ import {
 } from '../kpi-engine.js?v=124';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
-  entityValue, entityAttr, isComputeInProgress,
-} from '../utils.js?v=126';
+  entityValue, entityAttr, systemEntity,
+} from '../utils.js?v=127';
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -40,16 +40,22 @@ export function renderOverview(container, rooms, state, connection, hass) {
   const gauges = buildControllerGauges(state, rooms, connection);
   gauges.forEach((g) => kpiGrid.appendChild(g.element));
 
-  const applyComputing = (s) => {
-    const computing = isComputeInProgress(s);
-    gauges.forEach((g) => setGaugeComputing(g.element, computing));
-  };
-  applyComputing(state);
-
   const countdown = createCountdown(state, false);
   kpiGrid.appendChild(countdown.element);
   const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: false });
   kpiGrid.appendChild(nmpcCountdown.element);
+
+  const applyComputing = (s) => {
+    setCountdownComputing(
+      nmpcCountdown.element,
+      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'nmpc_computing')),
+    );
+    setCountdownComputing(
+      countdown.element,
+      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'control_computing')),
+    );
+  };
+  applyComputing(state);
 
   controllerSection.appendChild(kpiGrid);
   container.appendChild(controllerSection);
