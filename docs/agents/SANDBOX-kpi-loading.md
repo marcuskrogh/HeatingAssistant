@@ -71,7 +71,7 @@ Post-merge inspect-loop instead of `/iterate` when each turn needs inspection.
 - Relates: [SWD-426](https://marcusknielsen.atlassian.net/browse/SWD-426)
 - Artifact: docs/agents/SANDBOX-kpi-loading.md
 - Branch: `cursor/swd-430-kpi-loading-sandbox-7e18`
-- PR: — (sandbox never opens a PR)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/632
 
 ## Next
-`/implement SWD-430` — promote accepted overlay (ship remaining)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/632
