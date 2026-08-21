@@ -6,10 +6,10 @@ must be the exact calendar version on its own line.
 
 # 2026.08.28
 
-- Room-view Forecast now shows the optimiser's air-temperature path for
-  the accepted plan (the same implicit-Euler substeps the planner uses),
-  instead of a later re-simulation from the live estimator. Controller
-  Tuning preview with matching weights uses that same series.
+- Room-view Forecast re-simulates leftover planner power from the current
+  estimator using the same implicit-Euler substeps as the optimiser, so
+  updated weather still moves the plot, at the same accuracy the planner
+  used. Controller Tuning preview with matching weights uses that series.
 
 # 2026.08.27
 

@@ -72,6 +72,59 @@ def mean_price_slow(price_fast: np.ndarray, m: int, n_slow: int) -> np.ndarray:
     return out
 
 
+def step_hold(
+    sde: Any,
+    x: np.ndarray,
+    u: np.ndarray,
+    d: np.ndarray,
+    p: np.ndarray,
+    dt_s: float,
+    n_int: int,
+) -> np.ndarray:
+    """Advance one fast interval with U and d held: implicit Euler, ``n_int`` substeps.
+
+    This is the only plant step ``MeanOcp`` uses. Forecast resimulation must
+    call the same map so plotted T matches the NLP when U, x0, and d match.
+    """
+
+    u = np.asarray(u, dtype=float)
+    d = np.asarray(d, dtype=float)
+    rhs = lambda xx, u=u, d=d: sde.f(xx, u, d, p, 0.0)
+    jacx = lambda xx, u=u, d=d: sde.dfdx(xx, u, d, p, 0.0)
+    return implicit_euler_substeps(rhs, jacx, x, dt_s, n_int)
+
+
+def roll_fast_air_path(
+    sde: Any,
+    x0: np.ndarray,
+    U_fast: np.ndarray,
+    d_fast: Sequence[np.ndarray],
+    *,
+    dt_s: float,
+    n_int: int,
+    n_rooms: int,
+    p: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Open-loop room temperatures on the fast grid (same integrator as MeanOcp)."""
+
+    p_vec = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+    U = np.asarray(U_fast, dtype=float)
+    if U.ndim == 1:
+        U = U.reshape(-1, int(sde.nu))
+    d_list = list(d_fast)
+    if not d_list:
+        raise ValueError("d_fast must contain at least one disturbance")
+    n = int(U.shape[0])
+    x = np.asarray(x0, dtype=float).copy()
+    air = np.zeros((n, n_rooms), dtype=float)
+    last_d = d_list[-1]
+    for k in range(n):
+        d_k = d_list[k] if k < len(d_list) else last_d
+        x = step_hold(sde, x, U[k], d_k, p_vec, dt_s, n_int)
+        air[k] = x[:n_rooms]
+    return air
+
+
 class MeanOcp:
     """Slow-rate mean OCP: comfort zone + ROM + electricity price."""
 
@@ -202,9 +255,7 @@ class MeanOcp:
             for m in range(self.m):
                 k = n * self.m + m
                 d_k = self._d_fast[k]
-                rhs = lambda xx, u=u_n, d=d_k: self.sde.f(xx, u, d, self.p, 0.0)
-                jacx = lambda xx, u=u_n, d=d_k: self.sde.dfdx(xx, u, d, self.p, 0.0)
-                x = implicit_euler_substeps(rhs, jacx, x, self.dt_s, self.n_int)
+                x = step_hold(self.sde, x, u_n, d_k, self.p, self.dt_s, self.n_int)
                 ta = x[: self.n_rooms]
                 air_path.append(ta.copy())
                 lo = self.t_min[k]
