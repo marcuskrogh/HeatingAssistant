@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.28
+
+- Controller Tuning preview with the same weights as the live controller now
+  shows the same Forecast and Planned Power as the room view, instead of a
+  second planner solve that could disagree by a few degrees.
+
 # 2026.08.27
 
 - The 15-minute control countdown and the two-hour planner countdown now
