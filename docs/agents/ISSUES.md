@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | In Review | — | docs/agents/SANDBOX-forecast-jitter.md | `/ship SWD-417` closeout |
+| SWD-424 | Sub-task | Keep room-view Forecast on the NMPC air path | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
+| SWD-425 | Sub-task | Tests, CalVer, App sync for NMPC Forecast plot | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
 | SWD-418 | Task | [Bug] NMPC long timer resets when the solve finishes — schedule must stay drift-free | Done | — | docs/agents/PLAN-nmpc-timer-drift.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628 (`554e9fc`) |
 | SWD-419 | Sub-task | Wall-clock epoch: do not restamp NMPC/control timers when a solve finishes | Done | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
 | SWD-420 | Sub-task | Tests, CalVer, changelog, App sync for drift-free NMPC timer | Done | SWD-418 | docs/agents/PLAN-nmpc-timer-drift.md | — |
@@ -145,6 +148,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/review-fix` SWD-417 CLEAN (focused): 0 blockers remaining / 3 should-fix (disabled-source idle-U overlay; `_nmpc_k` vs apply identity; SWD-421 tests still expected frozen `T_ref`). Fix-forward on PR #630 (`e461dd2`). Merged `main` (SWD-418/421). CalVer 2026.08.26. Fast suite 962 passed, 88 skipped, 18 deselected. Next `/ship SWD-417`.
+- 2026-08-21 — `/implement` SWD-417 In Review: remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); PR https://github.com/marcuskrogh/HeatingAssistant/pull/630; CalVer 2026.08.25. Fast suite 950 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-417`.
+- 2026-08-21 — `/sandbox` SWD-417 iteration 4: room-view live cache vs Tuning preview re-solve; max |T| 1.88 K after 8 ticks; different U*. Next `/sandbox SWD-417`.
+- 2026-08-20 — `/sandbox` SWD-417 iteration 3: freeze production `U*`, re-roll T at n_int 1/10/40/100; n_int=10 vs 100 is 23 mK; 15 min wiggles remain on the high-fidelity path. Next `/sandbox SWD-417`.
+- 2026-08-20 — `/sandbox` SWD-417 iteration 2: peaked price × s_rom 0.05/0.1/1/5; traces overlay; ROM does not move Forecast jitter. Next `/sandbox SWD-417`.
+- 2026-08-20 — `/sandbox` SWD-417 from SWD-414: Forecast T jitter vs `n_int_steps`; Relates SWD-414; inspect `sandbox/forecast-jitter/inspect/01_*`. n_int=40 smoother; live 2.5 K swing not reproduced. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/ship` SWD-418 via PR #628 (`554e9fc`): two-hour planner countdown stays on the Start epoch; NLP finish does not restamp; plot/ID ticks stay off that grid. Review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.25`. Next Done.
 - 2026-08-20 — `/review-fix` SWD-418: 1 blocker / 1 should-fix (history ticker aligned to NMPC epoch; SWD-318 test stamped `_last_control_ts`). Fix-forward on PR #628 (`803e982`): plot/ID ticks stay `now + interval`; control stays on the Start grid. Local pytest-fast 951 passed, 88 skipped, 18 deselected. Next `/ship SWD-418`.
 - 2026-08-20 — `/implement` SWD-418 In Review: Start epoch is `last_nmpc_ts` / `last_run_ts`; NMPC finish does not restamp; PR https://github.com/marcuskrogh/HeatingAssistant/pull/628; CalVer 2026.08.25. Fast suite 951 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-418`.

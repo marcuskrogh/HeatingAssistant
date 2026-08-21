@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.26
+
+- Room-view Forecast and Planned Power now follow the remaining two-hour
+  plan from the current temperature: power still holds for two hours, and
+  the temperature path is a resimulation of that leftover plan rather than
+  a replay of the first interval or a frozen copy of the planner's air path.
+
 # 2026.08.25
 
 - The two-hour planner countdown now stays on the clock from when you press
