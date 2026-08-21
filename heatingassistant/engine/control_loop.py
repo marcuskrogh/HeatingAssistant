@@ -34,6 +34,16 @@ _PREVIEW_TUNING_KEYS = frozenset(
     }
 )
 
+_PREVIEW_WEIGHT_DEFAULTS: dict[str, float] = {
+    const.CONF_TRACKING_WEIGHT: const.DEFAULT_TRACKING_WEIGHT,
+    const.CONF_ENERGY_WEIGHT: const.DEFAULT_ENERGY_WEIGHT,
+    const.CONF_ENERGY_PRICE_WEIGHT: const.DEFAULT_ENERGY_PRICE_WEIGHT,
+    const.CONF_SMOOTHING_WEIGHT: const.DEFAULT_SMOOTHING_WEIGHT,
+    const.CONF_SOFT_CONSTRAINT_WEIGHT: const.DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    const.CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT: const.DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+    const.CONF_TERMINAL_WEIGHT: const.DEFAULT_TERMINAL_WEIGHT,
+}
+
 
 def _snapshot_from_controller(
     controller: Any,
@@ -247,6 +257,48 @@ class ControlEngine:
             default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
         )
 
+    def _preview_matches_live(self, overrides: Mapping[str, Any], timing) -> bool:
+        """True when a Tuning preview would solve the same problem as the live plan."""
+
+        if self._controller is None:
+            return False
+        try:
+            live = self._nmpc_timing()
+        except ValueError:
+            return False
+        if abs(float(timing.dt_s) - float(live.dt_s)) > 1e-6:
+            return False
+        if int(timing.n_fast) != int(live.n_fast):
+            return False
+        if abs(float(timing.period_s) - float(live.period_s)) > 1e-6:
+            return False
+        for key, default in _PREVIEW_WEIGHT_DEFAULTS.items():
+            if key not in overrides:
+                continue
+            try:
+                draft = float(overrides[key])
+            except (TypeError, ValueError):
+                return False
+            try:
+                live_v = float(self.config.get(key, default))
+            except (TypeError, ValueError):
+                live_v = float(default)
+            if abs(draft - live_v) > 1e-9:
+                return False
+        comfort = overrides.get(const.CONF_COMFORT_OFFSET)
+        if comfort is not None:
+            try:
+                draft_c = float(comfort)
+            except (TypeError, ValueError):
+                return False
+            for room in self.model.rooms.values():
+                live_c = float(
+                    getattr(room, "comfort_offset", const.DEFAULT_COMFORT_OFFSET)
+                )
+                if abs(draft_c - live_c) > 1e-9:
+                    return False
+        return True
+
     def _derived_dt(self, config: Mapping[str, Any] | None = None) -> float:
         try:
             return float(self._nmpc_timing(config).dt_s)
@@ -393,6 +445,9 @@ class ControlEngine:
         temperatures / setpoints on the shared model are updated to the supplied
         measurements (same as a normal compute). ``comfort_offset`` overrides are
         applied temporarily and restored afterwards.
+
+        When the draft matches the live controller, return the live remaining
+        plan that room view already plots instead of solving a second NLP.
         """
 
         ov = {
@@ -413,6 +468,11 @@ class ControlEngine:
         except ValueError as exc:
             _LOGGER.warning("preview_tuning_forecast: invalid NMPC timing: %s", exc)
             return {"error": "invalid_nmpc_timing"}
+
+        if self._preview_matches_live(ov, timing):
+            live = self.forecast_snapshot()
+            if live.get("predictions"):
+                return live
 
         comfort_override = ov.get(const.CONF_COMFORT_OFFSET)
         saved_comfort: dict[str, float] = {}
