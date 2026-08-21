@@ -143,8 +143,9 @@ def test_p_runs_while_nmpc_busy_on_previous_plan(tmp_path: Path) -> None:
     assert ctrl._nmpc_busy is True
     assert runtime._nmpc_computing is True
     assert runtime._control_computing is False
-    assert "heater" in runtime.actuator_outputs
-    assert abs(float(runtime.actuator_outputs["heater"])) > 0.0
+    heat = runtime.actuator_outputs.get("heater_heat")
+    assert heat is not None
+    assert abs(float(heat)) > 0.0
 
 
 def test_nmpc_worker_does_not_run_p_on_accept(tmp_path: Path) -> None:
