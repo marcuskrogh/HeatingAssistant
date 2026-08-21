@@ -423,6 +423,8 @@
   flex-direction: column;
   justify-content: space-between;
   padding: 14px 16px 12px;
+  position: relative;
+  overflow: hidden;
 }
 
 .gauge__label {
@@ -453,6 +455,31 @@
   border-radius: 2px;
   min-width: 2px;
   transition: width 0.8s ease, background 0.3s ease;
+}
+
+.gauge--computing .gauge__value,
+.gauge--computing .gauge__label {
+  opacity: 0.4;
+}
+
+.gauge--computing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: kpi-shimmer 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes kpi-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 /* KPI Card */

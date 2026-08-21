@@ -33,6 +33,11 @@ export function updateGauge(container, { value, min, max, format, severity }) {
   if (valueEl) valueEl.textContent = displayValue;
 }
 
+export function setGaugeComputing(container, computing) {
+  if (!container) return;
+  container.classList.toggle('gauge--computing', !!computing);
+}
+
 function getGaugeColor(value, severity) {
   if (!severity) return 'var(--accent)';
   if (severity.inverse) {

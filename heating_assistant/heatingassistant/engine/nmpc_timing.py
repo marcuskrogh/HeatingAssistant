@@ -42,6 +42,28 @@ def grid_slot_index(epoch_s: float, period_s: float, now_s: float) -> int:
     return int(elapsed // period)
 
 
+def grid_remaining_s(epoch_s: float, period_s: float, now_s: float) -> float:
+    """Seconds until the next exclusive grid time (full period on a boundary)."""
+
+    period = float(period_s)
+    if period <= 0.0:
+        raise ValueError(f"period must be > 0; got {period}")
+    elapsed = float(now_s) - float(epoch_s)
+    if elapsed < 0.0:
+        return period
+    rem = period - (elapsed % period)
+    if rem <= 0.0:
+        return period
+    return rem
+
+
+def slow_slot_start_s(epoch_s: float, period_s: float, now_s: float) -> float:
+    """Wall-clock start of the slow slot that contains ``now_s``."""
+
+    n = grid_slot_index(epoch_s, period_s, now_s)
+    return float(epoch_s) + n * float(period_s)
+
+
 def next_grid_ts(epoch_s: float, period_s: float, now_s: float) -> float:
     """Return the next exclusive grid time after ``now_s``.
 

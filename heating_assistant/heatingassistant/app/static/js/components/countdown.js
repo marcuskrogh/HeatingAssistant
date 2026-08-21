@@ -1,11 +1,11 @@
-import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=125';
+import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=126';
 
 export const COUNTDOWN_CONTROL = {
   dtAttr: 'dt_s',
-  lastRunAttr: 'last_run_ts',
+  lastRunAttr: 'last_nmpc_ts',
   label: 'NEXT CONTROL',
-  defaultDt: 300,
-  useEntityLastUpdated: true,
+  defaultDt: 900,
+  useEntityLastUpdated: false,
   missingRemaining: 'period',
 };
 
@@ -68,9 +68,7 @@ function getDtSeconds(state, spec) {
 
 function computeRemaining(state, dtS, spec) {
   // Prefer the explicit timestamp the coordinator publishes: it is anchored to
-  // the actual internal schedule and is NOT bumped by the fast UI refresh that
-  // writes entity state between solves.  Fall back to the entity's HA
-  // last_updated only for the fast control ring (older integration versions).
+  // the shared Start epoch so both rings stay on the same substepping grid.
   const lastRunTs = entityAttr(state, systemEntity('mpc_performance'), spec.lastRunAttr);
   let lastRunMs = null;
   if (lastRunTs != null) {
