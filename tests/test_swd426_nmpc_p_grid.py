@@ -243,7 +243,6 @@ def test_panel_wires_shared_epoch_and_computing_overlay() -> None:
     countdown = (_STATIC / "js" / "components" / "countdown.js").read_text(
         encoding="utf-8"
     )
-    gauge = (_STATIC / "js" / "components" / "gauge.js").read_text(encoding="utf-8")
     css = (_STATIC / "css" / "industrial.css").read_text(encoding="utf-8")
     overview = (_STATIC / "js" / "pages" / "overview.js").read_text(encoding="utf-8")
     room = (_STATIC / "js" / "pages" / "room-detail.js").read_text(encoding="utf-8")
@@ -251,13 +250,18 @@ def test_panel_wires_shared_epoch_and_computing_overlay() -> None:
     assert "lastRunAttr: 'last_nmpc_ts'" in countdown
     assert countdown.count("lastRunAttr: 'last_nmpc_ts'") >= 2
     assert "useEntityLastUpdated: true" not in countdown
-    assert "export function setGaugeComputing" in gauge
-    assert "gauge--computing" in css
-    assert "kpi-shimmer" in css
+    assert "export function setCountdownComputing" in countdown
+    assert "countdown--computing" in css
     assert "isComputeInProgress" in utils
-    assert "setGaugeComputing" in overview
-    assert "setGaugeComputing" in room
-    assert "paintComputeLoading" in room
+    assert "setCountdownComputing" in overview
+    assert "setCountdownComputing" in room
+    assert "paintCountdownLoading" in room
+    assert "nmpc_computing" in overview
+    assert "control_computing" in overview
+    assert "nmpc_computing" in room
+    assert "control_computing" in room
+    assert "setGaugeComputing" not in overview
+    assert "setGaugeComputing" not in room
     assert "nmpc_result_ts" in room
     assert "last_control_ran_ts" in room
     status = (_STATIC / "js" / "pages" / "system-status.js").read_text(

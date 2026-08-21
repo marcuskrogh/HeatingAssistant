@@ -4,12 +4,18 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.08.28
+# 2026.08.29
 
 - Room-view Forecast re-simulates leftover planner power from the current
   estimator using the same implicit-Euler substeps as the optimiser, so
   updated weather still moves the plot, at the same accuracy the planner
   used. Controller Tuning preview with matching weights uses that series.
+
+# 2026.08.28
+
+- While a plan or control tick is computing, the matching countdown ring
+  (next two-hour plan or next 15-minute control) shows a loading animation.
+  Live values such as heating power stay as they are.
 
 # 2026.08.27
 

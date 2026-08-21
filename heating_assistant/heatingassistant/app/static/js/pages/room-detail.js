@@ -1,7 +1,7 @@
 import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=124';
-import { createGauge, updateGauge, setGaugeComputing } from '../components/gauge.js?v=126';
+import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=126';
+import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=127';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=124';
@@ -23,9 +23,9 @@ import {
 } from '../ha-services.js?v=124';
 import {
   formatPower, formatPowerKw, formatPrice,
-  entityValue, entityAttr, systemEntity, isComputeInProgress,
+  entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=126';
+} from '../utils.js?v=127';
 import {
   buildTemperatureChart,
   buildPowerChart,
@@ -227,14 +227,22 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   kpiGrid.appendChild(heatLossGauge);
   kpiGrid.appendChild(modelFitGauge);
 
-  const computeKpiGauges = [
-    powerGauge, priceGauge, solarGauge, heatLossGauge, modelFitGauge,
-  ];
-  function paintComputeLoading(s) {
-    const computing = isComputeInProgress(s);
-    computeKpiGauges.forEach((el) => setGaugeComputing(el, computing));
+  const countdown = createCountdown(state, true);
+  kpiGrid.appendChild(countdown.element);
+  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: true });
+  kpiGrid.appendChild(nmpcCountdown.element);
+
+  function paintCountdownLoading(s) {
+    setCountdownComputing(
+      nmpcCountdown.element,
+      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'nmpc_computing')),
+    );
+    setCountdownComputing(
+      countdown.element,
+      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'control_computing')),
+    );
   }
-  paintComputeLoading(state);
+  paintCountdownLoading(state);
 
   function paintTimeInRangeGauge(s) {
     const lower = entityValue(s, room.entities['constraint_lower']);
@@ -321,11 +329,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   paintSolarGauge(entityValue(state, solarEntity));
   paintHeatLossGauge(state);
   paintModelFitGauge(state);
-
-  const countdown = createCountdown(state, true);
-  kpiGrid.appendChild(countdown.element);
-  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: true });
-  kpiGrid.appendChild(nmpcCountdown.element);
 
   // ── Schedule overview ──────────────────────────────────────────────────────
   // Mirrors the schedules index-card design; clicking opens the editable
@@ -508,7 +511,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       paintSolarGauge(entityValue(newState, solarEntity));
       paintHeatLossGauge(newState);
       paintModelFitGauge(newState);
-      paintComputeLoading(newState);
+      paintCountdownLoading(newState);
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.

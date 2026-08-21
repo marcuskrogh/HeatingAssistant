@@ -1,0 +1,41 @@
+/* Candidate overlay — sandbox only. Promote into industrial.css after accept. */
+/* Loading belongs on the countdown rings, not on live KPI gauges. */
+
+.countdown--computing {
+  position: relative;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 170, 0.45);
+}
+
+.countdown--computing .countdown__ring {
+  filter: drop-shadow(0 0 5px rgba(0, 212, 170, 0.7));
+}
+
+.countdown--computing .countdown__ring-track {
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-dasharray: 42 172;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+  animation: countdown-computing-spin 0.9s linear infinite;
+}
+
+.countdown--computing .countdown__ring-fill {
+  animation: countdown-computing-pulse 1.2s ease-in-out infinite;
+}
+
+.countdown--computing .countdown__label::after {
+  content: ' · computing';
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+@keyframes countdown-computing-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes countdown-computing-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.4; }
+}
