@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | In Review | — | docs/agents/SANDBOX-forecast-jitter.md | `/ship SWD-417` closeout |
+| SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | Done | — | docs/agents/SANDBOX-forecast-jitter.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/630 (`eb28be6`) |
 | SWD-424 | Sub-task | Keep room-view Forecast on the NMPC air path | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
 | SWD-425 | Sub-task | Tests, CalVer, App sync for NMPC Forecast plot | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
 | SWD-418 | Task | [Bug] NMPC long timer resets when the solve finishes — schedule must stay drift-free | Done | — | docs/agents/PLAN-nmpc-timer-drift.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/628 (`554e9fc`) |
@@ -148,6 +148,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/ship` SWD-417 via PR #630 (`eb28be6`): remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); Planned Power keeps leftover 2 h outdoor ZOH; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.26`. Next Done.
 - 2026-08-21 — `/review-fix` SWD-417 CLEAN (focused): 0 blockers remaining / 3 should-fix (disabled-source idle-U overlay; `_nmpc_k` vs apply identity; SWD-421 tests still expected frozen `T_ref`). Fix-forward on PR #630 (`e461dd2`). Merged `main` (SWD-418/421). CalVer 2026.08.26. Fast suite 962 passed, 88 skipped, 18 deselected. Next `/ship SWD-417`.
 - 2026-08-21 — `/implement` SWD-417 In Review: remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); PR https://github.com/marcuskrogh/HeatingAssistant/pull/630; CalVer 2026.08.25. Fast suite 950 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-417`.
 - 2026-08-21 — `/sandbox` SWD-417 iteration 4: room-view live cache vs Tuning preview re-solve; max |T| 1.88 K after 8 ticks; different U*. Next `/sandbox SWD-417`.
