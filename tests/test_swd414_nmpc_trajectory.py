@@ -42,6 +42,8 @@ def test_room_detail_refetches_forecasts_on_nmpc_stamp():
     source = _ROOM_JS.read_text(encoding="utf-8")
     assert "function mpcForecastStamp" in source
     assert "last_nmpc_ts" in source
+    assert "nmpc_result_ts" in source
+    assert "last_control_ran_ts" in source
     assert "replaceChartDataset(ds, 'Forecast'" in source
     assert "replaceChartDataset(ds, 'Planned Power'" in source
     update_fn = source.split("function updateChartsFromState", 1)[1]

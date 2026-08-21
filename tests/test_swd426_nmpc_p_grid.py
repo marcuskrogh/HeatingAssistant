@@ -91,6 +91,8 @@ def test_hass_states_share_epoch_and_derived_dt(tmp_path: Path) -> None:
     assert attrs["nmpc_period_s"] == pytest.approx(1800.0)
     assert attrs["nmpc_computing"] is False
     assert attrs["control_computing"] is False
+    assert "nmpc_result_ts" in attrs
+    assert "last_control_ran_ts" in attrs
 
 
 def test_restore_coerces_control_stamp_to_nmpc_epoch(tmp_path: Path) -> None:
@@ -117,8 +119,25 @@ def test_sync_p_index_uses_plan_epoch(tmp_path: Path) -> None:
         np.full((ctrl.timing.n_slow, 1), 0.4),
         np.full((n_fast, 1), 21.0),
         plan_epoch=epoch,
+        now=epoch,
     )
     runtime._sync_p_fast_index(epoch + 900.0)
+    assert ctrl._nmpc_k == 1
+
+
+def test_accept_sets_fast_index_from_wall_clock(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    epoch = 1_700_000_000.0
+    runtime._anchor_schedule_epoch(epoch)
+    ctrl = runtime.control_engine._controller
+    assert ctrl is not None
+    n_fast = ctrl.timing.n_fast
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, 1), 0.4),
+        np.full((n_fast, 1), 21.0),
+        plan_epoch=epoch,
+        now=epoch + 900.0,
+    )
     assert ctrl._nmpc_k == 1
 
 
@@ -134,6 +153,7 @@ def test_p_runs_while_nmpc_busy_on_previous_plan(tmp_path: Path) -> None:
         np.full((ctrl.timing.n_slow, 1), 0.4),
         np.full((n_fast, 1), 21.0),
         plan_epoch=epoch,
+        now=epoch,
     )
     ctrl._nmpc_busy = True
     runtime._nmpc_computing = True
@@ -204,6 +224,7 @@ def test_computing_flags_during_nmpc_worker(tmp_path: Path) -> None:
     assert thread is not None
     thread.join(timeout=2.0)
     assert runtime._nmpc_computing is False
+    assert runtime._nmpc_result_ts is not None
 
 
 def test_control_cycle_does_not_schedule_nmpc(tmp_path: Path) -> None:
@@ -237,3 +258,9 @@ def test_panel_wires_shared_epoch_and_computing_overlay() -> None:
     assert "setGaugeComputing" in overview
     assert "setGaugeComputing" in room
     assert "paintComputeLoading" in room
+    assert "nmpc_result_ts" in room
+    assert "last_control_ran_ts" in room
+    status = (_STATIC / "js" / "pages" / "system-status.js").read_text(
+        encoding="utf-8"
+    )
+    assert "last_control_ran_ts" in status

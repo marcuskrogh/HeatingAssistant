@@ -62,7 +62,7 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const idHistory = entityAttr(s, systemEntity('system_summary'), 'id_history') || {};
     const mpcLoad = mpcLoadPercent(s);
     const lastDuration = entityValue(s, systemEntity('mpc_performance'));
-    const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_run_ts');
+    const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_control_ran_ts');
     const dt = entityAttr(s, systemEntity('mpc_performance'), 'dt_s');
     const lastNmpc = entityAttr(s, systemEntity('mpc_performance'), 'last_nmpc_ts');
     const nmpcPeriod = entityAttr(s, systemEntity('mpc_performance'), 'nmpc_period_s');

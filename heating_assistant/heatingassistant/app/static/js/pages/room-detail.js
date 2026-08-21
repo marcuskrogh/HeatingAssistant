@@ -441,8 +441,8 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // Defaults match the backend until the WS fetch below resolves.
   const plotSettings = { historyHours: 12, forecastHours: 0 };
 
-  // lastRunTs tracks control + NMPC stamps; when either changes we re-fetch
-  // forecasts (a slow plan can land without a new 15 min control tick).
+  // lastRunTs tracks Start epoch + NLP result + P execution; when any changes
+  // we re-fetch forecasts (a slow plan can land without a new 15 min tick).
   const lastRunTs = { value: null, sensorEntities: [] };
   const onChartsReady = (roomForecast, priceForecast) => {
     // Scale the power gauge to rated heating/cooling capacity (no sysid scale).
@@ -820,7 +820,11 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
 function mpcForecastStamp(state) {
   const entity = systemEntity('mpc_performance');
-  return `${entityAttr(state, entity, 'last_run_ts')}|${entityAttr(state, entity, 'last_nmpc_ts')}`;
+  return [
+    entityAttr(state, entity, 'last_nmpc_ts'),
+    entityAttr(state, entity, 'nmpc_result_ts'),
+    entityAttr(state, entity, 'last_control_ran_ts'),
+  ].join('|');
 }
 
 function replaceChartDataset(datasets, label, data) {

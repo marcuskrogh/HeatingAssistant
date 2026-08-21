@@ -236,6 +236,7 @@ class HeatingRuntime:
         self._nmpc_loop: asyncio.AbstractEventLoop | None = None
         self._nmpc_computing = False
         self._control_computing = False
+        self._nmpc_result_ts: float | None = None
         self._history_lock = threading.Lock()
         # Open-window / door override (SWD-298): state machine + debounce timers.
         self._window_tags: dict[str, list[str]] = {}
@@ -490,17 +491,10 @@ class HeatingRuntime:
         """Point the P-law at the wall-clock substep of the installed plan."""
 
         controller = getattr(self.control_engine, "_controller", None)
-        if controller is None:
+        sync = getattr(controller, "sync_fast_index", None)
+        if not callable(sync):
             return
-        origin = getattr(controller, "_nmpc_plan_epoch", None)
-        if origin is None:
-            origin = self._last_nmpc_ts
-        if origin is None:
-            return
-        dt = float(controller.timing.dt_s)
-        n_fast = max(int(controller.timing.n_fast), 1)
-        k = grid_slot_index(float(origin), dt, float(now))
-        controller._nmpc_k = min(max(k, 0), n_fast - 1)
+        sync(float(now), fallback_epoch=self._last_nmpc_ts)
 
     def _control_tick_interval_s(self) -> float:
         """Seconds between background control cycles."""
@@ -908,8 +902,11 @@ class HeatingRuntime:
     def _nmpc_worker_thread(self) -> None:
         try:
             result = self.control_engine.solve_nmpc_blocking()
+            stamp = time.time()
             self.control_engine.apply_nmpc_result(
-                result, plan_epoch=self._slow_slot_start(time.time())
+                result,
+                plan_epoch=self._slow_slot_start(stamp),
+                now=stamp,
             )
             note = self.control_engine.consume_watchdog_notification()
             if note:
@@ -925,6 +922,7 @@ class HeatingRuntime:
                 if note:
                     self._emit_nmpc_notify(note)
         finally:
+            self._nmpc_result_ts = time.time()
             self._nmpc_computing = False
             self._note_nmpc_cycle_complete()
 
@@ -1661,6 +1659,8 @@ class HeatingRuntime:
                 "nmpc_period_s": nmpc_period_s,
                 "nmpc_computing": bool(self._nmpc_computing),
                 "control_computing": bool(self._control_computing),
+                "nmpc_result_ts": self._nmpc_result_ts,
+                "last_control_ran_ts": self._last_control_ran_ts,
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
             },
@@ -2016,6 +2016,8 @@ class HeatingRuntime:
             "last_duration_s": self._last_control_duration_s,
             "nmpc_computing": bool(self._nmpc_computing),
             "control_computing": bool(self._control_computing),
+            "nmpc_result_ts": self._nmpc_result_ts,
+            "last_control_ran_ts": self._last_control_ran_ts,
         }
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))

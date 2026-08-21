@@ -306,12 +306,15 @@ class ControlEngine:
         result: Mapping[str, Any],
         *,
         plan_epoch: float | None = None,
+        now: float | None = None,
     ) -> bool:
         controller = self._controller
         if controller is None:
             return False
         applied = bool(
-            controller.apply_nmpc_result(dict(result), plan_epoch=plan_epoch)
+            controller.apply_nmpc_result(
+                dict(result), plan_epoch=plan_epoch, now=now
+            )
         )
         if applied:
             self._cache_controller_forecast(controller)

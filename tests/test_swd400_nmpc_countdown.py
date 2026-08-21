@@ -34,6 +34,8 @@ def test_hass_states_publish_nmpc_cycle_attrs(tmp_path: Path) -> None:
     assert "dt_s" in attrs
     assert "nmpc_computing" in attrs
     assert "control_computing" in attrs
+    assert "nmpc_result_ts" in attrs
+    assert "last_control_ran_ts" in attrs
     assert runtime._control_status()["last_nmpc_ts"] is None
 
 

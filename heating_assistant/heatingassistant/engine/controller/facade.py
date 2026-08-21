@@ -125,7 +125,12 @@ from ..nmpc_ocp import (
     solve_mean_ocp,
 )
 from ..nmpc_p import comfort_fallback_command, p_command
-from ..nmpc_timing import NmpcTiming, derive_nmpc_timing, timing_from_dt_horizon
+from ..nmpc_timing import (
+    NmpcTiming,
+    derive_nmpc_timing,
+    grid_slot_index,
+    timing_from_dt_horizon,
+)
 from ..thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
@@ -2384,6 +2389,7 @@ class HeatingMPCController:
         T = np.asarray(t_ref, dtype=float)
         n_fast = self._timing.n_fast
         n_rooms = self._system._n_rooms
+        stamp = time.time() if now is None else float(now)
         if T.ndim == 1:
             T = np.tile(T.reshape(1, -1), (n_fast, 1))
         if T.shape[0] < n_fast:
@@ -2394,8 +2400,13 @@ class HeatingMPCController:
             self._nmpc_U = U
             self._nmpc_T_ref = T
             self._nmpc_U_fast = np.repeat(U, self._timing.m, axis=0)
-            self._nmpc_k = 0
-            self._nmpc_plan_epoch = None if plan_epoch is None else float(plan_epoch)
+            if plan_epoch is None:
+                self._nmpc_plan_epoch = None
+                self._nmpc_k = 0
+            else:
+                origin = float(plan_epoch)
+                self._nmpc_plan_epoch = origin
+                self._nmpc_k = self._fast_index_for(origin, stamp)
             self._nmpc_warm = U.reshape(-1).copy()
             self._reject_since = None
             if self._watchdog_tripped or self._notify_active:
@@ -2418,6 +2429,26 @@ class HeatingMPCController:
                 self._nmpc_U_fast = None
                 self._nmpc_k = 0
                 self._nmpc_plan_epoch = None
+
+    def _fast_index_for(self, origin: float, now: float) -> int:
+        n_fast = max(int(self._timing.n_fast), 1)
+        k = grid_slot_index(float(origin), float(self._timing.dt_s), float(now))
+        return min(max(k, 0), n_fast - 1)
+
+    def sync_fast_index(
+        self,
+        now: float,
+        fallback_epoch: Optional[float] = None,
+    ) -> None:
+        """Point `_nmpc_k` at the wall-clock substep of the installed plan."""
+
+        with self._nmpc_lock:
+            origin = self._nmpc_plan_epoch
+            if origin is None:
+                origin = fallback_epoch
+            if origin is None:
+                return
+            self._nmpc_k = self._fast_index_for(float(origin), float(now))
 
     def apply_nmpc_result(
         self,
