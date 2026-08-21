@@ -852,17 +852,22 @@ def test_idle_plan_debounces_nmpc_worker(tmp_path):
     assert thread is None or not thread.is_alive()
 
 
-def test_nmpc_worker_requests_control_cycle_on_accept(tmp_path):
+def test_nmpc_worker_does_not_run_p_on_accept(tmp_path):
     runtime = HeatingRuntime(
         tmp_path,
         bus=InMemoryMqttBus(),
         options={"instance_id": "haos"},
     )
-    requested: list[bool] = []
-    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
-        lambda: requested.append(True)
+    cycles = {"n": 0}
+
+    async def counted(*, wait_for_lock: bool = False):
+        cycles["n"] += 1
+        return {}
+
+    runtime.run_control_cycle = counted  # type: ignore[method-assign]
+    runtime.control_engine.apply_nmpc_result = (  # type: ignore[method-assign]
+        lambda _result, **_kwargs: True
     )
-    runtime.control_engine.apply_nmpc_result = lambda _result: True  # type: ignore[method-assign]
     runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
         "accepted": True,
         "u_star": np.array([[0.4]]),
@@ -871,83 +876,25 @@ def test_nmpc_worker_requests_control_cycle_on_accept(tmp_path):
     }
     runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
     runtime._nmpc_worker_thread()
-    assert requested == [True]
+    assert cycles["n"] == 0
 
 
-def test_request_control_cycle_runs_when_loop_missing(tmp_path):
+def test_nmpc_worker_does_not_run_p_on_reject(tmp_path):
     runtime = HeatingRuntime(
         tmp_path,
         bus=InMemoryMqttBus(),
         options={"instance_id": "haos"},
     )
-    runtime._nmpc_loop = None
-    called: list[bool] = []
+    cycles = {"n": 0}
 
-    async def _fake_cycle(*, wait_for_lock: bool = False):
-        called.append(wait_for_lock)
+    async def counted(*, wait_for_lock: bool = False):
+        cycles["n"] += 1
         return {}
 
-    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
-    runtime._request_control_cycle_after_nmpc()
-    assert called == [True]
-
-
-def test_request_control_cycle_runs_when_loop_closed(tmp_path):
-    runtime = HeatingRuntime(
-        tmp_path,
-        bus=InMemoryMqttBus(),
-        options={"instance_id": "haos"},
+    runtime.run_control_cycle = counted  # type: ignore[method-assign]
+    runtime.control_engine.apply_nmpc_result = (  # type: ignore[method-assign]
+        lambda _result, **_kwargs: False
     )
-    loop = asyncio.new_event_loop()
-    loop.close()
-    runtime._nmpc_loop = loop
-    called: list[bool] = []
-
-    async def _fake_cycle(*, wait_for_lock: bool = False):
-        called.append(wait_for_lock)
-        return {}
-
-    runtime.run_control_cycle = _fake_cycle  # type: ignore[method-assign]
-    runtime._request_control_cycle_after_nmpc()
-    assert called == [True]
-
-
-def test_request_control_cycle_waits_for_held_lock(tmp_path):
-    runtime = HeatingRuntime(
-        tmp_path,
-        bus=InMemoryMqttBus(),
-        options={"instance_id": "haos"},
-    )
-    runtime._nmpc_loop = None
-    assert runtime._control_lock.acquire(blocking=False)
-    done = threading.Event()
-
-    def _worker() -> None:
-        try:
-            runtime._request_control_cycle_after_nmpc()
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=_worker, name="nmpc-followup-lock")
-    thread.start()
-    assert not done.wait(timeout=0.3)
-    runtime._control_lock.release()
-    assert done.wait(timeout=15.0)
-    thread.join(timeout=2.0)
-    assert runtime._last_control_ran_ts is not None
-
-
-def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):
-    runtime = HeatingRuntime(
-        tmp_path,
-        bus=InMemoryMqttBus(),
-        options={"instance_id": "haos"},
-    )
-    requested: list[bool] = []
-    runtime._request_control_cycle_after_nmpc = (  # type: ignore[method-assign]
-        lambda: requested.append(True)
-    )
-    runtime.control_engine.apply_nmpc_result = lambda _result: False  # type: ignore[method-assign]
     runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
         "accepted": False,
         "u_star": np.array([[0.0]]),
@@ -956,4 +903,4 @@ def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):
     }
     runtime.control_engine.consume_watchdog_notification = lambda: None  # type: ignore[method-assign]
     runtime._nmpc_worker_thread()
-    assert requested == []
+    assert cycles["n"] == 0

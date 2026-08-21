@@ -1,6 +1,6 @@
-import { createGauge, updateGauge } from '../components/gauge.js?v=124';
+import { createGauge, updateGauge, setGaugeComputing } from '../components/gauge.js?v=126';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=125';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=126';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
 import {
@@ -16,8 +16,8 @@ import {
 } from '../kpi-engine.js?v=124';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
-  entityValue, entityAttr,
-} from '../utils.js?v=124';
+  entityValue, entityAttr, isComputeInProgress,
+} from '../utils.js?v=126';
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -39,6 +39,12 @@ export function renderOverview(container, rooms, state, connection, hass) {
 
   const gauges = buildControllerGauges(state, rooms, connection);
   gauges.forEach((g) => kpiGrid.appendChild(g.element));
+
+  const applyComputing = (s) => {
+    const computing = isComputeInProgress(s);
+    gauges.forEach((g) => setGaugeComputing(g.element, computing));
+  };
+  applyComputing(state);
 
   const countdown = createCountdown(state, false);
   kpiGrid.appendChild(countdown.element);
@@ -115,6 +121,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
       latestState = newState;
       systemGauges.forEach((g) => g.updater(newState));
       gauges.forEach((g) => g.updater(newState));
+      applyComputing(newState);
       tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
       updateCountdown(nmpcCountdown, newState);

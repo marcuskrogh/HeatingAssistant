@@ -301,11 +301,18 @@ class ControlEngine:
         kwargs = dict(self._nmpc_worker_kwargs or self._nmpc_last_kwargs)
         return controller.solve_nmpc(**kwargs)
 
-    def apply_nmpc_result(self, result: Mapping[str, Any]) -> bool:
+    def apply_nmpc_result(
+        self,
+        result: Mapping[str, Any],
+        *,
+        plan_epoch: float | None = None,
+    ) -> bool:
         controller = self._controller
         if controller is None:
             return False
-        applied = bool(controller.apply_nmpc_result(dict(result)))
+        applied = bool(
+            controller.apply_nmpc_result(dict(result), plan_epoch=plan_epoch)
+        )
         if applied:
             self._cache_controller_forecast(controller)
         return applied

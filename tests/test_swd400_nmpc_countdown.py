@@ -30,8 +30,10 @@ def test_hass_states_publish_nmpc_cycle_attrs(tmp_path: Path) -> None:
     ]
     assert attrs["nmpc_period_s"] == pytest.approx(DEFAULT_NMPC_PERIOD)
     assert attrs["last_nmpc_ts"] is None
-    assert "last_run_ts" in attrs
+    assert attrs["last_run_ts"] is None
     assert "dt_s" in attrs
+    assert "nmpc_computing" in attrs
+    assert "control_computing" in attrs
     assert runtime._control_status()["last_nmpc_ts"] is None
 
 
@@ -160,6 +162,7 @@ def test_panel_js_wires_dual_countdown_rings() -> None:
     assert "NEXT CONTROL" in countdown
     assert "NEXT NMPC" in countdown
     assert "last_nmpc_ts" in countdown
+    assert countdown.count("lastRunAttr: 'last_nmpc_ts'") >= 2
     assert "nmpc_period_s" in countdown
     assert "COUNTDOWN_NMPC" in overview
     assert "COUNTDOWN_NMPC" in room

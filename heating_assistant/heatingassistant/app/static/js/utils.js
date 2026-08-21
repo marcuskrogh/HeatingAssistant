@@ -130,6 +130,14 @@ export function systemEntity(metric) {
   return ENTITY_PREFIX + metric;
 }
 
+export function isComputeInProgress(state) {
+  const entity = systemEntity('mpc_performance');
+  return Boolean(
+    entityAttr(state, entity, 'nmpc_computing')
+    || entityAttr(state, entity, 'control_computing')
+  );
+}
+
 export function roomEntity(roomSlug, metric) {
   return ENTITY_PREFIX + roomSlug + '_' + metric;
 }

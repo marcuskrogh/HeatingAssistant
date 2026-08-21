@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.27
+
+- The 15-minute control countdown and the two-hour planner countdown now
+  stay on the same Start clock, so they meet at every planner slot. While
+  a new plan is being computed, heaters keep following the previous plan
+  until the next 15-minute tick, and the compute KPI cards show a loading
+  animation until the new values arrive.
+
 # 2026.08.26
 
 - Room-view Forecast and Planned Power now follow the remaining two-hour

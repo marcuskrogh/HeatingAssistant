@@ -1997,6 +1997,7 @@ class HeatingMPCController:
         self._nmpc_T_ref: Optional[np.ndarray] = None
         self._nmpc_U_fast: Optional[np.ndarray] = None
         self._nmpc_k: int = 0
+        self._nmpc_plan_epoch: Optional[float] = None
         self._nmpc_warm: Optional[np.ndarray] = None
         self._rho = float(rho)
         self._smoothing_weight = float(smoothing_weight)
@@ -2376,6 +2377,7 @@ class HeatingMPCController:
         t_ref: np.ndarray,
         *,
         now: Optional[float] = None,
+        plan_epoch: Optional[float] = None,
     ) -> None:
         """Install a slow plan for the fast P-law (tests and worker)."""
         U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu)
@@ -2393,6 +2395,7 @@ class HeatingMPCController:
             self._nmpc_T_ref = T
             self._nmpc_U_fast = np.repeat(U, self._timing.m, axis=0)
             self._nmpc_k = 0
+            self._nmpc_plan_epoch = None if plan_epoch is None else float(plan_epoch)
             self._nmpc_warm = U.reshape(-1).copy()
             self._reject_since = None
             if self._watchdog_tripped or self._notify_active:
@@ -2414,12 +2417,14 @@ class HeatingMPCController:
                 self._nmpc_T_ref = None
                 self._nmpc_U_fast = None
                 self._nmpc_k = 0
+                self._nmpc_plan_epoch = None
 
     def apply_nmpc_result(
         self,
         result: Dict[str, Any],
         *,
         now: Optional[float] = None,
+        plan_epoch: Optional[float] = None,
     ) -> bool:
         """Accept or reject a worker result.  Returns True when the path updated."""
         self._nmpc_busy = False
@@ -2427,7 +2432,9 @@ class HeatingMPCController:
         if elapsed is not None:
             self._solve_times.append(float(elapsed))
         if result.get("accepted"):
-            self.set_accepted_path(result["u_star"], result["t_ref"], now=now)
+            self.set_accepted_path(
+                result["u_star"], result["t_ref"], now=now, plan_epoch=plan_epoch,
+            )
             self.rebuild_forecast_from_plan()
             return True
         self._record_nmpc_reject(now)

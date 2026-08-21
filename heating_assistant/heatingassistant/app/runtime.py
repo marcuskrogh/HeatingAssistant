@@ -33,7 +33,11 @@ from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
-from heatingassistant.engine.nmpc_timing import grid_slot_index, next_grid_ts
+from heatingassistant.engine.nmpc_timing import (
+    grid_slot_index,
+    next_grid_ts,
+    slow_slot_start_s,
+)
 from heatingassistant.engine.datasets import DatasetStore
 from heatingassistant.engine.electricity_price import (
     align_prices_to_horizon,
@@ -191,6 +195,10 @@ class HeatingRuntime:
         self._id_history_last_append_ok: bool | None = None
         self._last_control_ts: float | None = self._coerce_number(self.state.get("last_control_ts"))
         self._last_nmpc_ts: float | None = self._coerce_number(self.state.get("last_nmpc_ts"))
+        if self._last_nmpc_ts is not None:
+            # Both countdown rings share this origin; never restore a drifted
+            # last_control_ts from older App versions.
+            self._last_control_ts = self._last_nmpc_ts
         self._last_control_ran_ts: float | None = self._coerce_number(
             self.state.get("last_control_ran_ts")
         )
@@ -226,6 +234,8 @@ class HeatingRuntime:
         self._state_lock = threading.Lock()
         self._nmpc_thread: threading.Thread | None = None
         self._nmpc_loop: asyncio.AbstractEventLoop | None = None
+        self._nmpc_computing = False
+        self._control_computing = False
         self._history_lock = threading.Lock()
         # Open-window / door override (SWD-298): state machine + debounce timers.
         self._window_tags: dict[str, list[str]] = {}
@@ -470,6 +480,28 @@ class HeatingRuntime:
             return float(now) + float(period)
         return next_grid_ts(epoch, float(period), float(now))
 
+    def _slow_slot_start(self, now: float) -> float | None:
+        epoch = self._last_nmpc_ts
+        if epoch is None:
+            return None
+        return slow_slot_start_s(epoch, self._nmpc_period_s(), float(now))
+
+    def _sync_p_fast_index(self, now: float) -> None:
+        """Point the P-law at the wall-clock substep of the installed plan."""
+
+        controller = getattr(self.control_engine, "_controller", None)
+        if controller is None:
+            return
+        origin = getattr(controller, "_nmpc_plan_epoch", None)
+        if origin is None:
+            origin = self._last_nmpc_ts
+        if origin is None:
+            return
+        dt = float(controller.timing.dt_s)
+        n_fast = max(int(controller.timing.n_fast), 1)
+        k = grid_slot_index(float(origin), dt, float(now))
+        controller._nmpc_k = min(max(k, 0), n_fast - 1)
+
     def _control_tick_interval_s(self) -> float:
         """Seconds between background control cycles."""
 
@@ -500,6 +532,7 @@ class HeatingRuntime:
 
         history_every = self._history_tick_interval_s()
         control_every = self._control_tick_interval_s()
+        nmpc_every = self._nmpc_period_s()
         now0 = time.time()
         epoch = self._last_nmpc_ts
         # Plot / ID cadence is not the NMPC clock — keep it on a simple
@@ -509,8 +542,10 @@ class HeatingRuntime:
             # First control soon after start so energy/actuators move without
             # waiting a full update_interval when tags are silent.
             next_control = now0 + min(control_every, history_every)
+            next_nmpc = now0 + min(nmpc_every, next_control)
         else:
             next_control = next_grid_ts(epoch, control_every, now0)
+            next_nmpc = next_grid_ts(epoch, nmpc_every, now0)
         while not self._ticker_stop.is_set():
             now = time.time()
             if now >= next_history:
@@ -526,7 +561,8 @@ class HeatingRuntime:
                     _logger.exception("Wall-clock identification sample failed")
                 history_every = self._history_tick_interval_s()
                 next_history = time.time() + history_every
-            if now >= next_control:
+            control_due_now = now >= next_control
+            if control_due_now:
                 last = self._last_control_ran_ts
                 if last is not None and (now - last) < (control_every * 0.5):
                     # MQTT tag path already ran control recently — skip.
@@ -538,7 +574,23 @@ class HeatingRuntime:
                         _logger.exception("Wall-clock control cycle failed")
                     control_every = self._control_tick_interval_s()
                     next_control = self._next_aligned_ts(control_every, time.time())
-            sleep_for = max(0.2, min(next_history, next_control) - time.time())
+            # Start NMPC after P on coincident slots so the first 15-minute
+            # tick still uses the previous plan while the NLP runs.
+            if now >= next_nmpc:
+                try:
+                    self._schedule_nmpc_worker()
+                except Exception:
+                    _logger.exception("Wall-clock NMPC schedule failed")
+                nmpc_every = self._nmpc_period_s()
+                next_nmpc = self._next_aligned_ts(nmpc_every, time.time())
+            elif control_due_now:
+                try:
+                    self._schedule_nmpc_worker()
+                except Exception:
+                    _logger.exception("Wall-clock idle NMPC retry failed")
+            sleep_for = max(
+                0.2, min(next_history, next_control, next_nmpc) - time.time()
+            )
             if self._ticker_stop.wait(timeout=sleep_for):
                 return
 
@@ -553,6 +605,10 @@ class HeatingRuntime:
             await self.run_control_cycle()
         except Exception:
             _logger.exception("Control cycle failed during runtime start")
+        try:
+            self._schedule_nmpc_worker()
+        except Exception:
+            _logger.exception("NMPC schedule failed during runtime start")
         try:
             await self.publish_status()
         except Exception:
@@ -758,7 +814,9 @@ class HeatingRuntime:
             # Another cycle (MQTT tag or ticker) is already running.
             return dict(self.actuator_outputs)
         try:
+            self._control_computing = True
             started = time.time()
+            self._sync_p_fast_index(started)
             self._recompute_room_temperatures()
             outdoor = self._outdoor_temperature()
             disturbances = self._mpc_disturbance_inputs(outdoor)
@@ -809,9 +867,9 @@ class HeatingRuntime:
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
-            self._schedule_nmpc_worker()
             return dict(self.actuator_outputs)
         finally:
+            self._control_computing = False
             self._control_lock.release()
 
     def _schedule_nmpc_worker(self) -> None:
@@ -838,6 +896,7 @@ class HeatingRuntime:
         except RuntimeError:
             self._nmpc_loop = None
         self._mark_nmpc_slot_started()
+        self._nmpc_computing = True
         self.control_engine.mark_nmpc_busy()
         self._nmpc_thread = threading.Thread(
             target=self._nmpc_worker_thread,
@@ -849,12 +908,13 @@ class HeatingRuntime:
     def _nmpc_worker_thread(self) -> None:
         try:
             result = self.control_engine.solve_nmpc_blocking()
-            applied = self.control_engine.apply_nmpc_result(result)
+            self.control_engine.apply_nmpc_result(
+                result, plan_epoch=self._slow_slot_start(time.time())
+            )
             note = self.control_engine.consume_watchdog_notification()
             if note:
                 self._emit_nmpc_notify(note)
-            if applied:
-                self._request_control_cycle_after_nmpc()
+            # P stays on the previous plan until the next fast grid tick.
         except Exception:
             _logger.exception("NMPC worker failed")
             controller = getattr(self.control_engine, "_controller", None)
@@ -865,38 +925,8 @@ class HeatingRuntime:
                 if note:
                     self._emit_nmpc_notify(note)
         finally:
+            self._nmpc_computing = False
             self._note_nmpc_cycle_complete()
-
-    def _request_control_cycle_after_nmpc(self) -> None:
-        """Recompute and publish P commands as soon as a slow plan is applied.
-
-        The NLP worker only installs ``U*`` / ``T_ref``.  Without this, heaters
-        stay at the previous (often zero) command until the next 15 min tick.
-
-        App start and the wall-clock ticker drive control through ephemeral
-        ``asyncio.run`` loops.  Those are closed before the NLP returns, so a
-        captured ``_nmpc_loop`` is often dead — fall back to ``asyncio.run``
-        the same way ``_emit_nmpc_notify`` does.
-        """
-
-        coro = self.run_control_cycle(wait_for_lock=True)
-        loop = getattr(self, "_nmpc_loop", None)
-        if loop is not None and loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(coro, loop)
-
-            def _log_done(done: Any) -> None:
-                if getattr(done, "cancelled", lambda: False)():
-                    return
-                exc = done.exception()
-                if exc is not None:
-                    _logger.error("Control cycle after NMPC apply failed: %s", exc)
-
-            fut.add_done_callback(_log_done)
-            return
-        try:
-            asyncio.run(coro)
-        except Exception:
-            _logger.exception("Control cycle after NMPC apply failed")
 
     def _note_nmpc_cycle_complete(self) -> None:
         """Persist runtime state after a slow solve without moving the epoch.
@@ -1618,21 +1648,19 @@ class HeatingRuntime:
             now,
         )
 
-        update_interval = float(
-            self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
-        )
-        nmpc_period_s = float(
-            self.options.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
-        )
+        update_interval = float(self._derived_update_interval())
+        nmpc_period_s = float(self._nmpc_period_s())
         mean_error = self._mean_tracking_error()
         states["sensor.heating_assistant_mpc_performance"] = self._ha_state(
             "sensor.heating_assistant_mpc_performance",
             self._last_control_duration_s,
             {
-                "last_run_ts": self._last_control_ts,
+                "last_run_ts": self._last_nmpc_ts,
                 "dt_s": update_interval,
                 "last_nmpc_ts": self._last_nmpc_ts,
                 "nmpc_period_s": nmpc_period_s,
+                "nmpc_computing": bool(self._nmpc_computing),
+                "control_computing": bool(self._control_computing),
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
             },
@@ -1983,9 +2011,11 @@ class HeatingRuntime:
         return {
             "mode": self.control_engine.mode,
             "fallback_reason": self.control_engine.fallback_reason,
-            "last_run_ts": self._last_control_ts,
+            "last_run_ts": self._last_nmpc_ts,
             "last_nmpc_ts": self._last_nmpc_ts,
             "last_duration_s": self._last_control_duration_s,
+            "nmpc_computing": bool(self._nmpc_computing),
+            "control_computing": bool(self._control_computing),
         }
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))
