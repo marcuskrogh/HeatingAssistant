@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>HeatingAssistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/css/industrial.css">
+  <link rel="stylesheet" href="/static/css/pages/tuning.css">
+  <link rel="stylesheet" href="/sandbox.css">
+  <script src="/static/vendor/chart.min.js"></script>
+  <script src="/static/vendor/chartjs-adapter-date-fns.min.js"></script>
+</head>
+<body>
+  <header class="ha-topbar">
+    <button class="ha-topbar__menu" type="button" aria-label="Menu">&#9776;</button>
+    <div class="ha-topbar__title">HeatingAssistant</div>
+  </header>
+  <nav class="panel-nav panel-nav--live">
+    <div class="panel-nav__links">
+      <a class="panel-nav__link" href="#room">ROOM VIEW</a>
+      <a class="panel-nav__link panel-nav__link--active" href="#tuning">TUNING</a>
+    </div>
+    <div class="panel-nav__brand">
+      <span class="panel-nav__name">HEATING ASSISTANT</span>
+    </div>
+  </nav>
+  <p class="metrics" id="metrics">Loading production forecast payloads…</p>
+
+  <section class="page" id="tuning">
+    <div class="page__label">Controller Tuning · Preview Controller Behaviour</div>
+    <div class="room-selector">
+      <button type="button" class="room-selector__btn room-selector__btn--active">Living Room</button>
+    </div>
+    <div class="grid-charts" id="preview-charts">
+      <div data-chart="temp"></div>
+      <div data-chart="power"></div>
+    </div>
+  </section>
+
+  <section class="page" id="room">
+    <div class="page__label">Room view · Living Room</div>
+    <div class="grid-charts" id="room-charts">
+      <div data-chart="temp"></div>
+      <div data-chart="power"></div>
+    </div>
+  </section>
+
+  <script type="module">
+    import {
+      TimeSeriesChart,
+      historyToDataPoints,
+      historyToEnabledPoints,
+      forecastToDataPoints,
+      forecastToEnabledPoints,
+    } from '/static/js/components/time-series-chart.js?v=124';
+    import {
+      buildTemperatureChart,
+      buildPowerChart,
+    } from '/static/js/charts/room-charts.js?v=124';
+
+    const POWER_KW_TICK = (v) => Number(v).toFixed(1);
+
+    function closeStepSegments(pts) {
+      const out = [];
+      for (let i = 0; i < pts.length; i++) {
+        out.push(pts[i]);
+        if (pts[i].y !== null && i + 1 < pts.length && pts[i + 1].y === null) {
+          out.push({ x: pts[i + 1].x - 1, y: pts[i].y });
+        }
+      }
+      return out;
+    }
+
+    function clampFirstToWindow(pts, windowStart) {
+      if (pts.length > 0 && pts[0].x < windowStart) {
+        pts[0] = { ...pts[0], x: windowStart };
+      }
+      return pts;
+    }
+
+    const pack = await (await fetch('/inspect/payloads.json')).json();
+    const m = pack.metrics;
+    document.getElementById('metrics').textContent =
+      `k=${pack.nmpc_k}  max|ΔT|=${m.max_abs_dT_K.toFixed(3)} K  rms|ΔT|=${m.rms_dT_K.toFixed(3)} K  `
+      + `max|ΔP|=${(m.max_abs_dP_W / 1000).toFixed(2)} kW  Urem=${pack.max_abs_U_remaining.toFixed(3)}`;
+
+    const previewOpts = { forecastOnly: true };
+    const previewRoot = document.getElementById('preview-charts');
+    const previewCharts = {
+      temp: new TimeSeriesChart(previewRoot.querySelector('[data-chart="temp"]'), {
+        title: 'TEMPERATURE',
+        yLabel: '°C',
+        height: 240,
+      }),
+      power: new TimeSeriesChart(previewRoot.querySelector('[data-chart="power"]'), {
+        title: 'HEATING POWER & PRICE',
+        yLabel: 'kW',
+        yTickFormat: POWER_KW_TICK,
+        y2: true,
+        y2Label: 'Price',
+        height: 200,
+      }),
+    };
+
+    const roomRoot = document.getElementById('room-charts');
+    const roomCharts = {
+      temp: new TimeSeriesChart(roomRoot.querySelector('[data-chart="temp"]'), {
+        title: 'TEMPERATURE',
+        yLabel: '°C',
+        height: 240,
+      }),
+      power: new TimeSeriesChart(roomRoot.querySelector('[data-chart="power"]'), {
+        title: 'HEATING POWER & PRICE',
+        yLabel: 'kW',
+        yTickFormat: POWER_KW_TICK,
+        y2: true,
+        y2Label: 'Price',
+        height: 200,
+      }),
+    };
+
+    const previewRoom = pack.preview.rooms.living_room;
+    const previewData = previewRoom.forecast || [];
+    const previewStart = previewData.length
+      ? new Date(previewData[0].time).getTime()
+      : pack.now_ms;
+    buildTemperatureChart(
+      previewCharts.temp,
+      [], [],
+      [], forecastToEnabledPoints(previewData, 'setpoint'),
+      forecastToDataPoints(previewData, 'temperature'),
+      forecastToDataPoints(previewData, 'linearised_temperature'),
+      [], forecastToEnabledPoints(previewData, 'constraint_upper'),
+      [], forecastToEnabledPoints(previewData, 'constraint_lower'),
+      null,
+      previewOpts,
+    );
+    buildPowerChart(
+      previewCharts.power,
+      [],
+      forecastToDataPoints(previewData, 'heating_power'),
+      [],
+      forecastToDataPoints(pack.preview.price_forecast || [], 'price'),
+      previewRoom,
+      previewStart,
+      previewOpts,
+    );
+
+    const windowStart = pack.window_start_ms;
+    const hist = pack.history;
+    const roomFc = pack.room.rooms.living_room;
+    const roomData = roomFc.forecast || [];
+    const filteredHistory = historyToDataPoints(hist.filtered);
+    const measuredHistory = historyToDataPoints(hist.measured);
+    const setpointHistory = closeStepSegments(
+      clampFirstToWindow(historyToEnabledPoints(hist.setpoint), windowStart),
+    );
+    const powerHistory = historyToDataPoints(hist.power);
+    const priceHistory = historyToDataPoints(hist.price);
+    const constraintUpperHistory = setpointHistory.map((p) => (
+      p.y == null ? p : { ...p, y: p.y + 2 }
+    ));
+    const constraintLowerHistory = setpointHistory.map((p) => (
+      p.y == null ? p : { ...p, y: p.y - 2 }
+    ));
+
+    buildTemperatureChart(
+      roomCharts.temp,
+      filteredHistory, measuredHistory,
+      setpointHistory, forecastToEnabledPoints(roomData, 'setpoint'),
+      forecastToDataPoints(roomData, 'temperature'),
+      forecastToDataPoints(roomData, 'linearised_temperature'),
+      constraintUpperHistory, forecastToEnabledPoints(roomData, 'constraint_upper'),
+      constraintLowerHistory, forecastToEnabledPoints(roomData, 'constraint_lower'),
+      null,
+    );
+    buildPowerChart(
+      roomCharts.power,
+      powerHistory,
+      forecastToDataPoints(roomData, 'heating_power'),
+      priceHistory,
+      forecastToDataPoints(pack.room.price_forecast || [], 'price'),
+      roomFc,
+      windowStart,
+    );
+  </script>
+</body>
+</html>

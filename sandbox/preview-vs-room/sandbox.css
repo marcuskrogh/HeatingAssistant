@@ -1,0 +1,85 @@
+/* Sandbox host: industrial.css variables live on :host in the panel shadow root. */
+html {
+  --bg-primary: #1a1d23;
+  --bg-card: #22262e;
+  --bg-elevated: #2a2f38;
+  --border: #363b44;
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa0a8;
+  --text-dim: #6b7280;
+  --accent: #00d4aa;
+  --accent-dim: rgba(0, 212, 170, 0.15);
+  --warning: #f5a623;
+  --alarm: #e74c3c;
+  --good: #27ae60;
+  --chart-temp: #4fc3f7;
+  --chart-temp-measured: #e57373;
+  --chart-power: #ffb74d;
+  --chart-solar: #ffd54f;
+  --chart-outdoor: #90a4ae;
+  --chart-setpoint: #e57373;
+  --chart-price: #81c784;
+  --chart-bounds: rgba(229, 115, 115, 0.12);
+  --radius: 8px;
+  --radius-sm: 4px;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --transition: 200ms ease;
+}
+
+html, body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.ha-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 16px;
+  background: var(--bg-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14),
+              0 1px 5px rgba(0, 0, 0, 0.12),
+              0 3px 1px rgba(0, 0, 0, 0.2);
+}
+
+.ha-topbar__menu {
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.ha-topbar__title {
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.page {
+  padding: 16px 20px 32px;
+}
+
+.page + .page {
+  border-top: 1px solid var(--border);
+}
+
+.page__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.metrics {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 20px 8px;
+}
