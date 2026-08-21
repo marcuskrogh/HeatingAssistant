@@ -89,7 +89,7 @@ source. This session also promoted the accepted short-circuit.
 - Relates: [SWD-417](https://marcusknielsen.atlassian.net/browse/SWD-417)
 - Artifact: `docs/agents/SANDBOX-preview-room-plots.md`
 - Branch: `cursor/swd-431-preview-room-plots-ce1e`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/633
 
 ## Next
 `/review-fix SWD-431` — Review and auto-fix on the delivery PR
