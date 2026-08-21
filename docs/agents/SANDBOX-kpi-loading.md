@@ -74,4 +74,4 @@ Post-merge inspect-loop instead of `/iterate` when each turn needs inspection.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/632
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/632
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/632 (`fa64ee6`)
