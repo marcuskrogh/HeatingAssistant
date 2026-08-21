@@ -4,6 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-426 | Task | [Tweak] Align NMPC/P timers on one grid; independent solves; KPI loading | In Progress | — | docs/agents/PLAN-nmpc-p-independent-grid.md | `/implement SWD-426` |
+| SWD-427 | Sub-task | Shared grid + independent NMPC and P (no extra P after NLP) | To Do | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
+| SWD-428 | Sub-task | Loading animation on compute KPI cards while solving | To Do | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
+| SWD-429 | Sub-task | Tests, CalVer, changelog, App sync | To Do | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
 | SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | Done | — | docs/agents/SANDBOX-forecast-jitter.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/630 (`eb28be6`) |
 | SWD-424 | Sub-task | Keep room-view Forecast on the NMPC air path | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
 | SWD-425 | Sub-task | Tests, CalVer, App sync for NMPC Forecast plot | Done | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
@@ -148,6 +152,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/define` SWD-426: PLAN `docs/agents/PLAN-nmpc-p-independent-grid.md` (tweak / delta-fast). Shared Start epoch; independent NMPC and P; no extra P after NLP; KPI loading while computing. Sub-tasks SWD-427–429. Next `/implement SWD-426`.
 - 2026-08-21 — `/ship` SWD-417 via PR #630 (`eb28be6`): remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); Planned Power keeps leftover 2 h outdoor ZOH; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.26`. Next Done.
 - 2026-08-21 — `/review-fix` SWD-417 CLEAN (focused): 0 blockers remaining / 3 should-fix (disabled-source idle-U overlay; `_nmpc_k` vs apply identity; SWD-421 tests still expected frozen `T_ref`). Fix-forward on PR #630 (`e461dd2`). Merged `main` (SWD-418/421). CalVer 2026.08.26. Fast suite 962 passed, 88 skipped, 18 deselected. Next `/ship SWD-417`.
 - 2026-08-21 — `/implement` SWD-417 In Review: remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); PR https://github.com/marcuskrogh/HeatingAssistant/pull/630; CalVer 2026.08.25. Fast suite 950 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-417`.
