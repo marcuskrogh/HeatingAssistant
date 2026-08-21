@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-431 | Task | [Sandbox] Controller Tuning preview vs room view predictions in HA app plots | In Review | — | docs/agents/SANDBOX-preview-room-plots.md | `/ship SWD-431` — closeout on https://github.com/marcuskrogh/HeatingAssistant/pull/633 |
 | SWD-430 | Task | [Sandbox] Loading animation belongs on NMPC/P countdown timers | Done | — | docs/agents/SANDBOX-kpi-loading.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/632 (`fa64ee6`) |
 | SWD-426 | Task | [Tweak] Align NMPC/P timers on one grid; independent solves; KPI loading | Done | — | docs/agents/PLAN-nmpc-p-independent-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/631 (`507873f`) |
 | SWD-427 | Sub-task | Shared grid + independent NMPC and P (no extra P after NLP) | Done | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
@@ -153,6 +154,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/review-fix` SWD-431 CLEAN (focused): 0 blockers / 0 should-fix / 2 deferred notes (worker apply vs `_control_lock`; empty-preview NLP). `gh` review API 403, posted comment. Merging `main` (SWD-430). Next `/ship SWD-431`.
+- 2026-08-21 — `/sandbox`+implement SWD-431: Forecast is remaining-`U*` resim from the current EKF with OCP `step_hold` (not freeze-`T_ref`). vs resim 0 K; vs frozen `T_ref[k:]` 1.30 K. Matching Tuning preview still overlays. Inspect `sandbox/preview-vs-room/inspect/04_*`. CalVer 2026.08.28. PR https://github.com/marcuskrogh/HeatingAssistant/pull/633. Next `/review-fix SWD-431`.
+- 2026-08-21 — `/sandbox`+implement SWD-431: room-view Forecast is remaining OCP `T_ref` (implicit-Euler `n_int`), vs OCP 0.000 K. Matching Tuning preview still overlays. Inspect `sandbox/preview-vs-room/inspect/03_*`. CalVer 2026.08.28. PR https://github.com/marcuskrogh/HeatingAssistant/pull/633. Next `/review-fix SWD-431`. (Withdrawn: freeze-`T_ref` ignores updated disturbances.)
 - 2026-08-21 — `/ship` SWD-430 via PR #632 (`fa64ee6`): loading animation on NEXT NMPC / NEXT CONTROL while that solver is busy; live KPIs stay applied values; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.28`. Next Done.
 - 2026-08-21 — `/review-fix` SWD-430 CLEAN (focused): 0 blockers / 1 should-fix (dual-tree overlay asserts). Fix-forward on PR #632. Fast suite 973 passed, 88 skipped, 18 deselected. Next `/ship SWD-430`.
 - 2026-08-21 — `/implement` SWD-430 In Review: countdown loading overlay on NEXT NMPC / NEXT CONTROL; live KPIs stay applied values; PR https://github.com/marcuskrogh/HeatingAssistant/pull/632; CalVer 2026.08.28. Fast suite 973 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-430`.

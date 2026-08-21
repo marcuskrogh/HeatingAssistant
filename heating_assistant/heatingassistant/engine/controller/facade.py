@@ -113,7 +113,6 @@ from ..const import (
     SHERMAN_GRIMSRUD_WIND_COEF,
     SOLAR_WALL_FRACTION,
 )
-from ..integrator import implicit_euler_substeps
 from ..nmpc_ocp import (
     NMPC_IDLE_U_ABS,
     NMPC_MAXITER,
@@ -122,6 +121,7 @@ from ..nmpc_ocp import (
     evaluate_zero_heat_cost,
     mean_price_slow,
     plan_from_solve,
+    roll_fast_air_path,
     solve_mean_ocp,
 )
 from ..nmpc_p import comfort_fallback_command, p_command
@@ -2523,27 +2523,34 @@ class HeatingMPCController:
         solar_seq: List[Dict[str, float]],
         wind_seq: Optional[List[float]] = None,
     ) -> None:
-        """Roll remaining U* from the current EKF and publish T / Planned Power."""
+        """Resimulate remaining U* on the OCP plant with current disturbances.
+
+        Temperature uses ``roll_fast_air_path`` (the same implicit-Euler hold
+        ``MeanOcp`` uses: ``n_int`` substeps, U and d held). Outdoor/solar are
+        the latest forecasts. Wind is the horizon mean, as in the NLP — not
+        the solve-time ``T_ref``. Planned Power is leftover ``U*`` with one
+        outdoor sample per 2 h hold.
+        """
+        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
         room_list = self._system._room_list
         n_rooms = self._system._n_rooms
         self._predictions = self._compute_nonlinear_predictions(
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
         )
         self._linearised_predictions = [dict(step) for step in self._predictions]
-        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
 
     def rebuild_forecast_from_plan(self) -> bool:
-        """Resimulate the remaining accepted U* from the current EKF state.
+        """Resimulate remaining accepted U* from the current EKF state.
 
-        Room view may re-roll leftover two-hour holds. It must not replay U*
-        from slow index 0 against a later state and a solar series from now.
-        Display power uses one outdoor sample per leftover hold so COP does
-        not invent 15-minute watt steps.
+        Room view may re-roll leftover two-hour holds when outdoor/solar/wind
+        forecasts change. The plant step is the OCP hold (implicit Euler,
+        ``n_int`` on ``_control_system``). Wind is the current horizon mean,
+        matching the NLP. Do not replay U* from slow index 0 against a later
+        state. Display power uses one outdoor sample per leftover hold so COP
+        does not invent 15-minute watt steps.
         """
         with self._nmpc_lock:
             has_plan = self._nmpc_U_fast is not None
-            T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
-            k0 = int(self._nmpc_k)
         if not has_plan:
             return False
         n = int(self._horizon)
@@ -2551,26 +2558,10 @@ class HeatingMPCController:
         if outdoor_seq is None:
             return False
         U_abs = self._forecast_U(n)
-        solar_seq = self._pad_solar_forecast(n)
-        if solar_seq is not None:
-            self._publish_plan_rollout(
-                U_abs, outdoor_seq, solar_seq, wind_seq=self._pad_wind_forecast(n),
-            )
-            return True
-        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
-        if T_ref is not None and T_ref.shape[0] > 0:
-            room_list = self._system._room_list
-            n_rooms = min(int(T_ref.shape[1]), len(room_list))
-            last = T_ref.shape[0] - 1
-            start = min(max(k0, 0), last)
-            self._predictions = [
-                {
-                    name: float(T_ref[min(start + k, last), i])
-                    for i, name in enumerate(room_list[:n_rooms])
-                }
-                for k in range(n)
-            ]
-            self._linearised_predictions = [dict(step) for step in self._predictions]
+        solar_seq = self._pad_solar_forecast(n) or []
+        self._publish_plan_rollout(
+            U_abs, outdoor_seq, solar_seq, wind_seq=self._pad_wind_forecast(n),
+        )
         return True
 
     def _comfort_bounds_fast(
@@ -3245,70 +3236,52 @@ class HeatingMPCController:
         n_rooms: int,
         wind_seq: Optional[List[float]] = None,
     ) -> List[Dict[str, float]]:
-        """Compute nonlinear model predictions using the optimal control sequence.
+        """Resimulate remaining U* with the OCP plant step.
 
-        Simulates the nonlinear thermal model forward over the horizon using the
-        optimal control inputs from the MPC and the forecasted disturbances
-        (outdoor temperature, solar gains, and — when available — per-step
-        wind speed).  The online internal-gain deviation decays with its OU
-        rate κ over the rollout, matching the decrement the QP saw in its
-        disturbance forecast.
-
-        Parameters
-        ----------
-        U_abs : np.ndarray
-            Optimal control sequence [N, m] where N is the horizon length
-            and m is the number of control inputs.
-        outdoor_seq : list of float
-            Outdoor temperature forecast over the horizon [°C].
-        solar_seq : list of dict
-            Solar gain forecasts per room over the horizon [W].
-        room_list : list of str
-            Names of the rooms.
-        n_rooms : int
-            Number of rooms.
-        wind_seq : list of float, optional
-            Wind speed [m/s] per horizon step for the infiltration overlay.
-
-        Returns
-        -------
-        list of dict
-            Predicted temperatures {room_name: temp_°C} for each horizon step.
+        Same map as ``MeanOcp``: ``roll_fast_air_path`` / ``step_hold``,
+        implicit Euler, ``n_int`` substeps, U and d held on ``_control_system``.
+        Outdoor and solar are the current forecasts. Wind is the horizon mean
+        (the NLP does not vary wind inside the horizon).
         """
-        predictions = []
-        x_curr = self._ekf.x_hat.copy()
-        p = np.array([], dtype=float)
-
-        wind_restore = self._system._wind_speed
-
+        plant = self._control_system
         N = len(outdoor_seq)
+        U = np.asarray(U_abs, dtype=float)
+        if U.ndim == 1:
+            U = U.reshape(-1, max(int(self._system.nu), 1))
+        if U.shape[0] == 0 or N == 0:
+            return []
+        if U.shape[0] < N:
+            U = np.vstack([U, np.tile(U[-1:], (N - U.shape[0], 1))])
+        U = U[:N]
+        last_solar: Dict[str, float] = {}
+        d_fast = []
+        for k in range(N):
+            if k < len(solar_seq):
+                last_solar = solar_seq[k]
+            d_fast.append(
+                plant.disturbance_vector(float(outdoor_seq[k]), last_solar)
+            )
+        wind_restore = plant._wind_speed
         try:
-            for k in range(N):
-                u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
-                outdoor_temp = outdoor_seq[k]
-                solar_gains = solar_seq[k] if k < len(solar_seq) else solar_seq[-1]
-                if wind_seq is not None and k < len(wind_seq):
-                    self._system.set_wind_speed(wind_seq[k])
-
-                d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
-
-                # Simulate one step forward using the nonlinear model
-                # Use default arguments to capture current values in closures
-                rhs = lambda x, u=u_k, d=d_k: self._system.f(x, u, d, p, 0.0)
-                jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
-
-                x_next = implicit_euler_substeps(
-                    rhs, jacobian, x_curr, self._dt, self._n_int_steps
-                )
-
-                # Extract room temperatures (first n_rooms states)
-                temps_k = x_next[:n_rooms]
-                predictions.append(
-                    {name: float(temps_k[i]) for i, name in enumerate(room_list)}
-                )
-
-                x_curr = x_next
+            if wind_seq:
+                finite = [float(w) for w in wind_seq if np.isfinite(w)]
+                if finite:
+                    plant.set_wind_speed(float(np.mean(finite)))
+            air = roll_fast_air_path(
+                plant,
+                self._ekf.x_hat,
+                U,
+                d_fast,
+                dt_s=float(self._timing.dt_s),
+                n_int=int(self._n_int_steps),
+                n_rooms=n_rooms,
+            )
         finally:
-            self._system.set_wind_speed(wind_restore)
-
-        return predictions
+            plant.set_wind_speed(wind_restore)
+        return [
+            {
+                name: float(air[k, i])
+                for i, name in enumerate(room_list[:n_rooms])
+            }
+            for k in range(int(air.shape[0]))
+        ]
