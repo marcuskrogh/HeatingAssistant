@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import matplotlib
@@ -28,8 +28,10 @@ from heatingassistant.engine.const import (  # noqa: E402
     DEFAULT_NMPC_PERIOD,
     DEFAULT_SMOOTHING_WEIGHT,
 )
+from heatingassistant.app.forecast_payload import build_app_forecast_payload  # noqa: E402
 from heatingassistant.engine.control_loop import ControlEngine  # noqa: E402
 from heatingassistant.engine.integrator import implicit_euler_step  # noqa: E402
+from heatingassistant.engine.naming import room_slug  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 INSPECT = HERE / "inspect"
@@ -540,6 +542,206 @@ def plot_fixed_u(pack: dict, tag: str) -> list[Path]:
     return [forecast_path, dt_path, dense_path]
 
 
+def _payload_temps(snap: dict, t_now: float) -> np.ndarray:
+    """Room-view / Tuning series including the NOW bridge sample."""
+
+    payload = build_app_forecast_payload(
+        rooms=[{"name": ROOM, "setpoint": 23.5, "comfort_offset": 2.0}],
+        room_temperatures={ROOM: t_now},
+        outdoor_temp=22.0,
+        energy_price=2.0,
+        snapshot=snap,
+        now=NOW,
+    )
+    slug = room_slug(ROOM)
+    rows = payload["rooms"][slug]["forecast"]
+    return np.array(
+        [float(step["temperature"]) for step in rows if step.get("temperature") is not None],
+        dtype=float,
+    )
+
+
+def _payload_watts(snap: dict) -> np.ndarray:
+    payload = build_app_forecast_payload(
+        rooms=[{"name": ROOM, "setpoint": 23.5, "comfort_offset": 2.0}],
+        room_temperatures={ROOM: 25.2},
+        outdoor_temp=22.0,
+        energy_price=2.0,
+        snapshot=snap,
+        now=NOW,
+    )
+    slug = room_slug(ROOM)
+    rows = payload["rooms"][slug]["forecast"]
+    vals = []
+    for step in rows:
+        p = step.get("heating_power")
+        vals.append(float(p) if p is not None else 0.0)
+    return np.array(vals, dtype=float)
+
+
+def run_surfaces(*, n_fast_ticks: int = 8, price_kind: str = "peaked") -> dict:
+    """Compare Tuning preview (fresh NLP) vs room-view (live compute cache)."""
+
+    engine = ControlEngine(_config())
+    n_fast = engine._controller.horizon
+    dt_s = float(engine._controller._dt)
+    outdoor = [22.0] * n_fast
+    prices = _price_series(price_kind, n_fast, dt_s)
+    t_meas = 25.2
+    engine.compute_actions(
+        {ROOM: t_meas},
+        22.0,
+        {ROOM: 23.5},
+        now=NOW,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    engine.mark_nmpc_busy()
+    plan = engine.solve_nmpc_blocking()
+    if not plan.get("accepted") or not engine.apply_nmpc_result(plan):
+        raise RuntimeError("surfaces sandbox: live NMPC did not accept")
+    snap_apply = engine.forecast_snapshot()
+    t_apply = _series(snap_apply, "predictions")
+    w_apply = _series(snap_apply, "heating_schedule")
+
+    # Same extra compute() the Tuning preview runs after apply.
+    engine.compute_actions(
+        {ROOM: t_meas},
+        22.0,
+        {ROOM: 23.5},
+        now=NOW,
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+    )
+    snap_preview_compute = engine.forecast_snapshot()
+    t_preview_compute = _series(snap_preview_compute, "predictions")
+
+    # Room view after one slow period of 15 min ticks. Measured T held (sensor);
+    # EKF + P run; Forecast is rebuilt from the unshifted U* each tick.
+    for k in range(1, n_fast_ticks + 1):
+        now_k = NOW + timedelta(seconds=dt_s * k)
+        engine.compute_actions(
+            {ROOM: t_meas},
+            22.0,
+            {ROOM: 23.5},
+            now=now_k,
+            outdoor_forecast=outdoor,
+            price_forecast=prices,
+        )
+    snap_room = engine.forecast_snapshot()
+    t_room = _series(snap_room, "predictions")
+    w_room = _series(snap_room, "heating_schedule")
+
+    preview = engine.preview_tuning_forecast(
+        {},
+        {ROOM: t_meas},
+        22.0,
+        {ROOM: 23.5},
+        outdoor_forecast=outdoor,
+        price_forecast=prices,
+        now=NOW + timedelta(seconds=dt_s * n_fast_ticks),
+    )
+    if preview.get("error"):
+        raise RuntimeError(f"surfaces sandbox: preview failed {preview.get('error')}")
+    t_preview = _series(preview, "predictions")
+    w_preview = _series(preview, "heating_schedule")
+
+    n = min(t_apply.size, t_room.size, t_preview.size, t_preview_compute.size)
+    hours = (np.arange(n, dtype=float) + 1.0) * (dt_s / 3600.0)
+    series = {
+        "apply T_ref": t_apply[:n],
+        "preview after compute()": t_preview_compute[:n],
+        "room view after 2 h ticks": t_room[:n],
+        "tuning preview re-solve": t_preview[:n],
+    }
+    watts = {
+        "apply T_ref": w_apply[:n],
+        "room view after 2 h ticks": w_room[:n],
+        "tuning preview re-solve": w_preview[:n],
+    }
+    metrics = []
+    for label, temps in series.items():
+        row = _jitter(temps, dt_s / 3600.0)
+        err = temps[:n] - t_preview[:n]
+        row.update(
+            {
+                "label": label,
+                "max_abs_err_vs_preview_K": float(np.max(np.abs(err))),
+                "rms_err_vs_preview_K": float(np.sqrt(np.mean(err * err))),
+            }
+        )
+        metrics.append(row)
+    ui_room = _payload_temps(snap_room, t_meas)
+    ui_preview = _payload_temps(preview, t_meas)
+    ui_apply = _payload_temps(snap_apply, 25.2)
+    return {
+        "hours": hours,
+        "series": series,
+        "watts": watts,
+        "metrics": metrics,
+        "ui_hours": np.arange(ui_room.size, dtype=float) * (dt_s / 3600.0),
+        "ui_room": ui_room,
+        "ui_preview": ui_preview,
+        "ui_apply": ui_apply,
+        "n_fast_ticks": n_fast_ticks,
+        "t_meas_after": t_meas,
+        "fun_live": float(plan.get("fun", float("nan"))),
+    }
+
+
+def plot_surfaces(pack: dict, tag: str) -> list[Path]:
+    INSPECT.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True)
+    ax_t, ax_u, ax_ui = axes
+    for label, temps in pack["series"].items():
+        ax_t.plot(pack["hours"], temps, label=label, linewidth=1.4)
+    ax_t.axhline(23.5, color="0.4", linestyle="--", linewidth=0.8)
+    ax_t.axhline(25.5, color="0.7", linestyle=":", linewidth=0.8)
+    ax_t.set_ylabel("Engine T [°C]")
+    ax_t.set_title("Room-view live cache vs Tuning preview (same plant, peaked price)")
+    ax_t.legend(loc="best", fontsize=8)
+    ax_t.grid(True, alpha=0.3)
+    for label, watts in pack["watts"].items():
+        ax_u.step(
+            pack["hours"],
+            np.asarray(watts)[: pack["hours"].size] / 1000.0,
+            where="post",
+            label=label,
+            linewidth=1.4,
+        )
+    ax_u.set_ylabel("Planned power [kW]")
+    ax_u.legend(loc="best", fontsize=8)
+    ax_u.grid(True, alpha=0.3)
+    n_ui = min(pack["ui_room"].size, pack["ui_preview"].size, pack["ui_apply"].size)
+    hours_ui = pack["ui_hours"][:n_ui]
+    ax_ui.plot(hours_ui, pack["ui_apply"][:n_ui], label="payload after apply", linewidth=1.4)
+    ax_ui.plot(hours_ui, pack["ui_room"][:n_ui], label="payload room view", linewidth=1.4)
+    ax_ui.plot(hours_ui, pack["ui_preview"][:n_ui], label="payload tuning preview", linewidth=1.4)
+    ax_ui.set_ylabel("UI payload T [°C]")
+    ax_ui.set_xlabel("Hours from the plot NOW")
+    ax_ui.legend(loc="best", fontsize=8)
+    ax_ui.grid(True, alpha=0.3)
+    fig.tight_layout()
+    forecast_path = INSPECT / f"{tag}_forecast.png"
+    fig.savefig(forecast_path, dpi=120)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+    for label, temps in pack["series"].items():
+        ax.plot(pack["hours"][1:], np.diff(temps), label=label, linewidth=1.1)
+    ax.axhline(0.0, color="0.3", linewidth=0.8)
+    ax.set_ylabel("ΔT per 15 min [K]")
+    ax.set_xlabel("Hours from now")
+    ax.set_title("Consecutive engine Forecast steps")
+    ax.legend(loc="best", fontsize=8)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    dt_path = INSPECT / f"{tag}_dT.png"
+    fig.savefig(dt_path, dpi=120)
+    plt.close(fig)
+    return [forecast_path, dt_path]
+
+
 def _floats(raw: str) -> list[float]:
     return [float(part) for part in raw.split(",") if part.strip()]
 
@@ -578,8 +780,43 @@ def main() -> int:
         default=BASELINE_N_INT,
         help="n_int used only for the NLP when --fixed-u is set (default 10)",
     )
+    parser.add_argument(
+        "--surfaces",
+        action="store_true",
+        help="compare room-view live forecast cache vs Tuning preview re-solve",
+    )
+    parser.add_argument(
+        "--fast-ticks",
+        type=int,
+        default=8,
+        help="15 min ticks to run on the live controller before comparing (default 8 = 2 h)",
+    )
     args = parser.parse_args()
     INSPECT.mkdir(parents=True, exist_ok=True)
+    if args.surfaces:
+        pack = run_surfaces(n_fast_ticks=args.fast_ticks, price_kind=args.price)
+        plots = plot_surfaces(pack, args.tag)
+        report = {
+            "tag": args.tag,
+            "mode": "surfaces",
+            "scenario": {
+                "now": NOW.isoformat(),
+                "room": ROOM,
+                "T0": 25.2,
+                "setpoint": 23.5,
+                "timing": "2 h / 8 fast / 36 h",
+                "price": args.price,
+                "n_fast_ticks": pack["n_fast_ticks"],
+                "t_meas_after": pack["t_meas_after"],
+                "fun_live": pack["fun_live"],
+            },
+            "metrics": pack["metrics"],
+            "plots": [str(p.relative_to(ROOT)) for p in plots],
+        }
+        report_path = INSPECT / f"{args.tag}_report.json"
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2))
+        return 0
     if args.fixed_u:
         n_vals = _ints(args.n_int) if args.n_int.strip() else list(FIXED_U_N_INT)
         pack = run_fixed_u(

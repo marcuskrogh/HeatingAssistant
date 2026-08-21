@@ -1,0 +1,65 @@
+{
+  "tag": "04",
+  "mode": "surfaces",
+  "scenario": {
+    "now": "2026-08-21T06:00:00+00:00",
+    "room": "Living Room",
+    "T0": 25.2,
+    "setpoint": 23.5,
+    "timing": "2 h / 8 fast / 36 h",
+    "price": "peaked",
+    "n_fast_ticks": 8,
+    "t_meas_after": 25.2,
+    "fun_live": 8.983495217965917
+  },
+  "metrics": [
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.19278814511062592,
+      "rms_dT_K": 0.07791601848623747,
+      "sign_flips": 8.0,
+      "p95_abs_dT_K": 0.13899020703864481,
+      "max_abs_dT_per_h": 0.7711525804425037,
+      "label": "apply T_ref",
+      "max_abs_err_vs_preview_K": 1.122350712749185,
+      "rms_err_vs_preview_K": 0.5280606518071959
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.2220874704922977,
+      "rms_dT_K": 0.07874443586865541,
+      "sign_flips": 8.0,
+      "p95_abs_dT_K": 0.13876279876126818,
+      "max_abs_dT_per_h": 0.8883498819691908,
+      "label": "preview after compute()",
+      "max_abs_err_vs_preview_K": 1.1536341947433613,
+      "rms_err_vs_preview_K": 0.5522291938981632
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.24585861008383603,
+      "rms_dT_K": 0.07906250086249872,
+      "sign_flips": 5.0,
+      "p95_abs_dT_K": 0.13183604799155443,
+      "max_abs_dT_per_h": 0.9834344403353441,
+      "label": "room view after 2 h ticks",
+      "max_abs_err_vs_preview_K": 1.8798676918454547,
+      "rms_err_vs_preview_K": 0.9647606446929692
+    },
+    {
+      "n": 144.0,
+      "max_abs_dT_K": 0.5714515153503719,
+      "rms_dT_K": 0.1057668685290893,
+      "sign_flips": 16.0,
+      "p95_abs_dT_K": 0.15670231531633477,
+      "max_abs_dT_per_h": 2.2858060614014875,
+      "label": "tuning preview re-solve",
+      "max_abs_err_vs_preview_K": 0.0,
+      "rms_err_vs_preview_K": 0.0
+    }
+  ],
+  "plots": [
+    "sandbox/forecast-jitter/inspect/04_forecast.png",
+    "sandbox/forecast-jitter/inspect/04_dT.png"
+  ]
+}

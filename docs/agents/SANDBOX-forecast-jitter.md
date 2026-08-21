@@ -16,6 +16,7 @@ measure
   - `python3 sandbox/forecast-jitter/harness.py --tag 01`
   - `python3 sandbox/forecast-jitter/harness.py --tag 02 --price peaked --smoothing 0.05,0.1,1.0,5.0`
   - `python3 sandbox/forecast-jitter/harness.py --tag 03 --fixed-u`
+  - `python3 sandbox/forecast-jitter/harness.py --tag 04 --surfaces --price peaked`
 - Inspectables: `sandbox/forecast-jitter/inspect/`
 
 ## Representativeness
@@ -29,7 +30,10 @@ measure
   - **Neighbours** — production `HouseThermalSDE` + `implicit_euler_substeps`.
     Forecast is the OCP air path sampled every 15 min. Price enters only
     as a 2 h mean (`mean_price_slow`). ROM penalises \(\|u_n-u_{n-1}\|^2\)
-    on that slow grid.
+    on that slow grid. Iteration 4 adds the **Tuning preview** neighbour:
+    `preview_tuning_forecast` re-solves the NLP on a throwaway controller.
+    Room view reads `forecast_snapshot` after live `compute()` (EKF+P,
+    then `_forecast_U` which is the unshifted last `U*`).
   - **Path** — `n_int_steps` shared by EKF, `MeanOcp`, and the nonlinear
     Forecast roll; `smoothing_weight` is `MeanOcp.s_rom`. Two-hour ZOH is
     the **control sampling interval**; temperature is implicit-Euler
@@ -44,7 +48,9 @@ measure
     prices did not recreate the live −1.5 kW pulses. The live ~2.5 K
     Forecast swing is still not reproduced.
   - **OCP Jacobian** — named. Frozen-`U*` tests the forward map only.
-  - **Chart.js interpolation** — engine snapshot only.
+  - **Chart.js interpolation** — Forecast datasets use `tension: 0.2` on
+    both pages; Planned Power is `stepped`. Secondary to the two backend
+    paths.
 
 ## Bar
 - Metrics: max |ΔT| / RMS ΔT on consecutive 15 min Forecast points;
@@ -57,14 +63,20 @@ measure
   inaccurate discretisation of the same frozen `U*` relative to a
   high-fidelity substepped roll (`n_int=100`). Bar: max `|T_10 − T_100|`
   comparable to the 15 min `|ΔT|` (~0.8 K here, ~2.5 K live).
+- Iteration 4 hypothesis: room-view Forecast and Tuning preview are
+  the same series. Bar: max `|T_room − T_preview|` after 8 fast ticks
+  comparable to integrator error (23 mK), not kelvin-scale.
 - Scenario: the representative map above.
 
 ## Promote map
 - Production targets (only after accept):
   - `n_int_steps` default in `heatingassistant/engine/controller/facade.py`
     and `heatingassistant/engine/estimation/model_build.py`.
-  - `smoothing_weight` / Tuning “Output Smoothing” (App options fallback
-    0.05 in `heatingassistant/app/runtime.py`).
+  - `heatingassistant/engine/controller/facade.py` (`_forecast_U` /
+    `compute()` overwriting `T_ref`; shift remaining `U*` or keep the
+    applied air path on fast ticks).
+  - `heatingassistant/engine/control_loop.py` (`preview_tuning_forecast`
+    vs `_cache_controller_forecast`).
 - Copy notes: do not change the 2 h / 8 / 36 h timing triple from this
   sandbox. Iterations 1–3 are not a promote (`n_int`, ROM).
 
@@ -74,6 +86,7 @@ measure
 | 1 | n_int = 1 / 10 / 40, flat price | `inspect/01_*` | n_int=40 smoother; not the live 2.5 K swing |
 | 2 | peaked price; s_rom = 0.05 / 0.1 / 1 / 5, n_int=10 | `inspect/02_*` | higher ROM does not move the path |
 | 3 | freeze production `U*` (n_int=10 solve); re-roll T at n_int = 1 / 10 / 40 / 100 | `inspect/03_*` | n_int=10 matches n_int=100 to 23 mK; 15 min wiggles are the plant, not Euler error |
+| 4 | room-view live cache vs Tuning preview re-solve (8×15 min ticks, peaked price) | `inspect/04_*` | two different paths; max \|T\| error 1.88 K; Planned Power is a different staircase |
 
 ### Iteration 1 numbers (flat price)
 
@@ -122,6 +135,31 @@ the wiggles and is not a promote for Forecast accuracy.
 
 The live ~2.5 K swing is still not in this scenario.
 
+### Iteration 4 numbers (room view vs Tuning preview)
+
+They are not the same prediction. Tuning **Preview Controller Behaviour**
+calls `preview_tuning_forecast`: new controller, copy EKF, **re-solve the
+NLP**, apply, one `compute()`. Room view calls `forecasts` → last
+`forecast_snapshot`. Every 15 min `compute()` **replaces** the OCP air
+path with `_compute_nonlinear_predictions(_forecast_U)`. `_forecast_U`
+returns the last accepted `U*` from slow index 0; it does not shift by
+`_nmpc_k`.
+
+Command: `python3 sandbox/forecast-jitter/harness.py --tag 04 --surfaces --price peaked`
+
+| Series | max \|ΔT\| [K] | max \|T − T_preview\| [K] |
+|--------|----------------|---------------------------|
+| apply `T_ref` (held plan) | 0.19 | 1.12 |
+| preview's extra `compute()` | 0.22 | 1.15 |
+| room view after 8 ticks (2 h) | 0.25 | 1.88 |
+| Tuning preview re-solve | 0.57 | 0 |
+
+Held-plan Planned Power stays the original staircase. Preview picks a
+different `U*` (deeper cooling for the first ~10 h). The UI payload
+matches the engine snapshot on each path, so Chart.js is not inventing
+the split. Forecast lines still use `tension: 0.2` on both pages
+(secondary overshoot).
+
 ## Role in pipeline
 Promotion input for `/implement`. Supportive isolation — not production
 source.
@@ -135,4 +173,4 @@ source.
 
 ## Next
 `/sandbox SWD-417` — next inspect turn after the operator names a delta
-(frozen-`U*` n_int=10 is accurate; not a promote)
+(room view is not the Tuning preview solve; not a promote yet)
