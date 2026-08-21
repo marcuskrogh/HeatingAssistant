@@ -178,7 +178,7 @@ source.
 - Relates: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
 - Artifact: `docs/agents/SANDBOX-forecast-jitter.md`
 - Branch: `cursor/swd-417-forecast-jitter-ce1e`
-- PR: (implement opens)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/630
 
 ## Next
 `/review-fix SWD-417` — remaining-`U*` resim on room-view Forecast
