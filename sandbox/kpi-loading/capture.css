@@ -1,0 +1,5 @@
+/* Harness-only freeze so stills land mid-sweep. Not for promotion. */
+.gauge--computing.capture-mid::after {
+  animation: none !important;
+  background-position: 40% 0 !important;
+}

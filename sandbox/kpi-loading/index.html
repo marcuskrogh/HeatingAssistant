@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sandbox: compute KPI loading overlay</title>
+  <style>
+    html, body {
+      margin: 0;
+      background: #111318;
+      color: #e8eaed;
+      font-family: system-ui, sans-serif;
+    }
+    .page {
+      padding: 20px 24px 32px;
+      max-width: 1100px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+    .lead { color: #9aa0a8; font-size: 13px; margin: 0 0 20px; max-width: 72ch; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel-label {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #6b7280;
+      margin: 0 0 8px;
+    }
+    ha-kpi-host { display: block; min-height: 140px; }
+    @media (max-width: 800px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Compute KPI loading overlay</h1>
+    <p class="lead" id="lead">
+      Room-view compute cards (POWER, ENERGY PRICE, SOLAR GAIN, HEAT LOSS, MODEL FIT)
+      on the production industrial theme. Left is the shipped overlay.
+      Right is the sandbox candidate.
+    </p>
+    <div class="row">
+      <section>
+        <div class="panel-label">Current (shipped)</div>
+        <ha-kpi-host id="current"></ha-kpi-host>
+      </section>
+      <section>
+        <div class="panel-label">Candidate (sandbox)</div>
+        <ha-kpi-host id="candidate" data-candidate="1"></ha-kpi-host>
+      </section>
+    </div>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

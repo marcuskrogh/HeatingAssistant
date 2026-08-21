@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-430 | Task | [Sandbox] Compute KPI loading overlay is not visible during solves | To Do | — | docs/agents/SANDBOX-kpi-loading.md | `/sandbox SWD-430` |
 | SWD-426 | Task | [Tweak] Align NMPC/P timers on one grid; independent solves; KPI loading | Done | — | docs/agents/PLAN-nmpc-p-independent-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/631 (`507873f`) |
 | SWD-427 | Sub-task | Shared grid + independent NMPC and P (no extra P after NLP) | Done | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
 | SWD-428 | Sub-task | Loading animation on compute KPI cards while solving | Done | SWD-426 | docs/agents/PLAN-nmpc-p-independent-grid.md | — |
@@ -152,6 +153,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/sandbox` SWD-430 iteration 1: shipped overlay is 8% white on `--bg-card` (invisible); candidate teal sweep + accent border + ` · computing`. Inspect `sandbox/kpi-loading/inspect/01_computing.png`. Next `/sandbox SWD-430`.
 - 2026-08-21 — `/ship` SWD-426 via PR #631 (`507873f`): shared NMPC/P Start epoch; independent solves (no extra P after NLP); KPI loading; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.27`. Next Done.
 - 2026-08-21 — `/review-fix` SWD-426 CLEAN (focused): 0 blockers / 4 should-fix (accept index from plan origin; lock P sync; room forecast stamp; System Status last P ts). Fix-forward on PR #631. Fast suite 970 passed, 88 skipped, 18 deselected. Next `/ship SWD-426`.
 - 2026-08-21 — `/implement` SWD-426 In Review: shared NMPC/P Start epoch; independent solves (no extra P after NLP); KPI loading; PR https://github.com/marcuskrogh/HeatingAssistant/pull/631; CalVer 2026.08.27. Fast suite 969 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-426`.
