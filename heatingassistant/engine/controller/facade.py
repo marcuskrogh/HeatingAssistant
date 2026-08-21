@@ -2428,40 +2428,79 @@ class HeatingMPCController:
         self._record_nmpc_reject(now)
         return False
 
-    def rebuild_forecast_from_plan(self) -> bool:
-        """Rebuild plot trajectories from the installed slow plan.
+    def _pad_outdoor_forecast(self, n: int) -> Optional[List[float]]:
+        outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
+        if not outdoor_seq:
+            return None
+        if len(outdoor_seq) < n:
+            outdoor_seq = outdoor_seq + [float(outdoor_seq[-1])] * (n - len(outdoor_seq))
+        return [float(v) for v in outdoor_seq[:n]]
 
-        ``compute()`` caches heating_schedule before the NLP worker finishes.
-        After a plan is applied, refresh the schedule and air-temperature
-        path immediately so Ingress does not keep an open-loop (U = 0)
-        forecast until the next control tick.
+    def _pad_solar_forecast(self, n: int) -> Optional[List[Dict[str, float]]]:
+        solar_seq = list(getattr(self, "_solar_forecast", []) or [])
+        if not solar_seq:
+            return None
+        if len(solar_seq) < n:
+            last = dict(solar_seq[-1])
+            solar_seq = solar_seq + [dict(last) for _ in range(n - len(solar_seq))]
+        return [dict(step) for step in solar_seq[:n]]
+
+    def _publish_plan_rollout(
+        self,
+        U_abs: np.ndarray,
+        outdoor_seq: List[float],
+        solar_seq: List[Dict[str, float]],
+        wind_seq: Optional[List[float]] = None,
+    ) -> None:
+        """Roll remaining U* from the current EKF and publish T / Planned Power."""
+        room_list = self._system._room_list
+        n_rooms = self._system._n_rooms
+        n = int(self._horizon)
+        self._predictions = self._compute_nonlinear_predictions(
+            U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
+        )
+        self._linearised_predictions = [dict(step) for step in self._predictions]
+        self._heating_schedule = [
+            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
+            for k in range(n)
+        ]
+
+    def rebuild_forecast_from_plan(self) -> bool:
+        """Resimulate the remaining accepted U* from the current EKF state.
+
+        Room view may re-roll leftover two-hour holds. It must not replay U*
+        from slow index 0 against a later state and a solar series from now.
         """
         with self._nmpc_lock:
-            U_fast = None if self._nmpc_U_fast is None else self._nmpc_U_fast.copy()
+            has_plan = self._nmpc_U_fast is not None
             T_ref = None if self._nmpc_T_ref is None else self._nmpc_T_ref.copy()
-        if U_fast is None:
+            k0 = int(self._nmpc_k)
+        if not has_plan:
             return False
-        outdoor_seq = list(getattr(self, "_outdoor_forecast", []) or [])
-        N = int(self._horizon)
-        if U_fast.shape[0] < N:
+        n = int(self._horizon)
+        outdoor_seq = self._pad_outdoor_forecast(n)
+        if outdoor_seq is None:
             return False
-        if len(outdoor_seq) < N:
-            if not outdoor_seq:
-                return False
-            outdoor_seq = outdoor_seq + [float(outdoor_seq[-1])] * (N - len(outdoor_seq))
+        U_abs = self._forecast_U(n)
+        solar_seq = self._pad_solar_forecast(n)
+        if solar_seq is not None:
+            self._publish_plan_rollout(U_abs, outdoor_seq, solar_seq)
+            return True
         self._heating_schedule = [
-            self._system.display_heating_powers(U_fast[k], outdoor_seq[k])
-            for k in range(N)
+            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
+            for k in range(n)
         ]
         if T_ref is not None and T_ref.shape[0] > 0:
             room_list = self._system._room_list
             n_rooms = min(int(T_ref.shape[1]), len(room_list))
+            last = T_ref.shape[0] - 1
+            start = min(max(k0, 0), last)
             self._predictions = [
                 {
-                    name: float(T_ref[min(k, T_ref.shape[0] - 1), i])
+                    name: float(T_ref[min(start + k, last), i])
                     for i, name in enumerate(room_list[:n_rooms])
                 }
-                for k in range(N)
+                for k in range(n)
             ]
             self._linearised_predictions = [dict(step) for step in self._predictions]
         return True
@@ -2677,7 +2716,6 @@ class HeatingMPCController:
                         float(src.u_min),
                         float(src.u_max),
                     )
-            self._nmpc_k = k + 1
         if u_min_seq is not None and u_max_seq is not None and clamp_mask is not None:
             for j, src in enumerate(self._sources):
                 if clamp_mask[0, j]:
@@ -2685,15 +2723,26 @@ class HeatingMPCController:
         return u_abs
 
     def _forecast_U(self, n_fast: int) -> np.ndarray:
+        """Remaining accepted U* from the current plan index, padded to n_fast."""
         n_u = self._system.nu
         with self._nmpc_lock:
             U_fast = self._nmpc_U_fast
+            k = int(self._nmpc_k)
             if U_fast is None:
                 return np.zeros((n_fast, n_u), dtype=float)
-            if U_fast.shape[0] >= n_fast:
-                return U_fast[:n_fast].copy()
-            pad = np.tile(U_fast[-1:], (n_fast - U_fast.shape[0], 1))
-            return np.vstack([U_fast, pad])
+            U = np.asarray(U_fast, dtype=float)
+            if U.ndim == 1:
+                U = U.reshape(-1, n_u)
+            if U.shape[0] == 0:
+                return np.zeros((n_fast, n_u), dtype=float)
+            start = min(max(k, 0), U.shape[0])
+            if start >= U.shape[0]:
+                return np.tile(U[-1:], (n_fast, 1))
+            tail = U[start:]
+            if tail.shape[0] >= n_fast:
+                return tail[:n_fast].copy()
+            pad = np.tile(tail[-1:], (n_fast - tail.shape[0], 1))
+            return np.vstack([tail, pad])
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -2962,21 +3011,16 @@ class HeatingMPCController:
         self._u_prev = u_abs.copy()
         self._mpc._u_prev = u_abs.copy()
 
-        self._predictions = self._compute_nonlinear_predictions(
-            U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
-            wind_seq=wind_seq,
+        self._publish_plan_rollout(
+            U_abs, outdoor_seq, solar_seq, wind_seq=wind_seq,
         )
-        self._linearised_predictions = [dict(step) for step in self._predictions]
-
-        self._heating_schedule = [
-            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
-            for k in range(N)
-        ]
         # The NLP worker may install a path while this tick rolled out U=0.
         # Refresh only then so disabled-source zeros in U_abs are not replaced
         # by the unmasked plan.
         if float(np.max(np.abs(U_abs))) < 1e-9:
             self.rebuild_forecast_from_plan()
+        with self._nmpc_lock:
+            self._nmpc_k += 1
 
         return actions
 
@@ -3175,7 +3219,7 @@ class HeatingMPCController:
                 jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
 
                 x_next = implicit_euler_substeps(
-                    rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
+                    rhs, jacobian, x_curr, self._dt, self._n_int_steps
                 )
 
                 # Extract room temperatures (first n_rooms states)
