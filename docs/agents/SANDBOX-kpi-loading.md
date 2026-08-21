@@ -60,7 +60,7 @@ omit (visual)
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
 | 1 | Extract shipped overlay vs teal sweep + “computing” label on KPI gauges | sandbox/kpi-loading/inspect/01_computing.png | delta: overlay belongs on countdown rings, not live KPIs |
-| 2 | Move overlay to NEXT CONTROL / NEXT NMPC; KPIs stay live; independent flags | sandbox/kpi-loading/inspect/02_nmpc.png | waiting: accept / delta / end |
+| 2 | Move overlay to NEXT CONTROL / NEXT NMPC; KPIs stay live; independent flags | sandbox/kpi-loading/inspect/02_nmpc.png | accept |
 
 ## Role in pipeline
 Promotion input for `/implement`. Supportive isolation — not production source.
@@ -74,4 +74,4 @@ Post-merge inspect-loop instead of `/iterate` when each turn needs inspection.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/sandbox SWD-430` — next inspect turn, or `/implement SWD-430` if this overlay is accepted
+`/implement SWD-430` — promote accepted overlay (ship remaining)

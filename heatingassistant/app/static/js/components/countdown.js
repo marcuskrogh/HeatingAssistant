@@ -1,4 +1,4 @@
-import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=126';
+import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=127';
 
 export const COUNTDOWN_CONTROL = {
   dtAttr: 'dt_s',
@@ -43,6 +43,11 @@ export function createCountdown(state, options = false) {
 export function updateCountdown(countdown, state) {
   const spec = countdown._spec || COUNTDOWN_CONTROL;
   countdown._dtS = getDtSeconds(state, spec);
+}
+
+export function setCountdownComputing(container, computing) {
+  if (!container) return;
+  container.classList.toggle('countdown--computing', !!computing);
 }
 
 // The control countdown is meaningless while the system is stopped: no control

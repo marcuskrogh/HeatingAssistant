@@ -457,31 +457,6 @@
   transition: width 0.8s ease, background 0.3s ease;
 }
 
-.gauge--computing .gauge__value,
-.gauge--computing .gauge__label {
-  opacity: 0.4;
-}
-
-.gauge--computing::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: kpi-shimmer 1.2s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes kpi-shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
-
 /* KPI Card */
 .kpi {
   display: flex;
@@ -610,6 +585,45 @@
   transform: rotate(-90deg);
   transform-origin: 50% 50%;
   transform-box: fill-box;
+}
+
+.countdown--computing {
+  position: relative;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 170, 0.45);
+}
+
+.countdown--computing .countdown__ring {
+  filter: drop-shadow(0 0 5px rgba(0, 212, 170, 0.7));
+}
+
+.countdown--computing .countdown__ring-track {
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-dasharray: 42 172;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+  animation: countdown-computing-spin 0.9s linear infinite;
+}
+
+.countdown--computing .countdown__ring-fill {
+  animation: countdown-computing-pulse 1.2s ease-in-out infinite;
+}
+
+.countdown--computing .countdown__label::after {
+  content: ' · computing';
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+@keyframes countdown-computing-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes countdown-computing-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.4; }
 }
 
 /* Room Tile */
