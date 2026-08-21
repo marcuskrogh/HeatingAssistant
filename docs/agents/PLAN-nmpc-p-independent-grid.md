@@ -104,9 +104,9 @@
 - Relates: [SWD-418](https://marcusknielsen.atlassian.net/browse/SWD-418),
   [SWD-411](https://marcusknielsen.atlassian.net/browse/SWD-411)
 - Branch: `cursor/swd-426-nmpc-p-grid-7e18`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/631
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-426` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-426` — Review and auto-fix per Workflow binding
