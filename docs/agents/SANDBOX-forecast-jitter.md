@@ -181,4 +181,4 @@ source.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/630
 
 ## Next
-`/review-fix SWD-417` — remaining-`U*` resim on room-view Forecast
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/630
