@@ -832,7 +832,7 @@ def test_idle_plan_debounces_nmpc_worker(tmp_path):
     )
     assert ctrl.nmpc_plan_idle() is True
     assert ctrl.nmpc_due is True
-    runtime._last_nmpc_ts = time.time()
+    runtime._last_nmpc_attempt_ts = time.time()
     started = threading.Event()
 
     def _fake_solve():
@@ -934,7 +934,7 @@ def test_request_control_cycle_waits_for_held_lock(tmp_path):
     runtime._control_lock.release()
     assert done.wait(timeout=15.0)
     thread.join(timeout=2.0)
-    assert runtime._last_control_ts is not None
+    assert runtime._last_control_ran_ts is not None
 
 
 def test_nmpc_worker_skips_control_cycle_on_reject(tmp_path):

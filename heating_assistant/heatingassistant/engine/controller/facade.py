@@ -2341,7 +2341,11 @@ class HeatingMPCController:
 
     @property
     def nmpc_due(self) -> bool:
-        """True when a slow solve should start (no path, idle zeros, or one period)."""
+        """True when a slow solve should start (no path or idle zeros).
+
+        The two-hour cadence is a wall-clock grid on the runtime, not
+        ``_nmpc_k >= M``. Fast-step count only indexes the installed plan.
+        """
         if self._nmpc_busy:
             return False
         with self._nmpc_lock:
@@ -2349,7 +2353,7 @@ class HeatingMPCController:
                 return True
             if float(np.max(np.abs(self._nmpc_U))) < NMPC_IDLE_U_ABS:
                 return True
-            return self._nmpc_k >= self._timing.m
+            return False
 
     def nmpc_plan_idle(self) -> bool:
         """True when an installed slow plan is identically off."""
@@ -2445,6 +2449,26 @@ class HeatingMPCController:
             solar_seq = solar_seq + [dict(last) for _ in range(n - len(solar_seq))]
         return [dict(step) for step in solar_seq[:n]]
 
+    def _heating_schedule_from_u(
+        self,
+        U_abs: np.ndarray,
+        outdoor_seq: List[float],
+    ) -> List[Dict[str, float]]:
+        """Convert remaining U* to watts with one outdoor sample per 2 h hold."""
+        m = max(int(self._timing.m), 1)
+        with self._nmpc_lock:
+            k0 = int(self._nmpc_k)
+        n = min(int(self._horizon), len(U_abs), len(outdoor_seq))
+        schedule: List[Dict[str, float]] = []
+        for i in range(n):
+            j = i - ((k0 + i) % m)
+            if j < 0:
+                j = 0
+            schedule.append(
+                self._system.display_heating_powers(U_abs[i], outdoor_seq[j])
+            )
+        return schedule
+
     def _publish_plan_rollout(
         self,
         U_abs: np.ndarray,
@@ -2455,21 +2479,19 @@ class HeatingMPCController:
         """Roll remaining U* from the current EKF and publish T / Planned Power."""
         room_list = self._system._room_list
         n_rooms = self._system._n_rooms
-        n = int(self._horizon)
         self._predictions = self._compute_nonlinear_predictions(
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
         )
         self._linearised_predictions = [dict(step) for step in self._predictions]
-        self._heating_schedule = [
-            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
-            for k in range(n)
-        ]
+        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
 
     def rebuild_forecast_from_plan(self) -> bool:
         """Resimulate the remaining accepted U* from the current EKF state.
 
         Room view may re-roll leftover two-hour holds. It must not replay U*
         from slow index 0 against a later state and a solar series from now.
+        Display power uses one outdoor sample per leftover hold so COP does
+        not invent 15-minute watt steps.
         """
         with self._nmpc_lock:
             has_plan = self._nmpc_U_fast is not None
@@ -2486,10 +2508,7 @@ class HeatingMPCController:
         if solar_seq is not None:
             self._publish_plan_rollout(U_abs, outdoor_seq, solar_seq)
             return True
-        self._heating_schedule = [
-            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
-            for k in range(n)
-        ]
+        self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
         if T_ref is not None and T_ref.shape[0] > 0:
             room_list = self._system._room_list
             n_rooms = min(int(T_ref.shape[1]), len(room_list))

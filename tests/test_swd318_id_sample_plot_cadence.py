@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -82,13 +83,13 @@ async def test_ticker_records_id_sample_without_control(
 
     await runtime.start()
     try:
-        # Mark control as recently run and clear ID state so only the ticker writes.
-        runtime._last_control_ts = time.time()
+        # Skip ticker control (the skip stamp is last *ran*, not the epoch).
+        runtime._last_control_ran_ts = time.time()
         runtime._history_buffer.clear()
         runtime._id_history_last_ts = 0.0
-        deadline = time.time() + 2.0
+        deadline = time.time() + 5.0
         while time.time() < deadline and len(runtime.history_buffer) == 0:
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
         assert len(runtime.history_buffer) >= 1
         assert runtime.history_buffer[-1]["y"][0] == pytest.approx(20.5)
     finally:
