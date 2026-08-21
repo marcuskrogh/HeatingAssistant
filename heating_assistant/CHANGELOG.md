@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.25
+
+- Room-view Forecast and Planned Power now follow the remaining two-hour
+  plan from the current temperature, so the plot stays a thermal trajectory
+  with two-hour power holds instead of a mismatched replay of the first
+  interval.
+
 # 2026.08.24
 
 - Room view now plots the two-hour planner's path (Forecast and Planned

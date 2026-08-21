@@ -4,7 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | To Do | — | docs/agents/SANDBOX-forecast-jitter.md | `/sandbox SWD-417` |
+| SWD-417 | Task | [Sandbox] Forecast temperature jitter vs EKF/OCP integrator substeps | In Progress | — | docs/agents/SANDBOX-forecast-jitter.md | `/review-fix SWD-417` |
+| SWD-424 | Sub-task | Keep room-view Forecast on the NMPC air path | In Progress | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
+| SWD-425 | Sub-task | Tests, CalVer, App sync for NMPC Forecast plot | In Progress | SWD-417 | docs/agents/SANDBOX-forecast-jitter.md | — |
 | SWD-414 | Task | [Iterate] Room view optimal trajectory still U=0 / 30°C free response | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/627 (`434027a`) |
 | SWD-415 | Sub-task | Accept NMPC plans that beat zero-heat and plot that trajectory | Done | SWD-414 | docs/agents/ITERATE.md | — |
 | SWD-416 | Sub-task | Tests, CalVer, changelog, App sync for trajectory plot | Done | SWD-414 | docs/agents/ITERATE.md | — |
@@ -140,6 +142,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-21 — `/implement` SWD-417: remaining-`U*` resim on room-view Forecast (not freeze-`t_ref`); Sub-tasks SWD-424–425. Next `/review-fix SWD-417`.
 - 2026-08-21 — `/sandbox` SWD-417 iteration 4: room-view live cache vs Tuning preview re-solve; max |T| 1.88 K after 8 ticks; different U*. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/sandbox` SWD-417 iteration 3: freeze production `U*`, re-roll T at n_int 1/10/40/100; n_int=10 vs 100 is 23 mK; 15 min wiggles remain on the high-fidelity path. Next `/sandbox SWD-417`.
 - 2026-08-20 — `/sandbox` SWD-417 iteration 2: peaked price × s_rom 0.05/0.1/1/5; traces overlay; ROM does not move Forecast jitter. Next `/sandbox SWD-417`.

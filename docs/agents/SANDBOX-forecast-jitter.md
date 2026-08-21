@@ -33,7 +33,7 @@ measure
     on that slow grid. Iteration 4 adds the **Tuning preview** neighbour:
     `preview_tuning_forecast` re-solves the NLP on a throwaway controller.
     Room view reads `forecast_snapshot` after live `compute()` (EKF+P,
-    then `_forecast_U` which is the unshifted last `U*`).
+    then remaining `U*` from `_nmpc_k`, rolled from the current EKF).
   - **Path** — `n_int_steps` shared by EKF, `MeanOcp`, and the nonlinear
     Forecast roll; `smoothing_weight` is `MeanOcp.s_rom`. Two-hour ZOH is
     the **control sampling interval**; temperature is implicit-Euler
@@ -73,8 +73,8 @@ measure
   - `n_int_steps` default in `heatingassistant/engine/controller/facade.py`
     and `heatingassistant/engine/estimation/model_build.py`.
   - `heatingassistant/engine/controller/facade.py` (`_forecast_U` /
-    `compute()` overwriting `T_ref`; shift remaining `U*` or keep the
-    applied air path on fast ticks).
+    `compute()` remaining-`U*` roll vs freeze-`t_ref`; shift remaining `U*`
+    and re-roll from current `x_hat`).
   - `heatingassistant/engine/control_loop.py` (`preview_tuning_forecast`
     vs `_cache_controller_forecast`).
 - Copy notes: do not change the 2 h / 8 / 36 h timing triple from this
@@ -87,6 +87,7 @@ measure
 | 2 | peaked price; s_rom = 0.05 / 0.1 / 1 / 5, n_int=10 | `inspect/02_*` | higher ROM does not move the path |
 | 3 | freeze production `U*` (n_int=10 solve); re-roll T at n_int = 1 / 10 / 40 / 100 | `inspect/03_*` | n_int=10 matches n_int=100 to 23 mK; 15 min wiggles are the plant, not Euler error |
 | 4 | room-view live cache vs Tuning preview re-solve (8×15 min ticks, peaked price) | `inspect/04_*` | two different paths; max \|T\| error 1.88 K; Planned Power is a different staircase |
+| 5 | operator: resim is allowed; unshifted `U*` replay is not | production `_forecast_U` | **accept remaining-`U*` resim** — freeze-`t_ref` rejected |
 
 ### Iteration 1 numbers (flat price)
 
@@ -160,6 +161,14 @@ matches the engine snapshot on each path, so Chart.js is not inventing
 the split. Forecast lines still use `tension: 0.2` on both pages
 (secondary overshoot).
 
+### Iteration 5 (promote)
+
+Operator: room view may resimulate, but it cannot feasibly be this
+different from the NMPC path. Freeze-`t_ref` is the wrong fix.
+Production `_forecast_U` now returns remaining `U_fast[_nmpc_k:]`
+(2 h ZOH shifted to now); `compute()` re-rolls that sequence from the
+current EKF with the same implicit-Euler `n_int` as the OCP.
+
 ## Role in pipeline
 Promotion input for `/implement`. Supportive isolation — not production
 source.
@@ -169,8 +178,7 @@ source.
 - Relates: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
 - Artifact: `docs/agents/SANDBOX-forecast-jitter.md`
 - Branch: `cursor/swd-417-forecast-jitter-ce1e`
-- PR: — (sandbox never opens a PR)
+- PR: (implement opens)
 
 ## Next
-`/sandbox SWD-417` — next inspect turn after the operator names a delta
-(room view is not the Tuning preview solve; not a promote yet)
+`/review-fix SWD-417` — remaining-`U*` resim on room-view Forecast
