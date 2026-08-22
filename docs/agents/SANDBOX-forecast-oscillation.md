@@ -160,4 +160,4 @@ source. Post-merge inspect-loop instead of `/iterate`.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/634
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/634
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/634 (`9d815d1`)
