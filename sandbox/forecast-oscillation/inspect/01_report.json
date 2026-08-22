@@ -1,0 +1,188 @@
+{
+  "tag": "01",
+  "now": "2026-08-22T05:54:00+00:00",
+  "accepted": true,
+  "applied": true,
+  "plan_success": true,
+  "eigenvalues": {
+    "n": 2,
+    "max_real": -4.130050001836028e-06,
+    "min_real": -0.0012019198114940088,
+    "max_abs_imag": 0.0,
+    "any_unstable": false,
+    "any_complex": false,
+    "eigs": [
+      {
+        "re": -0.0012019198114940088,
+        "im": 0.0
+      },
+      {
+        "re": -4.130050001836028e-06,
+        "im": 0.0
+      }
+    ],
+    "C_air": 250000.0,
+    "C_wall": 4750000.0,
+    "n_filtered": 1,
+    "emitter_tau": 60.0,
+    "dt_s": 900.0,
+    "n_int": 10,
+    "h_sub": 90.0,
+    "horizon": 144,
+    "c_air_fraction_default": 0.05
+  },
+  "frozen": {
+    "jitter": {
+      "n": 144.0,
+      "max_abs_d": 1.0965676205038228,
+      "rms_d": 0.19495296581099023,
+      "sign_flips": 0.0,
+      "p95_abs_d": 0.20663168475242594
+    },
+    "max_vs_ivp_K": 0.07327246760926442,
+    "n_int": {
+      "1": {
+        "n": 144.0,
+        "max_abs_d": 1.1557583680453014,
+        "rms_d": 0.2028413827569492,
+        "sign_flips": 0.0,
+        "p95_abs_d": 0.21105294854877493,
+        "max_vs_100": 0.5194111683870446
+      },
+      "10": {
+        "n": 144.0,
+        "max_abs_d": 1.0965676205038228,
+        "rms_d": 0.19495296581099023,
+        "sign_flips": 0.0,
+        "p95_abs_d": 0.20663168475242594,
+        "max_vs_100": 0.06566351581754759
+      },
+      "40": {
+        "n": 144.0,
+        "max_abs_d": 1.0804207393819496,
+        "rms_d": 0.19379770257086126,
+        "sign_flips": 0.0,
+        "p95_abs_d": 0.20649682416937873,
+        "max_vs_100": 0.01129247444384518
+      },
+      "100": {
+        "n": 144.0,
+        "max_abs_d": 1.0768706074564776,
+        "rms_d": 0.1935541855249129,
+        "sign_flips": 0.0,
+        "p95_abs_d": 0.2064735984969964,
+        "max_vs_100": 0.0
+      }
+    }
+  },
+  "production": {
+    "jitter_T": {
+      "n": 144.0,
+      "max_abs_d": 0.5587182782465234,
+      "rms_d": 0.11926086262103114,
+      "sign_flips": 24.0,
+      "p95_abs_d": 0.24125850916089714
+    },
+    "jitter_P_kW": {
+      "n": 144.0,
+      "max_abs_d": 0.3039519824009693,
+      "rms_d": 0.04457529415535275,
+      "sign_flips": 0.0,
+      "p95_abs_d": 0.09017339800807438
+    },
+    "jitter_Tout": {
+      "n": 144.0,
+      "max_abs_d": 0.38750000000000284,
+      "rms_d": 0.27603769568767134,
+      "sign_flips": 3.0,
+      "p95_abs_d": 0.38750000000000107
+    },
+    "jitter_qsolar": {
+      "n": 145.0,
+      "max_abs_d": 179.56899643161967,
+      "rms_d": 44.52056462377496,
+      "sign_flips": 8.0,
+      "p95_abs_d": 128.7277782018642
+    },
+    "T_min": 21.496982987634706,
+    "T_max": 24.24625732204956,
+    "P_min_kW": -0.5616530243809926,
+    "P_max_kW": 0.07621213651736033,
+    "qsolar_min_W": 0.0,
+    "qsolar_max_W": 854.0999999999999,
+    "resim_err_K": 0.0,
+    "ivp_err_K": 0.016840600537111783,
+    "nmpc_k": 0,
+    "U_min": -0.11233060487619852,
+    "U_max": 0.010887451514710617,
+    "U_unique_slow": 18
+  },
+  "ablations": {
+    "no_solar": {
+      "n": 144.0,
+      "max_abs_d": 0.6324276449137258,
+      "rms_d": 0.12261405407308026,
+      "sign_flips": 20.0,
+      "p95_abs_d": 0.21638455543361204
+    },
+    "persist_outdoor": {
+      "n": 144.0,
+      "max_abs_d": 0.5337978602784297,
+      "rms_d": 0.11611760205703178,
+      "sign_flips": 28.0,
+      "p95_abs_d": 0.24498856025788177
+    },
+    "outdoor_2h_zoh": {
+      "n": 144.0,
+      "max_abs_d": 0.5722051483497417,
+      "rms_d": 0.11451412052607343,
+      "sign_flips": 22.0,
+      "p95_abs_d": 0.23058699383032713
+    },
+    "max_T_vs_nosolar": 9.125757208462772,
+    "max_T_vs_persist_out": 1.0420353305367343,
+    "max_T_vs_2h_zoh": 0.11241301938868276
+  },
+  "energy_residual": {
+    "max_abs_W": 31.773355730270765,
+    "rms_W": 3.8725297392901146,
+    "q_heat_min_W": -561.6530243809926,
+    "q_heat_max_W": 76.212160582519,
+    "q_solar_min_W": 0.0,
+    "q_solar_max_W": 854.0999999999999
+  },
+  "payload_times": {
+    "n": 145,
+    "monotonic": true,
+    "min_dt_s": 900.0,
+    "max_dt_s": 900.0,
+    "unique_times": 145,
+    "temp_none": 0,
+    "power_none": 0,
+    "temp_min": 21.5,
+    "temp_max": 24.25
+  },
+  "weather_interp": {
+    "outdoor": {
+      "n": 144.0,
+      "max_abs_d": 0.38750000000000284,
+      "rms_d": 0.27603769568767134,
+      "sign_flips": 3.0,
+      "p95_abs_d": 0.38750000000000107
+    },
+    "ghi_finite": 144,
+    "ghi_jitter": {
+      "n": 144.0,
+      "max_abs_d": 67.5,
+      "rms_d": 28.849374245142737,
+      "sign_flips": 2.0,
+      "p95_abs_d": 50.46971379499158
+    }
+  },
+  "plots": [
+    "sandbox/forecast-oscillation/inspect/01_01_production.png",
+    "sandbox/forecast-oscillation/inspect/01_01_integrators.png",
+    "sandbox/forecast-oscillation/inspect/01_01_ablations.png"
+  ],
+  "c_air_fraction_note": "Room config c_air_fraction is ignored by ControlEngine (_build_house_model); plant uses DEFAULT 0.05."
+}
