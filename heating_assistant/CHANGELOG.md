@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.30
+
+- Room-view Forecast no longer reuses current sunlight when a future solar
+  irradiance step is missing; it uses the sky and cloud model instead.
+
 # 2026.08.29
 
 - Room-view Forecast re-simulates leftover planner power from the current

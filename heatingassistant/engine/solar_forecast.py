@@ -190,17 +190,21 @@ def select_ghi_for_step(
 ) -> Optional[float]:
     """Pick the GHI for horizon step ``k``.
 
-    Returns ``ghi_forecast[k]`` when present and non-``None``, else ``fallback``.
-    Unlike cloud cover, GHI is **not** persisted past the forecast's coverage
-    (a stale daytime value must not leak into the night) — out-of-range steps
-    fall back to the analytical model.
+    Returns ``ghi_forecast[k]`` when present and non-``None``. Missing slots,
+    out-of-range indices, and an empty forecast return ``None`` so the caller
+    takes the analytical cloud/clear-sky path. Unlike cloud cover, GHI is
+    **not** persisted past the forecast's coverage — a stale daytime value
+    must not leak into the night.
+
+    ``fallback`` is accepted for call-site compatibility and is ignored.
+    Passing a numeric fallback would leak current GHI into later steps.
     """
+    del fallback
     if not ghi_forecast:
-        return fallback
-    if k < len(ghi_forecast):
-        val = ghi_forecast[k]
-        return val if val is not None else fallback
-    return fallback
+        return None
+    if 0 <= k < len(ghi_forecast):
+        return ghi_forecast[k]
+    return None
 
 
 def is_stale(state: Any, now: datetime, max_age: float = STALE_SECONDS_DEFAULT) -> bool:

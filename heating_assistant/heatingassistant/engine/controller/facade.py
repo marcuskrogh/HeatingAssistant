@@ -3187,7 +3187,7 @@ class HeatingMPCController:
                 g = ghi_now
                 cc = cloud_cover_now
             else:
-                g = select_ghi_for_step(ghi_forecast, k - 1, fallback=ghi_now)
+                g = select_ghi_for_step(ghi_forecast, k - 1)
                 cc = _select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)
             schedules.append({
                 name: self._room_gain(name, t, cc, g)
