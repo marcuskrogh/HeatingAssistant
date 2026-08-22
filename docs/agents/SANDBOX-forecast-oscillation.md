@@ -157,7 +157,7 @@ source. Post-merge inspect-loop instead of `/iterate`.
 - Relates: [SWD-431](https://marcusknielsen.atlassian.net/browse/SWD-431), [SWD-417](https://marcusknielsen.atlassian.net/browse/SWD-417)
 - Artifact: `docs/agents/SANDBOX-forecast-oscillation.md`
 - Branch: `cursor/swd-432-forecast-oscillation-be46`
-- PR: — (sandbox never opens a PR)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/634
 
 ## Next
-`/implement SWD-432` — GHI `None` must use the cloud/clear path, not `ghi_now`
+`/review-fix SWD-432` — Review and auto-fix per Workflow binding
