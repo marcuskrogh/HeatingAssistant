@@ -160,4 +160,4 @@ source. Post-merge inspect-loop instead of `/iterate`.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/634
 
 ## Next
-`/review-fix SWD-432` — Review and auto-fix per Workflow binding
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/634
