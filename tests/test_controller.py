@@ -3,7 +3,7 @@
 import sys
 import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -1961,8 +1961,8 @@ class TestSolarGhiThreading:
         ctrl = self._windowed_controller()
         now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
         # k=0 uses ghi_now=500; k=1 uses ghi_forecast[0]=500 (same GHI, different
-        # sun position 15 min later); k=2 uses ghi_forecast[1]=None → falls back to
-        # cloud_cover_now via ghi_now fallback.
+        # sun position 15 min later); k=2 uses ghi_forecast[1]=None → cloud/clear
+        # path, not a leak of ghi_now.
         schedules = ctrl._forecast_solar(
             now,
             cloud_forecast=[1.0, 1.0, 1.0, 1.0],
@@ -1970,14 +1970,20 @@ class TestSolarGhiThreading:
             ghi_forecast=[500.0, None, None, None],
             ghi_now=500.0,
         )
-        # k=0 and k=1 both use GHI=500 but differ by sun position (15 min apart).
+        t2 = now + timedelta(seconds=900.0 * 2)
         g0 = schedules[0]["living_room"]
         g1 = schedules[1]["living_room"]
-        # k=2 uses ghi_forecast[1]=None → fallback to ghi_now=500, still GHI path.
         g2 = schedules[2]["living_room"]
-        assert g0 > 0.0 and g1 >= 0.0 and g2 >= 0.0
-        # All steps use GHI=500 but differ by sun position.
+        analytical = ctrl._room_gain(
+            "living_room", t2, cloud_cover=1.0, ghi=None,
+        )
+        leaked = ctrl._room_gain(
+            "living_room", t2, cloud_cover=1.0, ghi=500.0,
+        )
+        assert g0 > 0.0 and g1 >= 0.0
         assert abs(g0 - g1) > 1e-9
+        assert g2 == pytest.approx(analytical, rel=1e-12)
+        assert g2 != pytest.approx(leaked, rel=1e-9)
 
 
 class TestPriceAwareAbsoluteEnergyPricing:

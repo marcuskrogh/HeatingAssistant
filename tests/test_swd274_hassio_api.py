@@ -23,7 +23,7 @@ def test_app_config_enables_supervisor_token_for_mqtt_discovery() -> None:
     assert config["hassio_role"] == "default"
     assert config["homeassistant_api"] is True
     assert config["services"] == ["mqtt:need"]
-    assert config["version"] == "2026.08.29"
+    assert config["version"] == "2026.08.30"
 
 
 def test_health_reports_supervisor_token_presence(
