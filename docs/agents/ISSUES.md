@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| nmpc-input-bias | Task | [Bug] NMPC input bias (u_ref) must step on each accepted plan | In Review | — | docs/agents/PLAN-nmpc-input-bias.md | `/review-fix` |
+| nmpc-input-bias | Task | [Bug] NMPC input bias (u_ref) must step on each accepted plan | In Review | — | docs/agents/PLAN-nmpc-input-bias.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635 |
 | SWD-432 | Task | [Sandbox] Room-view temperature forecast oscillates while planned power is smooth | Done | — | docs/agents/SANDBOX-forecast-oscillation.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/634 (`9d815d1`) |
 | SWD-431 | Task | [Sandbox] Controller Tuning preview vs room view predictions in HA app plots | Done | — | docs/agents/SANDBOX-preview-room-plots.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/633 (`eb3fa55`) |
 | SWD-430 | Task | [Sandbox] Loading animation belongs on NMPC/P countdown timers | Done | — | docs/agents/SANDBOX-kpi-loading.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/632 (`fa64ee6`) |
@@ -156,6 +156,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-28 — `/review-fix` nmpc-input-bias CLEAN (focused): 0 blockers / 0 should-fix / 2 deferred notes (lock-timeout actuators vs `_u_prev`; un-awaited P publish coroutine). COMMENT (cannot APPROVE own PR). CI 6/6 green. Next `/ship`.
 - 2026-08-28 — `/implement` nmpc-input-bias In Review: `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF. PR https://github.com/marcuskrogh/HeatingAssistant/pull/635; CalVer 2026.08.31. Jira MCP unavailable. Next `/review-fix`.
 - 2026-08-28 — `/define`+`/implement` nmpc-input-bias: PLAN `docs/agents/PLAN-nmpc-input-bias.md` (bug / fix-fast). `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF. Jira MCP unavailable. Next `/review-fix`.
 - 2026-08-22 — `/ship` SWD-432 via PR #634 (`9d815d1`): missing GHI steps use cloud/clear, not `ghi_now`; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.30`. Next Done.

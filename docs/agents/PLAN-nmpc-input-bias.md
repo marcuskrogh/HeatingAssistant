@@ -83,4 +83,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review-fix nmpc-input-bias` — Review and auto-fix per Workflow binding
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635
