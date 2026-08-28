@@ -83,4 +83,4 @@
 - Workflow: fix-fast
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635 (`ff1449e`)
