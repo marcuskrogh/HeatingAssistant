@@ -18,6 +18,20 @@ from heatingassistant.mqtt.bridge import InMemoryMqttBus
 pytestmark = pytest.mark.unit
 
 
+def _wait_startup_nmpc(runtime: HeatingRuntime, timeout: float = 30.0) -> None:
+    """Block until the startup NLP thread has applied or exited.
+
+    Accepting a plan now publishes P immediately. Tests that seed
+    ``actuator_outputs`` after ``start()`` must wait so that worker cannot
+    overwrite the seed.
+    """
+
+    thread = getattr(runtime, "_nmpc_thread", None)
+    if thread is not None:
+        thread.join(timeout=timeout)
+    runtime._schedule_nmpc_worker = lambda: None  # type: ignore[method-assign]
+
+
 def _options(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "instance_id": "haos",
@@ -225,6 +239,7 @@ def test_state_machine_or_for_multi_sensor() -> None:
 async def test_runtime_debounce_clamps_heater(tmp_path: Path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
+    _wait_startup_nmpc(runtime)
     assert "Living Room" in runtime._window_tags
     window_tag = runtime._window_tags["Living Room"][0]
 
@@ -248,6 +263,7 @@ async def test_runtime_debounce_clamps_heater(tmp_path: Path) -> None:
 async def test_runtime_brief_open_does_not_clamp(tmp_path: Path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
+    _wait_startup_nmpc(runtime)
     window_tag = runtime._window_tags["Living Room"][0]
     ctrl = runtime.control_engine._controller
     assert ctrl is not None
@@ -274,6 +290,7 @@ async def test_runtime_brief_open_does_not_clamp(tmp_path: Path) -> None:
 async def test_control_cycle_disables_sources_under_override(tmp_path: Path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
+    _wait_startup_nmpc(runtime)
     runtime._window_state["Living Room"] = "open"
     ctx = runtime._schedule_control_context()
     assert "Living Heater" in ctx["disabled_sources"]
@@ -284,6 +301,7 @@ async def test_control_cycle_disables_sources_under_override(tmp_path: Path) -> 
 async def test_push_override_resumes_shadow_mpc(tmp_path: Path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
+    _wait_startup_nmpc(runtime)
     runtime.actuator_outputs["living_heater"] = 0.0
     runtime._window_state["Living Room"] = "closed"
     runtime.control_engine.mpc_actions_by_tag = lambda: {"living_heater": 0.65}  # type: ignore[method-assign]
@@ -299,6 +317,7 @@ async def test_id_sample_flags_window_open_only_when_override_active(
     """SWD-322: ID history flags the room only after heater shutoff triggers."""
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
     await runtime.start()
+    _wait_startup_nmpc(runtime)
     room = "Living Room"
     runtime.room_temperatures[room] = 21.5
 

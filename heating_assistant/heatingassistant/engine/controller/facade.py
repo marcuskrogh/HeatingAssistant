@@ -47,7 +47,8 @@ HeatingMPCController
       3. Applies the command to all heat sources.
 
     The slow nonlinear OCP runs on a worker thread (not inline from
-    ``compute``).
+    ``compute``).  When a plan is accepted, P is refreshed immediately
+    (no extra EKF prediction) so ``u_ref`` steps on that iterate.
 
     Public API:
         controller = HeatingMPCController(model, heat_sources, ...)
@@ -122,6 +123,7 @@ from ..nmpc_ocp import (
     mean_price_slow,
     plan_from_solve,
     roll_fast_air_path,
+    shift_slow_plan,
     solve_mean_ocp,
 )
 from ..nmpc_p import comfort_fallback_command, p_command
@@ -2407,7 +2409,7 @@ class HeatingMPCController:
                 origin = float(plan_epoch)
                 self._nmpc_plan_epoch = origin
                 self._nmpc_k = self._fast_index_for(origin, stamp)
-            self._nmpc_warm = U.reshape(-1).copy()
+            self._nmpc_warm = shift_slow_plan(U).reshape(-1).copy()
             self._reject_since = None
             if self._watchdog_tripped or self._notify_active:
                 self._watchdog_notification = "dismiss"
@@ -2466,6 +2468,7 @@ class HeatingMPCController:
             self.set_accepted_path(
                 result["u_star"], result["t_ref"], now=now, plan_epoch=plan_epoch,
             )
+            self.refresh_p_command()
             self.rebuild_forecast_from_plan()
             return True
         self._record_nmpc_reject(now)
@@ -2780,6 +2783,36 @@ class HeatingMPCController:
                 if clamp_mask[0, j]:
                     u_abs[j] = float(u_min_seq[0, j])
         return u_abs
+
+    def refresh_p_command(self) -> Dict[str, float]:
+        """Apply P with the installed ``u_ref`` without advancing the EKF.
+
+        Used when a slow plan is accepted mid-interval so the feedforward
+        bias takes effect immediately. The next ``compute()`` still runs the
+        EKF over elapsed ``T_s``.
+        """
+
+        u_abs = self._p_command_vector(None, None, None)
+        outdoor = 0.0
+        seq = getattr(self, "_outdoor_forecast", None) or []
+        if seq:
+            try:
+                outdoor = float(seq[0])
+            except (TypeError, ValueError):
+                outdoor = 0.0
+        actions: Dict[str, float] = {}
+        for j, src in enumerate(self._sources):
+            frac = float(np.clip(u_abs[j], src.u_min, src.u_max))
+            actions[src.name] = frac
+            if src.can_cool:
+                src._current_power = src.display_smooth_thermal_power(
+                    frac, outdoor, self._system._k_sigmoid,
+                )
+            else:
+                src.set_power(frac, outdoor)
+        self._u_prev = u_abs.copy()
+        self._mpc._u_prev = u_abs.copy()
+        return actions
 
     def _forecast_U(self, n_fast: int) -> np.ndarray:
         """Remaining accepted U* from the current plan index, padded to n_fast."""

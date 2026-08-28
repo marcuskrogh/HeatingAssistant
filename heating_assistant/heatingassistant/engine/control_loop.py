@@ -117,6 +117,7 @@ class ControlEngine:
         self._forecast_lock = threading.Lock()
         self._nmpc_last_kwargs: dict[str, Any] = {}
         self._nmpc_worker_kwargs: dict[str, Any] = {}
+        self._last_p_actions: dict[str, float] = {}
         self.update_config(config or {})
 
     def update_config(self, config: Mapping[str, Any]) -> None:
@@ -370,6 +371,8 @@ class ControlEngine:
         )
         if applied:
             self._cache_controller_forecast(controller)
+            actions = controller.refresh_p_command()
+            self._last_p_actions = self._actions_to_tags(actions)
         return applied
 
     def consume_watchdog_notification(self) -> str | None:

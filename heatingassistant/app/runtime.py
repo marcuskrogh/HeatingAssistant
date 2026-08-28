@@ -621,6 +621,10 @@ class HeatingRuntime:
         if self._ticker_thread is not None:
             self._ticker_thread.join(timeout=2)
             self._ticker_thread = None
+        nmpc_thread = getattr(self, "_nmpc_thread", None)
+        if nmpc_thread is not None:
+            nmpc_thread.join(timeout=5)
+            self._nmpc_thread = None
         self._mqtt_discovery_stop.set()
         if self._mqtt_discovery_thread is not None:
             self._mqtt_discovery_thread.join(timeout=2)
@@ -903,7 +907,7 @@ class HeatingRuntime:
         try:
             result = self.control_engine.solve_nmpc_blocking()
             stamp = time.time()
-            self.control_engine.apply_nmpc_result(
+            applied = self.control_engine.apply_nmpc_result(
                 result,
                 plan_epoch=self._slow_slot_start(stamp),
                 now=stamp,
@@ -911,7 +915,8 @@ class HeatingRuntime:
             note = self.control_engine.consume_watchdog_notification()
             if note:
                 self._emit_nmpc_notify(note)
-            # P stays on the previous plan until the next fast grid tick.
+            if applied:
+                self._install_nmpc_p_command()
         except Exception:
             _logger.exception("NMPC worker failed")
             controller = getattr(self.control_engine, "_controller", None)
@@ -948,6 +953,49 @@ class HeatingRuntime:
             asyncio.run(coro)
         except Exception:
             _logger.exception("Failed to publish NMPC watchdog notification")
+
+    def _install_nmpc_p_command(self) -> None:
+        """Put the accepted-plan P command on the actuators without an EKF tick.
+
+        The slow NLP must not call ``run_control_cycle`` (that would predict
+        another ``T_s``). P-only uses the new ``u_ref`` so the feedforward
+        bias steps when the plan lands.
+        """
+
+        tags = dict(getattr(self.control_engine, "_last_p_actions", {}) or {})
+        if not tags:
+            return
+        acquired = self._control_lock.acquire(blocking=True, timeout=10.0)
+        if not acquired:
+            _logger.warning("NMPC accept P publish timed out waiting for lock")
+            return
+        try:
+            self.actuator_outputs.update(tags)
+            self._clamp_window_override_actuators()
+            try:
+                self._save_runtime_state()
+            except Exception:
+                _logger.exception("Failed to persist P command after NMPC accept")
+        finally:
+            self._control_lock.release()
+        self._emit_nmpc_p_publish()
+
+    def _emit_nmpc_p_publish(self) -> None:
+        loop = self._nmpc_loop
+
+        async def _publish() -> None:
+            await self._best_effort_mqtt(
+                self.publish_actuator_outputs(), "NMPC P actuators"
+            )
+            await self._best_effort_mqtt(self.publish_status(), "NMPC P status")
+
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_publish(), loop)
+            return
+        try:
+            asyncio.run(_publish())
+        except Exception:
+            _logger.exception("Failed to publish P command after NMPC accept")
 
     async def publish_nmpc_notify(self, action: str) -> None:
         payload: dict[str, Any] = {
