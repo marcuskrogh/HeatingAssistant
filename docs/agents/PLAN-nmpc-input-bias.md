@@ -78,9 +78,9 @@
 - Task: nmpc-input-bias (mirror)
 - Sub-tasks: —
 - Branch: `cursor/nmpc-input-bias-a8a3`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/635
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix nmpc-input-bias` — Review and auto-fix per Workflow binding

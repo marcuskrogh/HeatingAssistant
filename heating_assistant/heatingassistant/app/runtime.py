@@ -621,6 +621,10 @@ class HeatingRuntime:
         if self._ticker_thread is not None:
             self._ticker_thread.join(timeout=2)
             self._ticker_thread = None
+        nmpc_thread = getattr(self, "_nmpc_thread", None)
+        if nmpc_thread is not None:
+            nmpc_thread.join(timeout=5)
+            self._nmpc_thread = None
         self._mqtt_discovery_stop.set()
         if self._mqtt_discovery_thread is not None:
             self._mqtt_discovery_thread.join(timeout=2)

@@ -227,6 +227,9 @@ async def test_runtime_debounce_clamps_heater(tmp_path: Path) -> None:
     await runtime.start()
     assert "Living Room" in runtime._window_tags
     window_tag = runtime._window_tags["Living Room"][0]
+    thread = runtime._nmpc_thread
+    if thread is not None:
+        thread.join(timeout=30.0)
 
     runtime.actuator_outputs["living_heater"] = 1.0
     await publish_tag_in(runtime, window_tag, True)

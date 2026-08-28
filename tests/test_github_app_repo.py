@@ -47,7 +47,7 @@ def test_heatingassistant_app_config_shape():
 
     assert config["name"] == "HeatingAssistant"
     assert config["slug"] == "heatingassistant"
-    assert config["version"] == "2026.08.30"
+    assert config["version"] == "2026.08.31"
     assert config["arch"] == ["amd64", "aarch64"]
     assert config["init"] is False
     assert config["startup"] == "application"

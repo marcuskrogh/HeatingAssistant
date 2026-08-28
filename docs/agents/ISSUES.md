@@ -156,6 +156,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-28 — `/implement` nmpc-input-bias In Review: `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF. PR https://github.com/marcuskrogh/HeatingAssistant/pull/635; CalVer 2026.08.31. Jira MCP unavailable. Next `/review-fix`.
 - 2026-08-28 — `/define`+`/implement` nmpc-input-bias: PLAN `docs/agents/PLAN-nmpc-input-bias.md` (bug / fix-fast). `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF. Jira MCP unavailable. Next `/review-fix`.
 - 2026-08-22 — `/ship` SWD-432 via PR #634 (`9d815d1`): missing GHI steps use cloud/clear, not `ghi_now`; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.30`. Next Done.
 - 2026-08-22 — `/review-fix` SWD-432 CLEAN (focused): 0 blockers / 0 should-fix / 2 deferred notes (live GHI holes; `c_air_fraction` ignored). COMMENT (cannot APPROVE own PR). Fast suite 987 passed, 88 skipped, 18 deselected. Next `/ship SWD-432`.
