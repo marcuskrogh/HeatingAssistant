@@ -113,7 +113,7 @@ def test_app_version_lock_across_app_context_and_package_metadata():
         app_manifest["version"],
         root_project["version"],
         app_project["version"],
-    } == {"2026.08.30"}
+    } == {"2026.08.31"}
 
 
 def test_app_dockerfile_uses_synced_package_and_bundled_integration():

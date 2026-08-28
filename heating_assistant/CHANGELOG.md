@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.31
+
+- When a new two-hour heating plan is accepted, heaters step to that plan
+  immediately instead of waiting for the next 15-minute tick, so commanded
+  power no longer looks like a slow lag on each planner update.
+
 # 2026.08.30
 
 - Room-view Forecast no longer reuses current sunlight when a future solar

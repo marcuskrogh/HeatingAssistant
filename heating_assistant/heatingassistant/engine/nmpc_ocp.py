@@ -26,6 +26,21 @@ NMPC_FTOL = 1e-6
 NMPC_IDLE_U_ABS = 1e-6
 
 
+def shift_slow_plan(u_star: np.ndarray) -> np.ndarray:
+    """Recede a slow ``U*`` by one interval for the next NLP warm-start.
+
+    ``U[0]`` was the hold that just started. The next solve's first move is
+    the previous ``U[1]`` (last interval repeated as the new tail).
+    """
+
+    U = np.asarray(u_star, dtype=float)
+    if U.ndim == 1:
+        U = U.reshape(-1, 1)
+    if U.shape[0] <= 1:
+        return U.copy()
+    return np.vstack([U[1:], U[-1:]])
+
+
 def electrical_w(sources: Sequence[HeatSource], u: np.ndarray) -> float:
     """Electrical draw [W] for a control vector."""
 
