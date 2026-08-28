@@ -46,9 +46,9 @@ def test_accept_steps_u_ref_before_compute() -> None:
     n_fast = ctrl.horizon
     n_slow = ctrl.timing.n_slow
     T = np.full((n_fast, 1), 24.0)
-    ctrl.set_accepted_path(np.full((n_slow, 1), -0.4), T, now=_NOW.timestamp())
+    ctrl.set_accepted_path(np.full((n_slow, 1), 0.2), T, now=_NOW.timestamp())
     ctrl.refresh_p_command()
-    assert float(ctrl._u_prev[0]) == pytest.approx(-0.4, abs=0.05)
+    assert float(ctrl._u_prev[0]) == pytest.approx(0.2, abs=0.05)
 
     plan = {
         "accepted": True,
