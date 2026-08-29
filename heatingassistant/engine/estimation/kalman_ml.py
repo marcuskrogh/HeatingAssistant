@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -276,13 +277,10 @@ class KalmanMLEstimator:
 
         # Convert history to CD-EKF format (use "ym" key)
         std_history = self._convert_history_std(history, use_ym=True)
-
-        # Build model factory for CDParameterEstimator
-        def _model_factory(theta: np.ndarray):
-            return self._build_parametric_system(layout, theta)
+        model_factory = partial(self._build_parametric_system, layout)
 
         # Initial state estimate/covariance (supports augmented states, e.g. [T, b])
-        system0 = _model_factory(theta_prior)
+        system0 = model_factory(theta_prior)
         if system0 is None:
             return None
         x0, P0 = self._initial_state_and_covariance(
@@ -293,7 +291,7 @@ class KalmanMLEstimator:
         try:
             # Evaluate negative log-likelihood using CD-EKF
             neg_ll = _cd_ped_neg_ll(
-                model_factory=_model_factory,
+                model_factory=model_factory,
                 theta=theta_prior,
                 history=std_history,
                 x0=x0,
@@ -365,11 +363,9 @@ class KalmanMLEstimator:
         center_log_mass = float(self._log_mass_prior[room_idx])
         center_log_r = float(self._log_r_prior[room_idx])
 
-        def _model_factory(theta: np.ndarray):
-            return self._build_parametric_system(layout, theta)
-
+        model_factory = partial(self._build_parametric_system, layout)
         std_history = self._convert_history_std(history, use_ym=True)
-        system0 = _model_factory(theta_prior)
+        system0 = model_factory(theta_prior)
         if system0 is None:
             return None
         x0, P0 = self._initial_state_and_covariance(
@@ -395,7 +391,7 @@ class KalmanMLEstimator:
                 theta[self._n + room_idx] = log_r
                 try:
                     neg_ll = _cd_ped_neg_ll(
-                        model_factory=_model_factory,
+                        model_factory=model_factory,
                         theta=theta,
                         history=std_history,
                         x0=x0,

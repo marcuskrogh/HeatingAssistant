@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -10,7 +11,116 @@ from .history.window import split_contiguous_runs
 from .integrator import ImplicitEulerConvergenceError, implicit_euler_substeps
 
 
-# ── Open-loop predictions ────────────────────────────────────────────────────
+def _open_loop_error(message: str, segment_length: Optional[int]) -> Dict[str, Any]:
+    return {
+        "error": message,
+        "per_room": {},
+        "overall_rmse": {},
+        "n_segments": 0,
+        "segment_length": segment_length,
+    }
+
+
+def _ua_modelled(rooms: Any, room_name: str) -> bool:
+    room_obj = rooms.get(room_name)
+    return float(getattr(room_obj, "ua_open", 0.0) or 0.0) > 0.0
+
+
+def _gap_open(rooms: Any, flags: Dict[str, Any], room_name: str) -> bool:
+    return bool(flags.get(room_name, False)) and not _ua_modelled(rooms, room_name)
+
+
+def _make_d(
+    system: Any,
+    record: Dict[str, Any],
+    *,
+    n: int,
+    room_names: List[str],
+    rooms: Any,
+    has_disturbance_vector: bool,
+) -> np.ndarray:
+    outdoor = float(record.get("d_outdoor", 0.0))
+    d_solar = record.get("d_solar", {}) or {}
+    if has_disturbance_vector:
+        return np.asarray(system.disturbance_vector(outdoor, d_solar), dtype=float)
+
+    n_d = int(getattr(system, "nd", 1 + 2 * n))
+    d = np.zeros(n_d)
+    d[0] = outdoor
+    room_idx = getattr(system, "_room_idx", {name: idx for idx, name in enumerate(room_names)})
+    n_model_rooms = len(room_idx)
+    for name, idx in room_idx.items():
+        if 1 + idx < n_d:
+            d[1 + idx] = float(d_solar.get(name, 0.0))
+        room_obj = rooms.get(name)
+        air_gain_idx = 1 + n_model_rooms + idx
+        if room_obj is not None and air_gain_idx < n_d:
+            d[air_gain_idx] = float(getattr(room_obj, "internal_gain", 0.0))
+    return d
+
+
+def _initial_state_from_measurement(
+    init_fn: Any,
+    y0_arr: np.ndarray,
+    u_prev: np.ndarray,
+    d_prev: np.ndarray,
+    wall_seed: str,
+) -> np.ndarray:
+    attempts = (
+        lambda: init_fn(y0_arr, u_prev, d_prev, wall_seed=wall_seed),
+        lambda: init_fn(y0_arr, u_prev, d_prev),
+        lambda: init_fn(y0_arr, u_prev),
+    )
+    last_error: TypeError | None = None
+    for attempt in attempts:
+        try:
+            return np.asarray(attempt(), dtype=float)
+        except TypeError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+def _seed_wall_states(
+    x: np.ndarray,
+    y0_arr: np.ndarray,
+    n: int,
+    room_names: List[str],
+    t_wall_initial: Optional[Dict[str, float]],
+    is_first_dataset_segment: bool,
+) -> np.ndarray:
+    if not (is_first_dataset_segment and x.shape[0] >= 2 * n):
+        return x
+    if t_wall_initial:
+        for room_idx, room_name in enumerate(room_names):
+            if room_name in t_wall_initial:
+                x[n + room_idx] = float(t_wall_initial[room_name])
+            else:
+                x[n + room_idx] = float(y0_arr[room_idx])
+    else:
+        x[n : 2 * n] = y0_arr[:n]
+    return x
+
+
+def _open_loop_rhs(
+    system: Any,
+    u_loc: np.ndarray,
+    d_loc: np.ndarray,
+    params: np.ndarray,
+    state: np.ndarray,
+) -> np.ndarray:
+    return system.f(state, u_loc, d_loc, params, 0.0)
+
+
+def _open_loop_jac(
+    system: Any,
+    u_loc: np.ndarray,
+    d_loc: np.ndarray,
+    params: np.ndarray,
+    state: np.ndarray,
+) -> np.ndarray:
+    return system.dfdx(state, u_loc, d_loc, params, 0.0)
+
 
 def compute_open_loop_predictions(
     history: List[Dict[str, Any]],
@@ -32,56 +142,31 @@ def compute_open_loop_predictions(
     if segment_length is not None:
         effective_segment_length = min(int(segment_length), max(1, len(history) // 2))
         if len(history) < effective_segment_length + 1:
-            return {
-                "error": (
+            return _open_loop_error(
+                (
                     f"Insufficient history: need >= {effective_segment_length + 1} "
                     f"steps, have {len(history)}."
                 ),
-                "per_room": {},
-                "overall_rmse": {},
-                "n_segments": 0,
-                "segment_length": effective_segment_length,
-            }
+                effective_segment_length,
+            )
         segment_length = effective_segment_length
     elif len(history) < 2:
-        return {
-            "error": f"Insufficient history: need >= 2 steps, have {len(history)}.",
-            "per_room": {},
-            "overall_rmse": {},
-            "n_segments": 0,
-            "segment_length": None,
-        }
+        return _open_loop_error(
+            f"Insufficient history: need >= 2 steps, have {len(history)}.",
+            None,
+        )
 
     has_disturbance_vector = hasattr(system, "disturbance_vector")
     rooms = getattr(getattr(system, "_model", None), "rooms", {}) or {}
     set_window_open = getattr(system, "set_window_open", None)
-
-    def _ua_modelled(room_name: str) -> bool:
-        room_obj = rooms.get(room_name)
-        return float(getattr(room_obj, "ua_open", 0.0) or 0.0) > 0.0
-
-    def _gap_open(flags: Dict[str, Any], room_name: str) -> bool:
-        return bool(flags.get(room_name, False)) and not _ua_modelled(room_name)
-
-    def _make_d(record: Dict[str, Any]) -> np.ndarray:
-        outdoor = float(record.get("d_outdoor", 0.0))
-        d_solar = record.get("d_solar", {}) or {}
-        if has_disturbance_vector:
-            return np.asarray(system.disturbance_vector(outdoor, d_solar), dtype=float)
-
-        n_d = int(getattr(system, "nd", 1 + 2 * n))
-        d = np.zeros(n_d)
-        d[0] = outdoor
-        room_idx = getattr(system, "_room_idx", {name: idx for idx, name in enumerate(room_names)})
-        n_model_rooms = len(room_idx)
-        for name, idx in room_idx.items():
-            if 1 + idx < n_d:
-                d[1 + idx] = float(d_solar.get(name, 0.0))
-            room_obj = rooms.get(name)
-            air_gain_idx = 1 + n_model_rooms + idx
-            if room_obj is not None and air_gain_idx < n_d:
-                d[air_gain_idx] = float(getattr(room_obj, "internal_gain", 0.0))
-        return d
+    make_d = partial(
+        _make_d,
+        system,
+        n=n,
+        room_names=room_names,
+        rooms=rooms,
+        has_disturbance_vector=has_disturbance_vector,
+    )
 
     per_room_preds: Dict[str, List[float]] = {name: [] for name in room_names}
     per_room_meas: Dict[str, List[float]] = {name: [] for name in room_names}
@@ -115,27 +200,15 @@ def compute_open_loop_predictions(
             if k < n_u:
                 u_prev[k] = float(value)
 
-        d_prev = _make_d(seg[0])
+        d_prev = make_d(seg[0])
         init_fn = getattr(system, "initial_state_from_measurement", None)
         if callable(init_fn):
             y0_arr = np.asarray(y0[:n], dtype=float)
             wall_seed = "air" if is_first_dataset_segment else "steady_state"
-            try:
-                x = np.asarray(init_fn(y0_arr, u_prev, d_prev, wall_seed=wall_seed), dtype=float)
-            except TypeError:
-                try:
-                    x = np.asarray(init_fn(y0_arr, u_prev, d_prev), dtype=float)
-                except TypeError:
-                    x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
-            if is_first_dataset_segment and x.shape[0] >= 2 * n:
-                if t_wall_initial:
-                    for room_idx, room_name in enumerate(room_names):
-                        if room_name in t_wall_initial:
-                            x[n + room_idx] = float(t_wall_initial[room_name])
-                        else:
-                            x[n + room_idx] = float(y0_arr[room_idx])
-                else:
-                    x[n : 2 * n] = y0_arr[:n]
+            x = _initial_state_from_measurement(init_fn, y0_arr, u_prev, d_prev, wall_seed)
+            x = _seed_wall_states(
+                x, y0_arr, n, room_names, t_wall_initial, is_first_dataset_segment
+            )
             is_first_dataset_segment = False
         else:
             x = np.zeros(nx, dtype=float)
@@ -150,7 +223,7 @@ def compute_open_loop_predictions(
         for room_idx, room_name in enumerate(room_names):
             if room_idx >= len(y0):
                 continue
-            if _gap_open(window_open0, room_name):
+            if _gap_open(rooms, window_open0, room_name):
                 simulation[room_name].append(
                     {"time": ts_prev, "measured": None, "predicted": None}
                 )
@@ -170,7 +243,7 @@ def compute_open_loop_predictions(
         for record in seg[1:]:
             if callable(set_window_open):
                 set_window_open(prev_window_open)
-            d = _make_d(record)
+            d = make_d(record)
             u = np.zeros(n_u)
             for k, value in enumerate(record.get("u", [])):
                 if k < n_u:
@@ -182,12 +255,8 @@ def compute_open_loop_predictions(
                 dt_step = nominal_dt
             n_steps = max(1, min(200, round(dt_step * 10.0 / nominal_dt)))
             params = np.array([])
-
-            def rhs(state: np.ndarray, u_loc: np.ndarray = u_prev, d_loc: np.ndarray = d_prev) -> np.ndarray:
-                return system.f(state, u_loc, d_loc, params, 0.0)
-
-            def jac(state: np.ndarray, u_loc: np.ndarray = u_prev, d_loc: np.ndarray = d_prev) -> np.ndarray:
-                return system.dfdx(state, u_loc, d_loc, params, 0.0)
+            rhs = partial(_open_loop_rhs, system, u_prev, d_prev, params)
+            jac = partial(_open_loop_jac, system, u_prev, d_prev, params)
 
             try:
                 x = implicit_euler_substeps(rhs, jac, x, dt_step, n_steps)
@@ -206,7 +275,7 @@ def compute_open_loop_predictions(
                 if room_idx >= len(y_meas):
                     continue
                 meas_val = float(y_meas[room_idx])
-                if _gap_open(window_open, room_name):
+                if _gap_open(rooms, window_open, room_name):
                     x[room_idx] = meas_val
                     simulation[room_name].append(
                         {"time": ts, "measured": None, "predicted": None}
@@ -229,13 +298,7 @@ def compute_open_loop_predictions(
             n_segments += 1
 
     if n_segments == 0:
-        return {
-            "error": "No valid segments found.",
-            "per_room": {},
-            "overall_rmse": {},
-            "n_segments": 0,
-            "segment_length": segment_length,
-        }
+        return _open_loop_error("No valid segments found.", segment_length)
 
     per_room_results: Dict[str, Any] = {}
     overall_rmse: Dict[str, float] = {}
