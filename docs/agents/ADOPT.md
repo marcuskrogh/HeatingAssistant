@@ -58,7 +58,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-445
 - Branch: `cursor/swd-445-adopt-panel-1253`
-- PR: (draft after characterize)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/642
 
 ## Next
 `/implement SWD-445` — split page-detail gods on the SWD-445 delivery head
