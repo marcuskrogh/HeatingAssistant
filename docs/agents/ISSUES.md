@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-434` |
+| SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
 | SWD-435 | Sub-task | Restore DISTURBANCES outdoor/solar history to solid lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
 | SWD-436 | Sub-task | Tests, CalVer, changelog, App sync for DISTURBANCES lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
 | nmpc-input-bias | Task | [Bug] NMPC input bias (u_ref) must step on each accepted plan | Done | — | docs/agents/PLAN-nmpc-input-bias.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635 (`ff1449e`) |
@@ -159,6 +159,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-29 — `/ship` SWD-434 via PR #636 (`161ad7f`): DISTURBANCES outdoor/solar history restored to solid lines; forecasts stay dashed; Indoor Measured stays points; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.32`. Next Done.
 - 2026-08-29 — `/review-fix` SWD-434 CLEAN (focused): 0 blockers / 0 should-fix / 0 notes. COMMENT (cannot APPROVE own PR). Local fast suite 994 passed, 88 skipped, 18 deselected. GitHub pytest-fast + panel-harness green; slow shards in flight at review. Next `/ship SWD-434`.
 - 2026-08-29 — `/iterate` SWD-434 In Review: DISTURBANCES outdoor/solar history restored to solid lines (grey/yellow); PR https://github.com/marcuskrogh/HeatingAssistant/pull/636; CalVer 2026.08.32. Fast suite 994 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-434`.
 - 2026-08-29 — `/iterate` SWD-434 from SWD-321: restore DISTURBANCES outdoor/solar history to solid lines (keep colours); Relates SWD-321; Sub-tasks SWD-435–436. Next `/review-fix SWD-434`.

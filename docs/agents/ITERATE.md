@@ -44,4 +44,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/636
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`)
