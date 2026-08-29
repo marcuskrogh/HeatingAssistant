@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 
+def require_non_negative_p_gating(p_deadband: float, u_ref_gate: float) -> None:
+    """Raise if NMPC-off P gating knobs are negative."""
+
+    if float(p_deadband) < 0.0:
+        raise ValueError(f"p_deadband must be >= 0; got {p_deadband}")
+    if float(u_ref_gate) < 0.0:
+        raise ValueError(f"u_ref_gate must be >= 0; got {u_ref_gate}")
+
+
 def p_command(
     u_ref: float,
     t_ref: float,
@@ -19,7 +28,8 @@ def p_command(
     When ``|u_ref|`` is below ``u_ref_gate`` and air is within ``p_deadband``
     of ``T_ref``, return 0 so P does not fight an NMPC-off interval.
     Defaults (0, 0) keep the ungated tracker. ``comfort_fallback_command``
-    omits the kwargs.
+    omits the kwargs. Negative knobs clamp to 0 here so the fast loop never
+    raises; persist and the controller constructor reject them.
     """
 
     gate = max(0.0, float(u_ref_gate))

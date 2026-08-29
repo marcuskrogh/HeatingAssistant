@@ -31,7 +31,7 @@ from heatingassistant.app.plot_history import PlotHistoryStore
 from heatingassistant.app import core_restart
 from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
-from heatingassistant.engine.control_loop import ControlEngine, reject_negative_p_deadband_knobs
+from heatingassistant.engine.control_loop import ControlEngine, reject_negative_p_gating_knobs
 from heatingassistant.engine import const
 from heatingassistant.engine.nmpc_timing import (
     grid_slot_index,
@@ -1015,7 +1015,7 @@ class HeatingRuntime:
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""
 
-        reject_negative_p_deadband_knobs(updates)
+        reject_negative_p_gating_knobs(updates)
         was_enabled = bool(self.options.get("system_enabled", False))
         self.options = {**self.options, **dict(updates)}
         now_enabled = bool(self.options.get("system_enabled", False))

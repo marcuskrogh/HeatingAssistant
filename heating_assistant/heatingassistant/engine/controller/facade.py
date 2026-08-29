@@ -130,7 +130,7 @@ from ..nmpc_ocp import (
     shift_slow_plan,
     solve_mean_ocp,
 )
-from ..nmpc_p import comfort_fallback_command, p_command
+from ..nmpc_p import comfort_fallback_command, p_command, require_non_negative_p_gating
 from ..nmpc_timing import (
     NmpcTiming,
     derive_nmpc_timing,
@@ -1861,10 +1861,7 @@ class HeatingMPCController:
             raise ValueError(
                 f"smoothing_weight must be >= 0; got {smoothing_weight}"
             )
-        if p_deadband < 0.0:
-            raise ValueError(f"p_deadband must be >= 0; got {p_deadband}")
-        if u_ref_gate < 0.0:
-            raise ValueError(f"u_ref_gate must be >= 0; got {u_ref_gate}")
+        require_non_negative_p_gating(p_deadband, u_ref_gate)
         if terminal_weight < 1.0:
             raise ValueError(
                 f"terminal_weight must be at least 1.0; got {terminal_weight}"

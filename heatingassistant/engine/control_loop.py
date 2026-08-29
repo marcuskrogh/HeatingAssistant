@@ -10,21 +10,24 @@ from typing import Any
 
 from . import const
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
+from .nmpc_p import require_non_negative_p_gating
 from .nmpc_timing import timing_from_dt_horizon, timing_from_options, timing_from_preview_overrides
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def reject_negative_p_deadband_knobs(mapping: Mapping[str, Any]) -> None:
-    """Raise if live P-deadband knobs are negative (before persist or rebuild)."""
+def reject_negative_p_gating_knobs(mapping: Mapping[str, Any]) -> None:
+    """Raise if live P-deadband or NMPC-off gate knobs are negative."""
 
-    for key in (const.CONF_P_DEADBAND, const.CONF_U_REF_GATE):
-        if key not in mapping:
-            continue
-        value = float(mapping[key])
-        if value < 0.0:
-            raise ValueError(f"{key} must be >= 0; got {value}")
+    require_non_negative_p_gating(
+        float(mapping[const.CONF_P_DEADBAND])
+        if const.CONF_P_DEADBAND in mapping
+        else 0.0,
+        float(mapping[const.CONF_U_REF_GATE])
+        if const.CONF_U_REF_GATE in mapping
+        else 0.0,
+    )
 
 
 # MPC tuning keys accepted by Controller Tuning preview (exclude window detection).
@@ -135,7 +138,7 @@ class ControlEngine:
     def update_config(self, config: Mapping[str, Any]) -> None:
         """Rebuild model/controller state from an App config dictionary."""
 
-        reject_negative_p_deadband_knobs(config)
+        reject_negative_p_gating_knobs(config)
         self.config = dict(config)
         try:
             timing = self._nmpc_timing(self.config)
