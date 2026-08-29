@@ -13,7 +13,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | engine/controller (`facade.py`) | Small type, SRP, Divergent Change; nested source dispatch in `f` | Split SDE / EKF / linearised / MPC files; extract `f`/`dfdu` helpers | done |
 | app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | done |
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | done |
-| estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | frontier |
+| estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | done |
 | Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | open |
 | Remaining engine / MQTT / thin bridge | Re-scan after prior areas | Nested leftover or documented exception (heat-source polymorphism) | open |
 | `heatingassistant/fusion/` | — | None — small averaging port | exception |
@@ -24,7 +24,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | done | SWD-441 |
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
-| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | In Review | SWD-444 |
+| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
 | 5 | Ingress panel | Split remaining panel god modules | SWD-444 | To Do | SWD-445 |
 | 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
 
@@ -45,8 +45,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: estimation + PE HTTP (`kalman_ml.py`, `sysid_services.py`, diagnostics, lifecycle)
-- Packages: NLP helpers extracted; PE sensors live in `sysid_sensors` (re-exported); open-loop predictions live in `open_loop_predictions` (re-exported from `model_diagnostics`). Nested open-loop ua/gap/d/rhs and log-likelihood factories lifted in harden. `KalmanMLEstimator.estimate` body stays on the class (public entry point).
+- Area: Ingress panel JS (page-detail gods; HA classic-script IIFE exception)
+- Packages: characterize then split `sysid-detail.js`, `schedules-detail.js`, `room-detail.js` along neighbour module seams; keep `?v=` cache-bust and IIFE boot shell.
 
 ## Workflow
 - Template: structure-safe
@@ -61,4 +61,4 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/641
 
 ## Next
-`/ship SWD-444` — merge PR #641 when CI is green; `/adopt` continues with SWD-445
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641; `/adopt` continues with SWD-445
