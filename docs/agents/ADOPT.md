@@ -62,7 +62,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-441
 - Branch: `cursor/swd-441-adopt-controller-1253`
-- PR: (opens after first commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/638
 
 ## Next
-`/test SWD-441` — dedicated non-regression pass on the controller split
+`/review-fix SWD-441` — lasers then code review on PR #638

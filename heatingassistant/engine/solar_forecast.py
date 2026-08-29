@@ -207,6 +207,24 @@ def select_ghi_for_step(
     return None
 
 
+def select_cloud_for_step(
+    cloud_forecast: Optional[List[float]],
+    k: int,
+    fallback: Optional[float] = None,
+) -> Optional[float]:
+    """Pick the cloud-cover fraction for horizon step ``k``.
+
+    Returns ``cloud_forecast[k]`` when in range, the last entry when ``k``
+    runs past the forecast (persistence), or ``fallback`` when no forecast
+    was given (typically the current measured cloud cover).
+    """
+    if not cloud_forecast:
+        return fallback
+    if k < len(cloud_forecast):
+        return cloud_forecast[k]
+    return cloud_forecast[-1]
+
+
 def is_stale(state: Any, now: datetime, max_age: float = STALE_SECONDS_DEFAULT) -> bool:
     """Return True when the entity's ``last_updated`` is older than ``max_age``."""
     last = getattr(state, "last_updated", None)

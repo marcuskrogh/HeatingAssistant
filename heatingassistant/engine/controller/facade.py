@@ -53,28 +53,12 @@ from ..nmpc_timing import (
     grid_slot_index,
     timing_from_dt_horizon,
 )
-from ..solar_forecast import select_ghi_for_step
+from ..solar_forecast import select_cloud_for_step, select_ghi_for_step
 from ..solar_model import room_solar_gains, room_solar_gains_from_exposure
 from ..thermal_model import HouseModel
 from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
 from .sde import HouseThermalSDE
-
-def _select_cloud_for_step(
-    cloud_forecast: Optional[List[float]], k: int,
-    fallback: Optional[float] = None,
-) -> Optional[float]:
-    """Pick the cloud-cover fraction for horizon step k from a forecast list.
-
-    Returns ``cloud_forecast[k]`` when in range, the last entry when ``k``
-    runs past the forecast (persistence), or ``fallback`` when no forecast
-    was given (typically the current measured cloud cover).
-    """
-    if not cloud_forecast:
-        return fallback
-    if k < len(cloud_forecast):
-        return cloud_forecast[k]
-    return cloud_forecast[-1]
 
 
 def _diag_np(n: int, v: float) -> np.ndarray:
@@ -1571,7 +1555,7 @@ class HeatingMPCController:
                 cc = cloud_cover_now
             else:
                 g = select_ghi_for_step(ghi_forecast, k - 1)
-                cc = _select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)
+                cc = select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)
             schedules.append({
                 name: self._room_gain(name, t, cc, g)
                 for name in self._system._room_list

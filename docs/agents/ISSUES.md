@@ -5,7 +5,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-440 | Story | [Adopt] Meet structure catalog on the production tree | In Progress | — | docs/agents/ADOPT.md | `/adopt` — walk unit chain; frontier SWD-441 |
-| SWD-441 | Task | [Adopt] Split engine controller facade into SDE, EKF, linearised, MPC | In Progress | SWD-440 | docs/agents/ADOPT.md | characterize lock green; implement file split |
+| SWD-441 | Task | [Adopt] Split engine controller facade into SDE, EKF, linearised, MPC | In Review | SWD-440 | docs/agents/ADOPT.md | `/review-fix SWD-441` |
 | SWD-442 | Task | [Adopt] Split HeatingRuntime into ticker, MQTT, NMPC, panel-state collaborators | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-441 |
 | SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-442 |
 | SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-443 |
@@ -166,7 +166,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-29 — `/adopt` SWD-440 route persisted: frontier SWD-441 In Progress; lock suite 225 passed / 6 skipped on current controller; Next implement facade split.
+- 2026-08-29 — `/adopt` SWD-441 implement+test+harden: facade split to sde/ekf/linearised; `select_cloud_for_step` with GHI picker; lock suite 226 passed / 6 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/638. Next `/review-fix SWD-441`.
 - 2026-08-29 — `/ship` SWD-434 via PR #636 (`161ad7f`): DISTURBANCES outdoor/solar history restored to solid lines; forecasts stay dashed; Indoor Measured stays points; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.32`. Next Done.
 - 2026-08-29 — `/review-fix` SWD-434 CLEAN (focused): 0 blockers / 0 should-fix / 0 notes. COMMENT (cannot APPROVE own PR). Local fast suite 994 passed, 88 skipped, 18 deselected. GitHub pytest-fast + panel-harness green; slow shards in flight at review. Next `/ship SWD-434`.
 - 2026-08-29 — `/iterate` SWD-434 In Review: DISTURBANCES outdoor/solar history restored to solid lines (grey/yellow); PR https://github.com/marcuskrogh/HeatingAssistant/pull/636; CalVer 2026.08.32. Fast suite 994 passed, 88 skipped, 18 deselected. Next `/review-fix SWD-434`.
