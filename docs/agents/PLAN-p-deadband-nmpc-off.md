@@ -107,4 +107,4 @@ else:
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-437` — Build gated P deadband per PLAN.md (same branch/PR)
+`/review-fix SWD-437` — Laser reviews then code review
