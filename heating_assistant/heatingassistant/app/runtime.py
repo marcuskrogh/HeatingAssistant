@@ -31,7 +31,7 @@ from heatingassistant.app.plot_history import PlotHistoryStore
 from heatingassistant.app import core_restart
 from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
-from heatingassistant.engine.control_loop import ControlEngine
+from heatingassistant.engine.control_loop import ControlEngine, reject_negative_p_gating_knobs
 from heatingassistant.engine import const
 from heatingassistant.engine.nmpc_timing import (
     grid_slot_index,
@@ -1015,6 +1015,7 @@ class HeatingRuntime:
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""
 
+        reject_negative_p_gating_knobs(updates)
         was_enabled = bool(self.options.get("system_enabled", False))
         self.options = {**self.options, **dict(updates)}
         now_enabled = bool(self.options.get("system_enabled", False))
@@ -1256,6 +1257,12 @@ class HeatingRuntime:
                 self.options.get("energy_price_weight", const.DEFAULT_ENERGY_PRICE_WEIGHT)
             ),
             "smoothing_weight": float(self.options.get("smoothing_weight", 0.05)),
+            const.CONF_P_DEADBAND: float(
+                self.options.get(const.CONF_P_DEADBAND, const.DEFAULT_P_DEADBAND)
+            ),
+            const.CONF_U_REF_GATE: float(
+                self.options.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
+            ),
             "soft_constraint_weight": float(self.options.get("soft_constraint_weight", 10.0)),
             "soft_constraint_linear_weight": float(
                 self.options.get("soft_constraint_linear_weight", 0.0)
