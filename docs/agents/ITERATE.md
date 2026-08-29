@@ -41,7 +41,7 @@
 - Sub-tasks: [SWD-435](https://marcusknielsen.atlassian.net/browse/SWD-435),
   [SWD-436](https://marcusknielsen.atlassian.net/browse/SWD-436)
 - Branch: `cursor/swd-434-disturbances-history-lines-071f`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/636
 
 ## Next
 `/review-fix SWD-434` — Review and auto-fix (single pass)

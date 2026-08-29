@@ -17,7 +17,15 @@ ROOM_CHARTS = (
     / "charts"
     / "room-charts.js"
 )
-APP_STATIC = Path(__file__).resolve().parents[1] / "heatingassistant" / "app" / "static"
+APP_TREES = (
+    Path(__file__).resolve().parents[1] / "heatingassistant" / "app" / "static",
+    Path(__file__).resolve().parents[1]
+    / "heating_assistant"
+    / "heatingassistant"
+    / "app"
+    / "static",
+)
+APP_STATIC = APP_TREES[0]
 
 
 def _dataset_block_from_marker(source: str, marker: str) -> str:
@@ -104,21 +112,31 @@ def test_measured_temperature_style_still_points() -> None:
 
 def test_room_charts_import_cache_bust() -> None:
     """Importers of room-charts.js use a bumped ?v= so Ingress does not keep points."""
-    room_detail = (APP_STATIC / "js" / "pages" / "room-detail.js").read_text(
-        encoding="utf-8"
-    )
-    mpc_preview = (APP_STATIC / "js" / "charts" / "mpc-preview-charts.js").read_text(
-        encoding="utf-8"
-    )
-    tuning = (APP_STATIC / "js" / "pages" / "tuning-controller.js").read_text(
-        encoding="utf-8"
-    )
-    index = (APP_STATIC / "index.html").read_text(encoding="utf-8")
-    dashboard = (APP_STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
-    assert "room-charts.js?v=140" in room_detail
-    assert "room-charts.js?v=140" in mpc_preview
-    assert "mpc-preview-charts.js?v=140" in tuning
-    assert "industrial-dashboard.js?v=140" in index
-    assert "return '140'" in dashboard
-    assert "room-charts.js?v=124" not in room_detail
-    assert "room-charts.js?v=124" not in mpc_preview
+    for static in APP_TREES:
+        room_detail = (static / "js" / "pages" / "room-detail.js").read_text(
+            encoding="utf-8"
+        )
+        mpc_preview = (static / "js" / "charts" / "mpc-preview-charts.js").read_text(
+            encoding="utf-8"
+        )
+        tuning = (static / "js" / "pages" / "tuning-controller.js").read_text(
+            encoding="utf-8"
+        )
+        index = (static / "index.html").read_text(encoding="utf-8")
+        dashboard = (static / "industrial-dashboard.js").read_text(encoding="utf-8")
+        disturb = (static / "js" / "charts" / "room-charts.js").read_text(
+            encoding="utf-8"
+        )
+        disturb = disturb.split("export function buildDisturbanceChart", 1)[1]
+        next_export = disturb.find("\nexport ")
+        if next_export != -1:
+            disturb = disturb[:next_export]
+        outdoor_hist = _dataset_block(disturb, "Outdoor Temperature")
+        _assert_solid_history_line(outdoor_hist, colour="#90a4ae")
+        assert "room-charts.js?v=140" in room_detail
+        assert "room-charts.js?v=140" in mpc_preview
+        assert "mpc-preview-charts.js?v=140" in tuning
+        assert "industrial-dashboard.js?v=140" in index
+        assert "return '140'" in dashboard
+        assert "room-charts.js?v=124" not in room_detail
+        assert "room-charts.js?v=124" not in mpc_preview
