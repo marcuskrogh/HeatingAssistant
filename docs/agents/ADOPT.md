@@ -14,7 +14,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | done |
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | done |
 | estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | done |
-| Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | open |
+| Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | frontier |
 | Remaining engine / MQTT / thin bridge | Re-scan after prior areas | Nested leftover or documented exception (heat-source polymorphism) | open |
 | `heatingassistant/fusion/` | — | None — small averaging port | exception |
 
@@ -25,28 +25,28 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
-| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | To Do | SWD-445 |
+| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | In Progress | SWD-445 |
 | 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
 
 ## Behaviour map
 | Requirement | Current behaviour | Test path | Status |
 |-------------|-------------------|-----------|--------|
-| `KalmanMLEstimator` is the PE entry point | re-exported from `parameter_estimator` and `estimation` | `tests/test_swd444_estimation_seams.py` `test_kalman_ml_estimator_reexported_from_compat_module`; `tests/test_parameter_estimator.py` | locked |
-| Estimator public methods stay on the class | estimate, estimate_wall_initial_only, log-likelihood slices | `tests/test_swd444_estimation_seams.py` `test_kalman_ml_estimator_public_methods_exist`; `tests/test_estimation_internals.py`; `tests/test_estimator_2r2c.py` | locked |
-| App PE HTTP handlers stay on `sysid_services` | create/delete dataset, estimate, store, simulate, coverage | `tests/test_swd444_estimation_seams.py` `test_sysid_services_public_handlers_exist`; `tests/test_swd289_sysid_services.py` | locked |
-| Runtime `apply_service` dispatches PE names to those handlers | `estimate_parameters_ml` / dataset / store / open-loop | `tests/test_swd444_estimation_seams.py` `test_runtime_maps_pe_services_to_sysid_handlers` | locked |
-| Diagnostics public API unchanged | fit metrics, residuals, validate, warnings, open-loop predict | `tests/test_swd444_estimation_seams.py` `test_model_diagnostics_public_api_exists`; `tests/test_model_diagnostics.py` | locked |
-| Parameter lifecycle persist/restore | store / apply / restore estimated params | `tests/test_swd444_estimation_seams.py` `test_parameter_lifecycle_public_api_exists`; `tests/test_persist_estimated_params.py` | locked |
+| Dashboard boot is a classic-script IIFE | wrapped in `(() => {`; no `import.meta.url`; defines `ha-industrial-panel` | `tests/test_swd445_panel_seams.py` `test_industrial_dashboard_is_classic_script_iife`; `tests/test_app_ingress_panel.py` | locked |
+| Dashboard dynamically imports page modules with `?v=` | `room-detail`, PE, schedules, overview, tuning, system-status, config | `tests/test_swd445_panel_seams.py` `test_industrial_dashboard_dynamically_imports_page_modules` | locked |
+| Page-detail public renders stay on named modules | `renderRoomDetail`, `renderIdentificationDetail`, `renderScheduleDetail`; thin page wrappers import them | `tests/test_swd445_panel_seams.py` `test_page_detail_entry_exports_exist` | locked |
+| Ingress index cache-busts the dashboard entry | `industrial-dashboard.js?v=` in `index.html` | `tests/test_swd445_panel_seams.py` `test_index_html_cache_busts_dashboard_entry`; `tests/test_swd434_disturbance_history_lines.py` | locked |
+| Room-detail live chart helpers stay callable by name | `updateChartsFromState` extends live history before `mpcForecastStamp` early return | `tests/test_swd445_panel_seams.py` `test_room_detail_keeps_live_chart_update_helpers`; `tests/test_swd414_nmpc_trajectory.py` | locked |
+| PE detail keeps window/aux/tw0 identifiers | `getPeInputs`, `t_wall_locked`, `applySimulatedTw0` in `sysid-detail.js` | `tests/test_swd344_pe_sim_aux_tw0.py` `test_pe_guides_are_plain_dataset_requirements` | locked |
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Characterize result: green — 68 passed, 5 skipped, 6 deselected (2026-08-29, current estimation/sysid tree); after NLP extract 69 passed, 5 skipped, 6 deselected; after sensor / open-loop split 98 passed, 5 skipped, 6 deselected; dedicated `/test` 100 passed, 5 skipped, 6 deselected; after harden 101 passed, 5 skipped, 6 deselected (same lock-suite commands)
-- Lock-suite commands: `python3 -m pytest tests/test_swd444_estimation_seams.py tests/test_swd444_estimation_modules.py tests/test_swd289_sysid_services.py tests/test_sysid_param_overrides.py tests/test_sysid_initial_state.py tests/test_sysid_cache_consistency.py tests/test_estimation_internals.py tests/test_parameter_estimator.py tests/test_model_diagnostics.py tests/test_persist_estimated_params.py tests/test_estimator_2r2c.py tests/test_initial_state_estimator.py tests/test_no_online_gain_estimation.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py -m "not slow and not ondemand" -q`
+- Lock-suite commands: `python3 -m pytest tests/test_swd445_panel_seams.py tests/test_app_ingress_panel.py tests/test_panel_setup.py tests/test_swd414_nmpc_trajectory.py tests/test_swd434_disturbance_history_lines.py tests/test_swd430_timer_loading.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py -m "not slow and not ondemand" -q`
+- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree)
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
 - Area: Ingress panel JS (page-detail gods; HA classic-script IIFE exception)
-- Packages: characterize then split `sysid-detail.js`, `schedules-detail.js`, `room-detail.js` along neighbour module seams; keep `?v=` cache-bust and IIFE boot shell.
+- Packages: split `sysid-detail.js`, `schedules-detail.js`, `room-detail.js` along neighbour module seams; keep `?v=` cache-bust and IIFE boot shell (`industrial-dashboard.js` exception).
 
 ## Workflow
 - Template: structure-safe
@@ -56,9 +56,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Tracker
 - Story: SWD-440
-- Task: SWD-444
-- Branch: `cursor/swd-444-adopt-estimation-1253`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/641
+- Task: SWD-445
+- Branch: `cursor/swd-445-adopt-panel-1253`
+- PR: (draft after characterize)
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641; `/adopt` continues with SWD-445
+`/implement SWD-445` — split page-detail gods on the SWD-445 delivery head
