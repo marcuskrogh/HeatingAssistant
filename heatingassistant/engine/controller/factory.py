@@ -63,8 +63,6 @@ class ControllerBuildConfig:
             DEFAULT_NMPC_FAST_SUBSTEPS,
             DEFAULT_NMPC_HORIZON_H,
             DEFAULT_NMPC_PERIOD,
-            DEFAULT_P_DEADBAND,
-            DEFAULT_U_REF_GATE,
         )
         from ..nmpc_timing import timing_from_options  # noqa: PLC0415
 
