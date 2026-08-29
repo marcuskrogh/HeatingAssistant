@@ -40,13 +40,13 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Lock-suite commands: `python3 -m pytest tests/test_swd444_estimation_seams.py tests/test_swd289_sysid_services.py tests/test_sysid_param_overrides.py tests/test_sysid_initial_state.py tests/test_sysid_cache_consistency.py tests/test_estimation_internals.py tests/test_parameter_estimator.py tests/test_model_diagnostics.py tests/test_persist_estimated_params.py tests/test_estimator_2r2c.py tests/test_initial_state_estimator.py tests/test_no_online_gain_estimation.py -m "not slow and not ondemand" -q`
 - Characterize result: green — 68 passed, 5 skipped, 6 deselected (2026-08-29, current estimation/sysid tree); after NLP extract 69 passed, 5 skipped, 6 deselected (same commands + `tests/test_swd444_estimation_modules.py`)
+- Lock-suite commands: `python3 -m pytest tests/test_swd444_estimation_seams.py tests/test_swd444_estimation_modules.py tests/test_swd289_sysid_services.py tests/test_sysid_param_overrides.py tests/test_sysid_initial_state.py tests/test_sysid_cache_consistency.py tests/test_estimation_internals.py tests/test_parameter_estimator.py tests/test_model_diagnostics.py tests/test_persist_estimated_params.py tests/test_estimator_2r2c.py tests/test_initial_state_estimator.py tests/test_no_online_gain_estimation.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py -m "not slow and not ondemand" -q`
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
 - Area: estimation + PE HTTP (`kalman_ml.py`, `sysid_services.py`, diagnostics, lifecycle)
-- Packages: lift nested MSE/L-BFGS helpers out of `KalmanMLEstimator.estimate`; keep public PE/sysid HTTP and estimator entry points. Remaining `sysid_services` / diagnostics module splits if still over the bar after that extract.
+- Packages: NLP helpers extracted; PE sensors live in `sysid_sensors` (re-exported); open-loop predictions live in `open_loop_predictions` (re-exported from `model_diagnostics`). Remaining nested log-likelihood factories / leftover size on SWD-444 harden.
 
 ## Workflow
 - Template: structure-safe
