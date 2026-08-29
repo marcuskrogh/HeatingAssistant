@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '141';
+  return '142';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on

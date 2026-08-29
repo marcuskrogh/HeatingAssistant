@@ -64,3 +64,12 @@ def test_room_detail_keeps_live_chart_update_helpers() -> None:
     assert update_fn.index("extendLiveChartHistory") < update_fn.index(
         "mpcForecastStamp(state)"
     )
+
+
+def test_room_detail_loads_history_from_collaborator() -> None:
+    source = (STATIC / "js" / "pages" / "room-detail.js").read_text(encoding="utf-8")
+    hist = (STATIC / "js" / "pages" / "room-detail-history.js").read_text(
+        encoding="utf-8"
+    )
+    assert "from './room-detail-history.js" in source
+    assert "export async function loadChartsData" in hist

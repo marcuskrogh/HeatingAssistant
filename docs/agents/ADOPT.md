@@ -41,7 +41,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
 - Lock-suite commands: `python3 -m pytest tests/test_swd445_panel_seams.py tests/test_app_ingress_panel.py tests/test_panel_setup.py tests/test_swd414_nmpc_trajectory.py tests/test_swd434_disturbance_history_lines.py tests/test_swd430_timer_loading.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py -m "not slow and not ondemand" -q`
-- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree)
+- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree); after room-detail history extract 63 passed, 1 skipped
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
