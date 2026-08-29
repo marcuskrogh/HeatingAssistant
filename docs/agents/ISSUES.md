@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | To Do | — | docs/agents/PLAN-p-deadband-nmpc-off.md | `/implement SWD-437` |
+| SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | To Do | — | docs/agents/PLAN-p-deadband-nmpc-off.md | `/implement SWD-437` — https://github.com/marcuskrogh/HeatingAssistant/pull/637 |
 | SWD-438 | Sub-task | Gated P deadband + live tuning keys | To Do | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-439 | Sub-task | Tuning pane, tests, CalVer, App sync | To Do | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |

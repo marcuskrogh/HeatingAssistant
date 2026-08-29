@@ -102,7 +102,7 @@ else:
 - Sub-tasks: [SWD-438](https://marcusknielsen.atlassian.net/browse/SWD-438),
   [SWD-439](https://marcusknielsen.atlassian.net/browse/SWD-439)
 - Branch: `cursor/swd-437-p-deadband-b77a`
-- PR: *(draft on first push)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/637
 - Classification: tweak
 - Workflow: delta-fast
 
