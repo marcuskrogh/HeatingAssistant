@@ -20,6 +20,38 @@ function appendCurrentValue(dataPoints, state, entityId) {
   return dataPoints;
 }
 
+function slugifyRoomName(name) {
+  return (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+// HA's history_during_period returns the initial boundary state with its
+// original lu (last_updated) timestamp, which may predate the chart window by
+// days for slowly-changing sensors like setpoint/constraints. Clamp it to the
+// window start so the x-axis is not distorted.
+function clampFirstToWindow(pts, windowStart) {
+  if (pts.length > 0 && pts[0].x < windowStart) {
+    pts[0] = { ...pts[0], x: windowStart };
+  }
+  return pts;
+}
+
+// Chart.js stepped:'before' + spanGaps:false draws each step toward the NEXT
+// VALID point — not toward the next null. When the history has only one valid
+// entry before an off-period null (common for sensors that rarely change), the
+// segment has a single point and produces zero-width fill. Insert a synthetic
+// closing point at (null.x − 1 ms) with the same y so every valid run has at
+// least two points, matching the dense-point behaviour of the forecast data.
+function closeStepSegments(pts) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    out.push(pts[i]);
+    if (pts[i].y !== null && i + 1 < pts.length && pts[i + 1].y === null) {
+      out.push({ x: pts[i + 1].x - 1, y: pts[i].y });
+    }
+  }
+  return out;
+}
+
 export async function loadChartsData(
   room,
   state,
@@ -68,11 +100,10 @@ export async function loadChartsData(
   // Fetch raw sensor histories and build a min/max span when the room has
   // multiple configured temperature sensors. Align the band to the control
   // measurement timeline so it renders as one continuous shaded region.
-  const slugify = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   let sensorSpan = null;
   try {
     const modelCfg = await connection.getModelConfig();
-    const roomCfg = modelCfg?.rooms?.find((r) => slugify(r.name) === room.slug);
+    const roomCfg = modelCfg?.rooms?.find((r) => slugifyRoomName(r.name) === room.slug);
     let rawSensorEntities = [];
     if (roomCfg) {
       rawSensorEntities = Array.isArray(roomCfg.temp_sensors) ? [...roomCfg.temp_sensors] : [];
@@ -100,38 +131,10 @@ export async function loadChartsData(
   // control / NMPC stamps is treated as a no-op rather than an immediate re-fetch.
   lastRunTs.value = mpcForecastStamp(state);
 
-  // HA's history_during_period returns the initial boundary state with its
-  // original lu (last_updated) timestamp, which may predate the chart window by
-  // days for slowly-changing sensors like setpoint/constraints. Clamp it to the
-  // window start so the x-axis is not distorted.
-  function clampFirstToWindow(pts) {
-    if (pts.length > 0 && pts[0].x < windowStart) {
-      pts[0] = { ...pts[0], x: windowStart };
-    }
-    return pts;
-  }
-
-  // Chart.js stepped:'before' + spanGaps:false draws each step toward the NEXT
-  // VALID point — not toward the next null. When the history has only one valid
-  // entry before an off-period null (common for sensors that rarely change), the
-  // segment has a single point and produces zero-width fill. Insert a synthetic
-  // closing point at (null.x − 1 ms) with the same y so every valid run has at
-  // least two points, matching the dense-point behaviour of the forecast data.
-  function closeStepSegments(pts) {
-    const out = [];
-    for (let i = 0; i < pts.length; i++) {
-      out.push(pts[i]);
-      if (pts[i].y !== null && i + 1 < pts.length && pts[i + 1].y === null) {
-        out.push({ x: pts[i + 1].x - 1, y: pts[i].y });
-      }
-    }
-    return out;
-  }
-
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
-  const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity])));
-  const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity])));
-  const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity])));
+  const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity]), windowStart));
+  const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity]), windowStart));
+  const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity]), windowStart));
   const powerHistory = appendCurrentValue(historyToDataPoints(history[powerMeasuredEntity]), state, powerMeasuredEntity);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);

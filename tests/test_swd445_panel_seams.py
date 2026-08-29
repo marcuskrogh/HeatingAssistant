@@ -73,6 +73,12 @@ def test_room_detail_loads_history_from_collaborator() -> None:
     )
     assert "from './room-detail-history.js" in source
     assert "export async function loadChartsData" in hist
+    assert hist.index("function clampFirstToWindow") < hist.index(
+        "export async function loadChartsData"
+    )
+    assert hist.index("function closeStepSegments") < hist.index(
+        "export async function loadChartsData"
+    )
 
 
 def test_sysid_detail_loads_markup_from_collaborator() -> None:
@@ -99,3 +105,36 @@ def test_schedules_detail_loads_markup_from_collaborator() -> None:
     assert "export function periodBodyHtml" in markup
     assert "export function periodHeaderHtml" in markup
     assert "export function renderScheduleDetail(" in source
+
+
+def test_sysid_detail_markup_keeps_query_ids() -> None:
+    markup = (
+        STATIC / "js" / "identification" / "sysid-detail-markup.js"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "param-thermal-mass",
+        "param-ua-open",
+        "param-t-wall-initial",
+        "btn-apply-params",
+        "fit-comparison-kpis",
+        "param-history-list",
+        "heater-scales-list",
+        "window-mode-custom",
+        "param-window-start",
+        'data-chart="temp"',
+    ):
+        assert needle in markup, needle
+
+
+def test_schedules_detail_markup_keeps_editor_hooks() -> None:
+    markup = (STATIC / "js" / "schedules" / "schedules-detail-markup.js").read_text(
+        encoding="utf-8"
+    )
+    for needle in (
+        'data-action="toggle-enabled"',
+        "data-segmented-field",
+        "data-when-field",
+        "data-remove-override",
+        "schedule-form__period-name",
+    ):
+        assert needle in markup, needle

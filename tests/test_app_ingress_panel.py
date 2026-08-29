@@ -57,6 +57,16 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
             assert "javascript" in response.headers["Content-Type"]
             assert b"customElements.define('ha-industrial-panel'" in response.read()
 
+        for rel in (
+            "/ha-industrial-panel/js/identification/sysid-detail-markup.js",
+            "/ha-industrial-panel/js/schedules/schedules-detail-markup.js",
+            "/ha-industrial-panel/js/pages/room-detail-history.js",
+        ):
+            with urlopen(f"{base_url}{rel}", timeout=5) as response:
+                assert response.status == 200, rel
+                body = response.read()
+                assert b"export async function" in body or b"export function" in body, rel
+
         with urlopen(f"{base_url}/", timeout=5) as response:
             body = response.read().decode("utf-8")
 
