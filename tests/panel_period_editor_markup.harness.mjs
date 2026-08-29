@@ -1,5 +1,6 @@
 /**
  * Harness: schedule detail period editor exposes the SWD-23/SWD-39 controls.
+ * Markup lives in schedules-detail-markup.js; wiring stays on schedules-detail.js.
  *
  * Run: node tests/panel_period_editor_markup.harness.mjs
  */
@@ -9,12 +10,19 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DETAIL = join(ROOT, 'heatingassistant/app/static/js/schedules/schedules-detail.js');
+const MARKUP = join(ROOT, 'heatingassistant/app/static/js/schedules/schedules-detail-markup.js');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const source = readFileSync(DETAIL, 'utf8');
+const detail = readFileSync(DETAIL, 'utf8');
+const markup = readFileSync(MARKUP, 'utf8');
+assert(
+  detail.includes("from './schedules-detail-markup.js"),
+  'schedules-detail.js must import period editor markup from schedules-detail-markup.js',
+);
+const source = `${detail}\n${markup}`;
 
 const sectionOrder = ['>Type<', '>Name<', '>When ', '>Behaviour<', '>Overrides<']
   .map((needle) => source.indexOf(needle));

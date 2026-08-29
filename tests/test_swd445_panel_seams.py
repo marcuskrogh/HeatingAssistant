@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 STATIC = Path(__file__).resolve().parents[1] / "heatingassistant" / "app" / "static"
+REPO = Path(__file__).resolve().parents[1]
 
 
 def test_industrial_dashboard_is_classic_script_iife() -> None:
@@ -138,3 +140,23 @@ def test_schedules_detail_markup_keeps_editor_hooks() -> None:
         "schedule-form__period-name",
     ):
         assert needle in markup, needle
+
+
+def _run_panel_harness(name: str) -> None:
+    result = subprocess.run(
+        ["node", str(REPO / "tests" / name)],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_period_editor_markup_harness() -> None:
+    _run_panel_harness("panel_period_editor_markup.harness.mjs")
+
+
+def test_sysid_detail_imports_harness() -> None:
+    _run_panel_harness("panel_sysid_detail_imports.harness.mjs")
