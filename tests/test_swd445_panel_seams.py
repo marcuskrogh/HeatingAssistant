@@ -73,3 +73,29 @@ def test_room_detail_loads_history_from_collaborator() -> None:
     )
     assert "from './room-detail-history.js" in source
     assert "export async function loadChartsData" in hist
+
+
+def test_sysid_detail_loads_markup_from_collaborator() -> None:
+    source = (STATIC / "js" / "identification" / "sysid-detail.js").read_text(
+        encoding="utf-8"
+    )
+    markup = (
+        STATIC / "js" / "identification" / "sysid-detail-markup.js"
+    ).read_text(encoding="utf-8")
+    assert "from './sysid-detail-markup.js" in source
+    assert "export function paramsCardHtml" in markup
+    assert "export function buildValidationSection" in markup
+    assert "export function renderIdentificationDetail(" in source
+
+
+def test_schedules_detail_loads_markup_from_collaborator() -> None:
+    source = (STATIC / "js" / "schedules" / "schedules-detail.js").read_text(
+        encoding="utf-8"
+    )
+    markup = (STATIC / "js" / "schedules" / "schedules-detail-markup.js").read_text(
+        encoding="utf-8"
+    )
+    assert "from './schedules-detail-markup.js" in source
+    assert "export function periodBodyHtml" in markup
+    assert "export function periodHeaderHtml" in markup
+    assert "export function renderScheduleDetail(" in source
