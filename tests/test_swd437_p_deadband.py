@@ -15,6 +15,13 @@ from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_p import comfort_fallback_command, p_command
 from heatingassistant.engine.thermal_model import HouseModel, Room
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
+from heatingassistant.persistence import load_config
+
+_ROOT = Path(__file__).resolve().parents[1]
+_APP_TREES = (
+    _ROOT / "heatingassistant" / "app" / "static",
+    _ROOT / "heating_assistant" / "heatingassistant" / "app" / "static",
+)
 
 
 def test_p_command_ungated_default_unchanged() -> None:
@@ -77,6 +84,26 @@ def test_p_deadband_tracks_when_error_exceeds_band() -> None:
         u_ref_gate=0.02,
         p_deadband=1.0,
     ) == pytest.approx(0.3)
+    assert p_command(
+        0.01,
+        21.0,
+        18.0,
+        0.1,
+        0.0,
+        1.0,
+        u_ref_gate=0.02,
+        p_deadband=1.0,
+    ) == pytest.approx(0.31)
+    assert p_command(
+        0.0,
+        21.0,
+        19.99,
+        0.1,
+        0.0,
+        1.0,
+        u_ref_gate=0.02,
+        p_deadband=1.0,
+    ) == pytest.approx(0.101)
 
 
 def test_p_deadband_does_not_swallow_preheat() -> None:
@@ -241,16 +268,52 @@ def test_controller_config_exposes_deadband_defaults(tmp_path: Path) -> None:
 
 
 def test_tuning_pane_exposes_deadband_knobs() -> None:
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "heatingassistant"
-        / "app"
-        / "static"
-        / "js"
-        / "pages"
-        / "tuning-controller.js"
-    ).read_text(encoding="utf-8")
-    assert "p_deadband" in source
-    assert "u_ref_gate" in source
-    assert "P deadband (NMPC off)" in source
-    assert "NMPC-off gate" in source
+    for static in _APP_TREES:
+        source = (static / "js" / "pages" / "tuning-controller.js").read_text(
+            encoding="utf-8"
+        )
+        assert "p_deadband" in source
+        assert "u_ref_gate" in source
+        assert "P deadband (NMPC off)" in source
+        assert "NMPC-off gate" in source
+
+
+@pytest.mark.asyncio
+async def test_update_controller_tuning_persists_deadband_knobs(
+    tmp_path: Path,
+) -> None:
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={
+            "instance_id": "haos",
+            "update_interval": 900,
+            "horizon": 2,
+            "rooms": [{"name": "Living Room", "setpoint": 21.0}],
+            "heat_sources": [
+                {
+                    "name": "heater",
+                    "type": "electric_heater",
+                    "room": "Living Room",
+                    "max_power": 1500.0,
+                }
+            ],
+        },
+    )
+    result = await runtime.apply_service(
+        "heating_assistant",
+        "update_controller_tuning",
+        {"p_deadband": 1.5, "u_ref_gate": 0.05},
+    )
+    assert result["config"]["p_deadband"] == pytest.approx(1.5)
+    assert result["config"]["u_ref_gate"] == pytest.approx(0.05)
+    cfg = runtime.controller_config()
+    assert cfg["p_deadband"] == pytest.approx(1.5)
+    assert cfg["u_ref_gate"] == pytest.approx(0.05)
+    ctrl = runtime.control_engine._controller
+    assert ctrl is not None
+    assert ctrl._p_deadband == pytest.approx(1.5)
+    assert ctrl._u_ref_gate == pytest.approx(0.05)
+    disk = load_config(tmp_path)
+    assert disk["p_deadband"] == pytest.approx(1.5)
+    assert disk["u_ref_gate"] == pytest.approx(0.05)
