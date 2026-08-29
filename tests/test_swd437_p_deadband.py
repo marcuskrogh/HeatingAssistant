@@ -7,12 +7,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from heatingassistant.app.runtime import HeatingRuntime
 from heatingassistant.engine.const import DEFAULT_P_DEADBAND, DEFAULT_U_REF_GATE
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_p import comfort_fallback_command, p_command
 from heatingassistant.engine.thermal_model import HouseModel, Room
+from heatingassistant.mqtt.bridge import InMemoryMqttBus
 
 
 def test_p_command_ungated_default_unchanged() -> None:
@@ -88,6 +90,19 @@ def test_p_deadband_does_not_swallow_preheat() -> None:
         u_ref_gate=0.02,
         p_deadband=1.0,
     ) == pytest.approx(0.1)
+
+
+def test_u_ref_at_gate_is_not_deadbanded() -> None:
+    assert p_command(
+        0.02,
+        21.0,
+        20.5,
+        0.1,
+        0.0,
+        1.0,
+        u_ref_gate=0.02,
+        p_deadband=1.0,
+    ) == pytest.approx(0.07)
 
 
 def test_p_deadband_cools_only_outside_band_when_nmpc_off() -> None:
@@ -201,6 +216,28 @@ def test_control_engine_reads_deadband_keys() -> None:
     assert engine._controller is not None
     assert engine._controller._p_deadband == pytest.approx(1.5)
     assert engine._controller._u_ref_gate == pytest.approx(0.05)
+
+
+def test_negative_deadband_and_gate_rejected() -> None:
+    room = Room("living_room", 5e6, 0.05, temperature=21.0, setpoint=21.0)
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    with pytest.raises(ValueError, match="p_deadband"):
+        HeatingMPCController(
+            HouseModel([room]), [heater], horizon=2, dt=900.0, p_deadband=-0.1
+        )
+    with pytest.raises(ValueError, match="u_ref_gate"):
+        HeatingMPCController(
+            HouseModel([room]), [heater], horizon=2, dt=900.0, u_ref_gate=-0.01
+        )
+
+
+def test_controller_config_exposes_deadband_defaults(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(
+        tmp_path, bus=InMemoryMqttBus(), options={"instance_id": "haos"}
+    )
+    cfg = runtime.controller_config()
+    assert cfg["p_deadband"] == pytest.approx(DEFAULT_P_DEADBAND)
+    assert cfg["u_ref_gate"] == pytest.approx(DEFAULT_U_REF_GATE)
 
 
 def test_tuning_pane_exposes_deadband_knobs() -> None:
