@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO
+from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_P_DEADBAND, DEFAULT_U_REF_GATE
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
@@ -36,6 +36,8 @@ class ControllerBuildConfig:
     nmpc_period: Optional[float] = None
     nmpc_fast_substeps: Optional[int] = None
     nmpc_horizon_h: Optional[float] = None
+    p_deadband: float = DEFAULT_P_DEADBAND
+    u_ref_gate: float = DEFAULT_U_REF_GATE
 
     @classmethod
     def from_coordinator(
@@ -51,11 +53,13 @@ class ControllerBuildConfig:
             CONF_NMPC_FAST_SUBSTEPS,
             CONF_NMPC_HORIZON_H,
             CONF_NMPC_PERIOD,
+            CONF_P_DEADBAND,
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
             CONF_SOFT_CONSTRAINT_WEIGHT,
             CONF_TERMINAL_WEIGHT,
             CONF_TRACKING_WEIGHT,
+            CONF_U_REF_GATE,
             DEFAULT_NMPC_FAST_SUBSTEPS,
             DEFAULT_NMPC_HORIZON_H,
             DEFAULT_NMPC_PERIOD,
@@ -129,6 +133,18 @@ class ControllerBuildConfig:
             energy_price_weight=float(
                 ov.get(CONF_ENERGY_PRICE_WEIGHT, coordinator._energy_price_weight)
             ),
+            p_deadband=float(
+                ov.get(
+                    CONF_P_DEADBAND,
+                    getattr(coordinator, "_p_deadband", DEFAULT_P_DEADBAND),
+                )
+            ),
+            u_ref_gate=float(
+                ov.get(
+                    CONF_U_REF_GATE,
+                    getattr(coordinator, "_u_ref_gate", DEFAULT_U_REF_GATE),
+                )
+            ),
         )
 
 
@@ -159,4 +175,6 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         nmpc_period=config.nmpc_period,
         nmpc_fast_substeps=config.nmpc_fast_substeps,
         nmpc_horizon_h=config.nmpc_horizon_h,
+        p_deadband=config.p_deadband,
+        u_ref_gate=config.u_ref_gate,
     )

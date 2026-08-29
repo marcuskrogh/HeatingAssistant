@@ -28,8 +28,10 @@ from ..const import (
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
+    DEFAULT_P_DEADBAND,
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_U_REF_GATE,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
 )
@@ -46,7 +48,7 @@ from ..nmpc_ocp import (
     shift_slow_plan,
     solve_mean_ocp,
 )
-from ..nmpc_p import comfort_fallback_command, p_command
+from ..nmpc_p import comfort_fallback_command, p_command, require_non_negative_p_gating
 from ..nmpc_timing import (
     NmpcTiming,
     derive_nmpc_timing,
@@ -79,8 +81,10 @@ class HeatingMPCController:
     The fast loop at each ``T_s``:
       1. CD-EKF predict+update using the last applied P command.
       2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)`` from the
-         last accepted plan.  With no plan, P toward the setpoint while
-         air is outside the comfort band (watchdog still forces ``u = 0``).
+         last accepted plan, or ``u = 0`` while NMPC is near zero and air
+         is inside the P temperature deadband.  With no plan, P toward
+         the setpoint while air is outside the comfort band (watchdog
+         still forces ``u = 0``).
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -120,6 +124,8 @@ class HeatingMPCController:
     solver            : accepted for API compatibility, ignored (SLSQP used).
     solver_options    : accepted for API compatibility, ignored.
     use_analytic_derivatives : accepted for API compatibility, ignored.
+    p_deadband        : temperature deadband [K] around T_ref while NMPC is off.
+    u_ref_gate        : |u_ref| below this (heater fraction) is NMPC-off.
     """
 
     def __init__(
@@ -149,6 +155,8 @@ class HeatingMPCController:
         nmpc_period: Optional[float] = None,
         nmpc_fast_substeps: Optional[int] = None,
         nmpc_horizon_h: Optional[float] = None,
+        p_deadband: float = DEFAULT_P_DEADBAND,
+        u_ref_gate: float = DEFAULT_U_REF_GATE,
     ) -> None:
         self._sources = heat_sources
         if (
@@ -185,6 +193,7 @@ class HeatingMPCController:
             raise ValueError(
                 f"smoothing_weight must be >= 0; got {smoothing_weight}"
             )
+        require_non_negative_p_gating(p_deadband, u_ref_gate)
         if terminal_weight < 1.0:
             raise ValueError(
                 f"terminal_weight must be at least 1.0; got {terminal_weight}"
@@ -342,6 +351,8 @@ class HeatingMPCController:
         self._nmpc_warm: Optional[np.ndarray] = None
         self._rho = float(rho)
         self._smoothing_weight = float(smoothing_weight)
+        self._p_deadband = float(p_deadband)
+        self._u_ref_gate = float(u_ref_gate)
         self._n_int_steps = int(n_int_steps)
         self._reject_since: Optional[float] = None
         self._watchdog_tripped: bool = False
@@ -1095,6 +1106,8 @@ class HeatingMPCController:
                         kp,
                         float(src.u_min),
                         float(src.u_max),
+                        u_ref_gate=self._u_ref_gate,
+                        p_deadband=self._p_deadband,
                     )
             elif not watchdog:
                 rooms = self._system._model.rooms

@@ -11,7 +11,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | Area | Catalog rows | Concrete moves | Status |
 |------|--------------|----------------|--------|
 | engine/controller (`facade.py`) | Small type, SRP, Divergent Change; nested source dispatch in `f` | Split SDE / EKF / linearised / MPC files; extract `f`/`dfdu` helpers | done |
-| app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | frontier |
+| app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | done |
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | open |
 | estimation + `sysid_services` | Small type, Divergent Change | Split remaining god modules along existing seams | open |
 | Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | open |
@@ -22,7 +22,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | Order | Area | Task | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
 | 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | done | SWD-441 |
-| 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | In Progress | SWD-442 |
+| 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | To Do | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | To Do | SWD-444 |
 | 5 | Ingress panel | Split remaining panel god modules | SWD-444 | To Do | SWD-445 |
@@ -52,8 +52,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: app runtime (`HeatingRuntime`)
-- Packages: extract ticker, NMPC worker, HA state publisher, wiring, history sampler
+- Area: engine `ControlEngine` (`control_loop.py`)
+- Packages: extract construction, live loop, and tuning preview helpers
 
 ## Workflow
 - Template: structure-safe
@@ -68,4 +68,4 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/639
 
 ## Next
-`/review-fix SWD-442` then `/ship SWD-442`. `/adopt` continues with SWD-443 after this Task ships
+`/ship SWD-442` — merge PR #639 after main rebase; `/adopt` continues with SWD-443

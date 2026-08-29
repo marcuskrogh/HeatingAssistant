@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.33
+
+- During night or other planner-off intervals, heaters stay off unless room
+  air drifts more than 1 °C from the planned temperature. Small preheat
+  commands are still followed. Both the off-threshold and the 1 °C band are
+  on Controller Tuning.
+
 # 2026.08.32
 
 - Room DISTURBANCES plots historical outdoor temperature and solar gain as
