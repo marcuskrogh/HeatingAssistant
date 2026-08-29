@@ -107,4 +107,4 @@ else:
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-437` — Laser reviews then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/637

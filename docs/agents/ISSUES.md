@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | In Review | — | docs/agents/PLAN-p-deadband-nmpc-off.md | `/review-fix SWD-437` — https://github.com/marcuskrogh/HeatingAssistant/pull/637 |
+| SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | In Review | — | docs/agents/PLAN-p-deadband-nmpc-off.md | `/ship SWD-437` — https://github.com/marcuskrogh/HeatingAssistant/pull/637 |
 | SWD-438 | Sub-task | Gated P deadband + live tuning keys | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-439 | Sub-task | Tuning pane, tests, CalVer, App sync | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
@@ -162,6 +162,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-29 — `/review-fix` SWD-437 CLEAN (focused, sequential): 0 blockers / 0 should-fix / 1 deferred note (`p_command` arity). COMMENT (cannot APPROVE own PR). Local pytest-fast 1016 passed, 88 skipped, 18 deselected; panel harness green. Next `/ship SWD-437`.
 - 2026-08-29 — `/harden` SWD-437: no further structure edits. Live knobs follow existing factory/facade/Tuning wiring; `p_command` keeps keyword-only extras on an already-long signature. Dual tree already in lockstep. Next `/review-fix SWD-437`.
 - 2026-08-29 — `/test` SWD-437: persist via `update_controller_tuning`, residual `u_ref` outside the band, dual-tree Tuning labels. Fast suite 1011 passed, 88 skipped, 18 deselected; panel harness green. Next `/harden SWD-437`.
 - 2026-08-29 — `/implement` SWD-437 In Progress: gated P deadband + live `p_deadband`/`u_ref_gate`; CalVer 2026.08.33; PR https://github.com/marcuskrogh/HeatingAssistant/pull/637. Next `/test SWD-437`.
