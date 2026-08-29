@@ -11,7 +11,7 @@ import numpy as np
 from ..controller import HouseThermalSDE as HouseThermalSystem
 from ..heat_sources import HeatSource
 from ..thermal_model import Room
-from mbc.control import NLPProblem, ScipyNLPBackend
+from mbc.control import ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
     MIN_HISTORY_STEPS,
@@ -36,8 +36,6 @@ from .constants import (
     _R_AW_LO,
     _T_WALL_HI,
     _T_WALL_LO,
-    _T_WALL_MIN_LAM,
-    _T_WALL_PRIOR_STD,
     _UA_OPEN_HI,
     _UA_OPEN_LO,
     _log_mass_bounds,
@@ -70,6 +68,7 @@ from .sensitivity import (
     _dfdtheta_step,
     _simulation_mse_and_grad,
 )
+from .nlp_eval import RegularizedMseCache, WallInitMseCache, solve_lbfgs
 from .theta_layout import _ThetaLayout
 from .warmstart import (
     _initial_state_and_covariance,
@@ -644,46 +643,15 @@ class KalmanMLEstimator:
         # ── Convert history (carries timestamps for gap detection) ────────
         std_history = self._convert_history_std(history, use_ym=True)
 
-        # ── Build regularisation function ──────────────────────────────────
-        def _regularization_fn(theta: np.ndarray) -> float:
-            return self._compute_regularization_theta(theta, layout)
-
-        # ── SciPy L-BFGS-B optimisation with analytical gradients ─────────────
-        # Objective: multi-step open-loop simulation MSE (see
-        # _simulation_mse_and_grad).  The EKF PED likelihood is retained
-        # for diagnostics (compute_log_likelihood / compute_loglik_slice)
-        # but is no longer used here because it diverges on unevenly-spaced
-        # data from controller restarts.
+        mse_cache = RegularizedMseCache(
+            self,
+            layout,
+            std_history,
+            identifiable_pairs,
+            dataset_start_timestamps,
+        )
         lb = np.array([lo for lo, _ in bounds])
         ub = np.array([hi for _, hi in bounds])
-
-        # Cache the last (theta, obj, grad) triple so separate fun/jac calls
-        # at the same point do not trigger a second forward-sensitivity pass.
-        _cache: List[Optional[object]] = [None, None, None]  # [theta, val, grad]
-
-        def _eval(theta: np.ndarray) -> None:
-            if _cache[0] is None or not np.array_equal(theta, _cache[0]):
-                mse, g_mse = self._simulation_mse_and_grad(
-                    theta, layout, std_history, nominal_dt=self._dt,
-                    max_window_steps=self._max_window_steps,
-                    min_segment_steps=self._min_segment_steps,
-                    dataset_start_ts=dataset_start_timestamps,
-                )
-                reg = _regularization_fn(theta)
-                reg_grad = self._compute_regularization_gradient(
-                    theta, layout, identifiable_pairs
-                )
-                _cache[0] = theta.copy()
-                _cache[1] = mse + reg
-                _cache[2] = g_mse + reg_grad
-
-        def _fun(theta: np.ndarray) -> float:
-            _eval(theta)
-            return float(_cache[1])  # type: ignore[arg-type]
-
-        def _jac(theta: np.ndarray) -> np.ndarray:
-            _eval(theta)
-            return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
 
         scipy_backend = ScipyNLPBackend(
             # L-BFGS-B builds a quasi-Newton Hessian approximation that
@@ -717,28 +685,16 @@ class KalmanMLEstimator:
             starts.append(phys_theta)
         starts.append(theta_prior.copy())
 
-        def _solve_from(theta_start: np.ndarray) -> Optional[Tuple[float, np.ndarray, bool]]:
-            """Run SciPy L-BFGS-B from one start; return (f, theta, ok)."""
-            _cache[0] = None
-            problem = NLPProblem(
-                objective=_fun,
-                objective_jac=_jac,
-                x0=theta_start,
-                lb=lb,
-                ub=ub,
-                constraints=(),
-            )
-            try:
-                res = scipy_backend.solve(problem)
-            except Exception as exc:
-                _LOGGER.debug("Optimiser failed: %s", exc)
-                return None
-            if not np.isfinite(res.fun):
-                return None
-            return float(res.fun), np.asarray(res.x, dtype=float), bool(res.success)
-
         for theta_start in starts:
-            out = _solve_from(theta_start)
+            out = solve_lbfgs(
+                mse_cache.fun,
+                mse_cache.jac,
+                theta_start,
+                lb,
+                ub,
+                invalidate=mse_cache.invalidate,
+                backend=scipy_backend,
+            )
             if out is None:
                 continue
             f_cand, theta_c, converged = out
@@ -1031,38 +987,7 @@ class KalmanMLEstimator:
 
         std_history = self._convert_history_std(fit_history, use_ym=False)
 
-        _cache: List[Optional[object]] = [None, None, None]
-
-        def _eval(theta: np.ndarray) -> None:
-            if _cache[0] is None or not np.array_equal(theta, _cache[0]):
-                mse, g_mse = self._simulation_mse_and_grad(
-                    theta, layout, std_history, nominal_dt=self._dt,
-                    max_window_steps=self._max_window_steps,
-                    min_segment_steps=self._min_segment_steps,
-                )
-                a_tw, b_tw = layout.idx_t_wall_init
-                t_wall = theta[a_tw:b_tw]
-                floor = _T_WALL_MIN_LAM if min_lam is None else float(min_lam)
-                lam_tw = max(self._regularization, floor)
-                reg = lam_tw * float(
-                    np.sum((t_wall - self._t_wall_init_prior) ** 2)
-                ) / (_T_WALL_PRIOR_STD ** 2)
-                reg_grad = np.zeros(len(theta))
-                reg_grad[a_tw:b_tw] = (
-                    2.0 * lam_tw * (t_wall - self._t_wall_init_prior)
-                    / (_T_WALL_PRIOR_STD ** 2)
-                )
-                _cache[0] = theta.copy()
-                _cache[1] = mse + reg
-                _cache[2] = g_mse + reg_grad
-
-        def _fun(theta: np.ndarray) -> float:
-            _eval(theta)
-            return float(_cache[1])  # type: ignore[arg-type]
-
-        def _jac(theta: np.ndarray) -> np.ndarray:
-            _eval(theta)
-            return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
+        wall_cache = WallInitMseCache(self, layout, std_history, min_lam)
 
         lb = np.array([lo for lo, _ in bounds])
         ub = np.array([hi for _, hi in bounds])
@@ -1070,8 +995,8 @@ class KalmanMLEstimator:
         try:
             from scipy.optimize import minimize as _sp_minimize
             res = _sp_minimize(
-                _fun, theta_prior,
-                jac=_jac,
+                wall_cache.fun, theta_prior,
+                jac=wall_cache.jac,
                 bounds=list(zip(lb, ub)),
                 method="L-BFGS-B",
                 options={"maxiter": 200, "ftol": 1e-10, "gtol": 1e-5},
