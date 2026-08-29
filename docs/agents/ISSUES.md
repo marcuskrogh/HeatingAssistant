@@ -11,7 +11,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-441 | Task | [Adopt] Split engine controller facade into SDE, EKF, linearised, MPC | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/638 (`3b4122d`) |
 | SWD-442 | Task | [Adopt] Split HeatingRuntime into ticker, MQTT, NMPC, panel-state collaborators | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/639 (`3ac73c7`) |
 | SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/640 (`1421b56`) |
-| SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | In Review | SWD-440 | docs/agents/ADOPT.md | `/review-fix SWD-444` |
+| SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | In Review | SWD-440 | docs/agents/ADOPT.md | `/ship SWD-444` |
 | SWD-445 | Task | [Adopt] Split remaining Ingress panel god modules | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-444 |
 | SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-445 |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
