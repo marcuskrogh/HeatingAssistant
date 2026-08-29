@@ -58,7 +58,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-444
 - Branch: `cursor/swd-444-adopt-estimation-1253`
-- PR: (draft after first writer commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/641
 
 ## Next
-`/implement SWD-444` — extract nested PE NLP helpers; `/adopt` continues the route after ship
+`/implement SWD-444` — remaining `sysid_services` / diagnostics splits on PR #641; `/adopt` continues after ship
