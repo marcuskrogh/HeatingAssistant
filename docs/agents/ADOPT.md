@@ -25,7 +25,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
-| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | In Progress | SWD-445 |
+| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | In Review | SWD-445 |
 | 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
 
 ## Behaviour map
@@ -41,7 +41,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
 - Lock-suite commands: `python3 -m pytest tests/test_swd445_panel_seams.py tests/test_app_ingress_panel.py tests/test_panel_setup.py tests/test_swd414_nmpc_trajectory.py tests/test_swd434_disturbance_history_lines.py tests/test_swd430_timer_loading.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py -m "not slow and not ondemand" -q`
-- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree); after room-detail history extract 63 passed, 1 skipped
+- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree)
+- After splits: 67 passed, 1 skipped (markup collaborators, ingress asset fetch, module-level history helpers)
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
@@ -61,4 +62,4 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/642
 
 ## Next
-`/implement SWD-445` — split page-detail gods on the SWD-445 delivery head
+`/review-fix SWD-445` — focused lasers + COMMENT (cannot APPROVE own PR); then `/ship SWD-445`
