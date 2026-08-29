@@ -9,9 +9,16 @@ import threading
 from typing import Any
 
 from . import const
+from .control_engine_build import BuildMixin
+from .control_engine_preview import (  # noqa: F401
+    PreviewMixin,
+    _PREVIEW_TUNING_KEYS,
+    _PREVIEW_WEIGHT_DEFAULTS,
+    _snapshot_from_controller,
+)
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
 from .nmpc_p import require_non_negative_p_gating
-from .nmpc_timing import timing_from_dt_horizon, timing_from_options, timing_from_preview_overrides
+from .nmpc_timing import timing_from_options
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,80 +37,7 @@ def reject_negative_p_gating_knobs(mapping: Mapping[str, Any]) -> None:
     )
 
 
-# MPC tuning keys accepted by Controller Tuning preview (exclude window detection).
-_PREVIEW_TUNING_KEYS = frozenset(
-    {
-        const.CONF_COMFORT_OFFSET,
-        const.CONF_TRACKING_WEIGHT,
-        const.CONF_ENERGY_WEIGHT,
-        const.CONF_ENERGY_PRICE_WEIGHT,
-        const.CONF_SMOOTHING_WEIGHT,
-        const.CONF_SOFT_CONSTRAINT_WEIGHT,
-        const.CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-        const.CONF_TERMINAL_WEIGHT,
-        const.CONF_UPDATE_INTERVAL,
-        const.CONF_HORIZON,
-        const.CONF_NMPC_PERIOD,
-        const.CONF_NMPC_FAST_SUBSTEPS,
-        const.CONF_NMPC_HORIZON_H,
-    }
-)
-
-_PREVIEW_WEIGHT_DEFAULTS: dict[str, float] = {
-    const.CONF_TRACKING_WEIGHT: const.DEFAULT_TRACKING_WEIGHT,
-    const.CONF_ENERGY_WEIGHT: const.DEFAULT_ENERGY_WEIGHT,
-    const.CONF_ENERGY_PRICE_WEIGHT: const.DEFAULT_ENERGY_PRICE_WEIGHT,
-    const.CONF_SMOOTHING_WEIGHT: const.DEFAULT_SMOOTHING_WEIGHT,
-    const.CONF_SOFT_CONSTRAINT_WEIGHT: const.DEFAULT_SOFT_CONSTRAINT_WEIGHT,
-    const.CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT: const.DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-    const.CONF_TERMINAL_WEIGHT: const.DEFAULT_TERMINAL_WEIGHT,
-}
-
-
-def _snapshot_from_controller(
-    controller: Any,
-    *,
-    dt: float,
-    horizon: int,
-    compute_ts: datetime | None = None,
-) -> dict[str, Any]:
-    """Build a forecast snapshot dict from a one-off controller solve."""
-
-    filtered: dict[str, float] = {}
-    raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
-    if isinstance(raw_filtered, Mapping):
-        for key, value in raw_filtered.items():
-            try:
-                filtered[str(key)] = float(value)
-            except (TypeError, ValueError):
-                continue
-    return {
-        "mode": "mpc",
-        "compute_ts": compute_ts or datetime.now(timezone.utc),
-        "predictions": [dict(item) for item in list(getattr(controller, "predictions", []) or [])],
-        "linearised_predictions": [
-            dict(item)
-            for item in list(getattr(controller, "linearised_predictions", []) or [])
-        ],
-        "heating_schedule": [
-            dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
-        ],
-        "outdoor_forecast": [
-            float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
-        ],
-        "solar_forecast": [
-            dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
-        ],
-        "price_forecast": [
-            float(value) for value in list(getattr(controller, "price_forecast", []) or [])
-        ],
-        "filtered_temperatures": filtered,
-        "dt": float(dt),
-        "horizon": int(horizon),
-    }
-
-
-class ControlEngine:
+class ControlEngine(BuildMixin, PreviewMixin):
     """Build and step the control model from App configuration.
 
     The wrapper keeps the App runtime independent from the full HA coordinator.
@@ -274,48 +208,6 @@ class ControlEngine:
             default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
         )
 
-    def _preview_matches_live(self, overrides: Mapping[str, Any], timing) -> bool:
-        """True when a Tuning preview would solve the same problem as the live plan."""
-
-        if self._controller is None:
-            return False
-        try:
-            live = self._nmpc_timing()
-        except ValueError:
-            return False
-        if abs(float(timing.dt_s) - float(live.dt_s)) > 1e-6:
-            return False
-        if int(timing.n_fast) != int(live.n_fast):
-            return False
-        if abs(float(timing.period_s) - float(live.period_s)) > 1e-6:
-            return False
-        for key, default in _PREVIEW_WEIGHT_DEFAULTS.items():
-            if key not in overrides:
-                continue
-            try:
-                draft = float(overrides[key])
-            except (TypeError, ValueError):
-                return False
-            try:
-                live_v = float(self.config.get(key, default))
-            except (TypeError, ValueError):
-                live_v = float(default)
-            if abs(draft - live_v) > 1e-9:
-                return False
-        comfort = overrides.get(const.CONF_COMFORT_OFFSET)
-        if comfort is not None:
-            try:
-                draft_c = float(comfort)
-            except (TypeError, ValueError):
-                return False
-            for room in self.model.rooms.values():
-                live_c = float(
-                    getattr(room, "comfort_offset", const.DEFAULT_COMFORT_OFFSET)
-                )
-                if abs(draft_c - live_c) > 1e-9:
-                    return False
-        return True
-
     def _derived_dt(self, config: Mapping[str, Any] | None = None) -> float:
         try:
             return float(self._nmpc_timing(config).dt_s)
@@ -443,135 +335,6 @@ class ControlEngine:
                 )
         return {name: 0.0 for name in self.model.rooms}
 
-    def preview_tuning_forecast(
-        self,
-        overrides: Mapping[str, Any] | None,
-        room_temps: Mapping[str, float | None],
-        outdoor_temp: float,
-        setpoints: Mapping[str, float] | None = None,
-        *,
-        outdoor_forecast: list[float] | None = None,
-        cloud_forecast: list[float] | None = None,
-        cloud_cover_now: float | None = None,
-        ghi_forecast: list[float | None] | None = None,
-        ghi_now: float | None = None,
-        price_forecast: list[float] | None = None,
-        now: datetime | None = None,
-    ) -> dict[str, Any]:
-        """Run a one-off MPC solve with proposed tuning parameters.
-
-        Does not mutate the live forecast caches used by room views. Room
-        temperatures / setpoints on the shared model are updated to the supplied
-        measurements (same as a normal compute). ``comfort_offset`` overrides are
-        applied temporarily and restored afterwards.
-
-        When the draft matches the live controller, return the live remaining
-        plan that room view already plots instead of solving a second NLP.
-        """
-
-        ov = {
-            key: value
-            for key, value in dict(overrides or {}).items()
-            if key in _PREVIEW_TUNING_KEYS and value is not None
-        }
-        try:
-            timing = timing_from_preview_overrides(
-                self.config,
-                ov,
-                default_period=const.DEFAULT_NMPC_PERIOD,
-                default_substeps=const.DEFAULT_NMPC_FAST_SUBSTEPS,
-                default_horizon_h=const.DEFAULT_NMPC_HORIZON_H,
-            )
-            preview_dt = timing.dt_s
-            preview_horizon = timing.n_fast
-        except ValueError as exc:
-            _LOGGER.warning("preview_tuning_forecast: invalid NMPC timing: %s", exc)
-            return {"error": "invalid_nmpc_timing"}
-
-        if self._preview_matches_live(ov, timing):
-            live = self.forecast_snapshot()
-            if live.get("predictions"):
-                return live
-
-        comfort_override = ov.get(const.CONF_COMFORT_OFFSET)
-        saved_comfort: dict[str, float] = {}
-        if comfort_override is not None:
-            preview_comfort = float(comfort_override)
-            for name, room in self.model.rooms.items():
-                saved_comfort[name] = float(
-                    getattr(room, "comfort_offset", const.DEFAULT_COMFORT_OFFSET)
-                )
-                room.comfort_offset = preview_comfort
-
-        try:
-            try:
-                preview_ctrl = self._build_controller_from_config(
-                    {**self.config, **ov},
-                    timing=timing,
-                    horizon=preview_horizon,
-                    dt=preview_dt,
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "preview_tuning_forecast: controller build failed: %s", exc
-                )
-                return {"error": "controller_unavailable"}
-            if preview_ctrl is None:
-                return {"error": "controller_unavailable"}
-
-            if self._controller is not None:
-                try:
-                    x_hat, P = self._controller.ekf_state
-                    preview_ctrl.restore_ekf_state(x_hat, P)
-                except Exception:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "preview_tuning_forecast: could not copy EKF state",
-                        exc_info=True,
-                    )
-
-            self._apply_measurements(room_temps, dict(setpoints or {}))
-            compute_now = now or datetime.now(timezone.utc)
-            try:
-                plan = preview_ctrl.solve_nmpc(
-                    outdoor_temp,
-                    now=compute_now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    price_forecast=price_forecast,
-                )
-                preview_ctrl.apply_nmpc_result(plan)
-                preview_ctrl.compute(
-                    outdoor_temp,
-                    solar_gains=None,
-                    now=compute_now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    price_forecast=price_forecast,
-                    run_optimization=True,
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "preview_tuning_forecast: MPC compute failed: %s", exc
-                )
-                return {"error": "preview_compute_failed"}
-            return _snapshot_from_controller(
-                preview_ctrl,
-                dt=preview_dt,
-                horizon=preview_horizon,
-                compute_ts=compute_now,
-            )
-        finally:
-            for name, value in saved_comfort.items():
-                room = self.model.rooms.get(name)
-                if room is not None:
-                    room.comfort_offset = value
-
     def room_power_meta(
         self, outdoor_temp: float | None = None
     ) -> dict[str, dict[str, float]]:
@@ -617,39 +380,21 @@ class ControlEngine:
         return by_room
 
     def _cache_controller_forecast(self, controller: Any) -> None:
-        predictions = [dict(item) for item in list(getattr(controller, "predictions", []) or [])]
-        linearised = [
-            dict(item) for item in list(getattr(controller, "linearised_predictions", []) or [])
-        ]
-        heating_schedule = [
-            dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
-        ]
-        outdoor_forecast = [
-            float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
-        ]
-        solar_forecast = [
-            dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
-        ]
-        price_forecast = [
-            float(value) for value in list(getattr(controller, "price_forecast", []) or [])
-        ]
-        filtered: dict[str, float] = {}
-        raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
-        if isinstance(raw_filtered, Mapping):
-            for key, value in raw_filtered.items():
-                try:
-                    filtered[str(key)] = float(value)
-                except (TypeError, ValueError):
-                    continue
+        snap = _snapshot_from_controller(
+            controller,
+            dt=self._derived_dt(),
+            horizon=self._derived_horizon(),
+            compute_ts=datetime.now(timezone.utc),
+        )
         with self._forecast_lock:
-            self._last_predictions = predictions
-            self._last_linearised_predictions = linearised
-            self._last_heating_schedule = heating_schedule
-            self._last_outdoor_forecast = outdoor_forecast
-            self._last_solar_forecast = solar_forecast
-            self._last_price_forecast = price_forecast
-            self._last_filtered_temperatures = filtered
-            self._last_compute_ts = datetime.now(timezone.utc)
+            self._last_predictions = snap["predictions"]
+            self._last_linearised_predictions = snap["linearised_predictions"]
+            self._last_heating_schedule = snap["heating_schedule"]
+            self._last_outdoor_forecast = snap["outdoor_forecast"]
+            self._last_solar_forecast = snap["solar_forecast"]
+            self._last_price_forecast = snap["price_forecast"]
+            self._last_filtered_temperatures = snap["filtered_temperatures"]
+            self._last_compute_ts = snap["compute_ts"]
 
     def _clear_controller_forecast(self) -> None:
         with self._forecast_lock:
@@ -661,112 +406,6 @@ class ControlEngine:
             self._last_price_forecast = []
             self._last_filtered_temperatures = {}
             self._last_compute_ts = None
-
-    def _try_build_controller(self) -> Any:
-        if not self.heat_sources or not self.model.rooms:
-            self.mode = "proportional"
-            self.fallback_reason = "no heat sources or rooms configured"
-            return None
-
-        try:
-            controller = self._build_controller_from_config(self.config)
-        except Exception as exc:  # pragma: no cover - exercised when optional deps differ
-            self.mode = "proportional"
-            self.fallback_reason = f"controller unavailable: {exc}"
-            _LOGGER.info("HeatingAssistant engine using fallback control: %s", exc)
-            return None
-
-        if controller is None:
-            self.mode = "proportional"
-            self.fallback_reason = "no heat sources or rooms configured"
-            return None
-
-        self.mode = "mpc"
-        self.fallback_reason = None
-        return controller
-
-    def _build_controller_from_config(
-        self,
-        config: Mapping[str, Any],
-        *,
-        horizon: int | None = None,
-        dt: float | None = None,
-        timing: Any | None = None,
-    ) -> Any:
-        """Construct an MPC controller from a config mapping (may raise)."""
-
-        if not self.heat_sources or not self.model.rooms:
-            return None
-
-        from .controller.factory import (  # noqa: PLC0415
-            ControllerBuildConfig,
-            build_mpc_controller,
-        )
-
-        if timing is None:
-            if dt is not None or horizon is not None:
-                base = self._nmpc_timing(config)
-                timing = timing_from_dt_horizon(
-                    float(dt if dt is not None else base.dt_s),
-                    int(horizon if horizon is not None else base.n_fast),
-                )
-            else:
-                timing = self._nmpc_timing(config)
-        preview_dt = float(timing.dt_s)
-        preview_horizon = int(timing.n_fast)
-        build_config = ControllerBuildConfig(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=preview_horizon,
-            dt=preview_dt,
-            measurement_dt=float(config.get("measurement_dt", preview_dt)),
-            latitude=float(config.get("latitude", 0.0)),
-            longitude=float(config.get("longitude", 0.0)),
-            tracking_weight=float(
-                config.get("tracking_weight", const.DEFAULT_TRACKING_WEIGHT)
-            ),
-            energy_weight=float(
-                config.get("energy_weight", const.DEFAULT_ENERGY_WEIGHT)
-            ),
-            smoothing_weight=float(
-                config.get("smoothing_weight", const.DEFAULT_SMOOTHING_WEIGHT)
-            ),
-            soft_constraint_weight=float(
-                config.get(
-                    "soft_constraint_weight",
-                    const.DEFAULT_SOFT_CONSTRAINT_WEIGHT,
-                )
-            ),
-            soft_constraint_linear_weight=float(
-                config.get(
-                    "soft_constraint_linear_weight",
-                    const.DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-                )
-            ),
-            terminal_weight=float(
-                config.get("terminal_weight", const.DEFAULT_TERMINAL_WEIGHT)
-            ),
-            sigma_w=float(config.get("sigma_w", const.DEFAULT_SIGMA_W)),
-            sigma_v=float(config.get("sigma_v", const.DEFAULT_SIGMA_V)),
-            sigma_b=float(config.get("sigma_b", const.DEFAULT_SIGMA_B)),
-            energy_price_weight=float(
-                config.get(
-                    "energy_price_weight",
-                    const.DEFAULT_ENERGY_PRICE_WEIGHT,
-                )
-            ),
-            albedo=float(config.get("ground_albedo", const.DEFAULT_GROUND_ALBEDO)),
-            nmpc_period=timing.period_s,
-            nmpc_fast_substeps=timing.fast_substeps,
-            nmpc_horizon_h=timing.horizon_h,
-            p_deadband=float(
-                config.get(const.CONF_P_DEADBAND, const.DEFAULT_P_DEADBAND)
-            ),
-            u_ref_gate=float(
-                config.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
-            ),
-        )
-        return build_mpc_controller(build_config)
 
     def _apply_measurements(
         self,
