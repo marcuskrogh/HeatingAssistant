@@ -64,4 +64,4 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/640
 
 ## Next
-`/review-fix SWD-443` — lasers then code review; `/adopt` continues after ship
+`/ship SWD-443` — merge PR #640 after CI; `/adopt` continues with SWD-444
