@@ -12,8 +12,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 |------|--------------|----------------|--------|
 | engine/controller (`facade.py`) | Small type, SRP, Divergent Change; nested source dispatch in `f` | Split SDE / EKF / linearised / MPC files; extract `f`/`dfdu` helpers | done |
 | app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | done |
-| engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | frontier |
-| estimation + `sysid_services` | Small type, Divergent Change | Split remaining god modules along existing seams | open |
+| engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | done |
+| estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | done |
 | Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | open |
 | Remaining engine / MQTT / thin bridge | Re-scan after prior areas | Nested leftover or documented exception (heat-source polymorphism) | open |
 | `heatingassistant/fusion/` | — | None — small averaging port | exception |
@@ -23,33 +23,30 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 |-------|------|------|------------|--------|-------|
 | 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | done | SWD-441 |
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
-| 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | In Progress | SWD-443 |
-| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | To Do | SWD-444 |
+| 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
+| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
 | 5 | Ingress panel | Split remaining panel god modules | SWD-444 | To Do | SWD-445 |
 | 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
 
 ## Behaviour map
 | Requirement | Current behaviour | Test path | Status |
 |-------------|-------------------|-----------|--------|
-| Runtime imports `ControlEngine` from `control_loop` | `from heatingassistant.engine.control_loop import ControlEngine` | `tests/test_swd443_control_engine_seams.py` `test_runtime_imports_control_engine_from_control_loop` | locked |
-| Public engine methods stay on `ControlEngine` | update_config, step, compute_actions, forecast, NMPC apply, preview, room_power_meta, build helpers | `tests/test_swd443_control_engine_seams.py` `test_control_engine_public_methods_exist` | locked |
-| Module helpers stay importable from `control_loop` | house/heat-source builders, snapshot, P-gating reject, preview key sets | `tests/test_swd443_control_engine_seams.py` `test_module_helpers_remain_on_control_loop`; `tests/test_swd282_solar_exposure_aperture.py` | locked |
-| House model is built from rooms config | `ControlEngine({"rooms": [...]})` → `HouseModel`; proportional when no sources | `tests/test_swd443_control_engine_seams.py` `test_control_engine_builds_house_from_rooms_config`; `tests/test_engine_averaging_control.py` | locked |
-| Proportional fallback without MPC | room `output_tags` get clamped error/3; `step` delegates | `tests/test_swd443_control_engine_seams.py` `test_compute_actions_proportional_fallback_without_controller`; `tests/test_engine_averaging_control.py` | locked |
-| Preview without a controller is unavailable | no heat sources → `{"error": "controller_unavailable"}`; `_preview_matches_live` is false | `tests/test_swd443_control_engine_seams.py`; `tests/test_swd285_tuning_preview.py` | locked |
-| Draft preview does not mutate live forecast cache | one-off solve; live snapshot unchanged | `tests/test_swd285_tuning_preview.py`; `tests/test_swd431_preview_room_parity.py` | locked |
-| Negative P-gating knobs rejected at engine construct | `ValueError` on negative `p_deadband` / `u_ref_gate` | `tests/test_swd443_control_engine_seams.py` `test_reject_negative_p_gating_knobs_raises`; `tests/test_swd437_p_deadband.py` | locked |
-| NMPC due / apply / P command | live loop on `ControlEngine` / `HeatingMPCController` | `tests/test_controller.py`; `tests/test_nmpc_input_bias.py`; `tests/test_swd395_nmpc_p.py`; `tests/integration/test_controller_factory.py` | locked |
+| `KalmanMLEstimator` is the PE entry point | re-exported from `parameter_estimator` and `estimation` | `tests/test_swd444_estimation_seams.py` `test_kalman_ml_estimator_reexported_from_compat_module`; `tests/test_parameter_estimator.py` | locked |
+| Estimator public methods stay on the class | estimate, estimate_wall_initial_only, log-likelihood slices | `tests/test_swd444_estimation_seams.py` `test_kalman_ml_estimator_public_methods_exist`; `tests/test_estimation_internals.py`; `tests/test_estimator_2r2c.py` | locked |
+| App PE HTTP handlers stay on `sysid_services` | create/delete dataset, estimate, store, simulate, coverage | `tests/test_swd444_estimation_seams.py` `test_sysid_services_public_handlers_exist`; `tests/test_swd289_sysid_services.py` | locked |
+| Runtime `apply_service` dispatches PE names to those handlers | `estimate_parameters_ml` / dataset / store / open-loop | `tests/test_swd444_estimation_seams.py` `test_runtime_maps_pe_services_to_sysid_handlers` | locked |
+| Diagnostics public API unchanged | fit metrics, residuals, validate, warnings, open-loop predict | `tests/test_swd444_estimation_seams.py` `test_model_diagnostics_public_api_exists`; `tests/test_model_diagnostics.py` | locked |
+| Parameter lifecycle persist/restore | store / apply / restore estimated params | `tests/test_swd444_estimation_seams.py` `test_parameter_lifecycle_public_api_exists`; `tests/test_persist_estimated_params.py` | locked |
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Lock-suite commands: `python3 -m pytest tests/test_swd443_control_engine_seams.py tests/test_engine_averaging_control.py tests/test_swd285_tuning_preview.py tests/test_swd431_preview_room_parity.py tests/test_swd437_p_deadband.py tests/test_controller.py tests/test_nmpc_input_bias.py tests/test_swd395_nmpc_p.py tests/integration/test_controller_factory.py -m "not slow and not ondemand" -q`
-- Characterize result: green — 221 passed, 5 skipped (2026-08-29, current `control_loop.py`); after split 223 passed, 5 skipped (same commands + `tests/test_swd443_control_engine_modules.py`)
+- Characterize result: green — 68 passed, 5 skipped, 6 deselected (2026-08-29, current estimation/sysid tree); after NLP extract 69 passed, 5 skipped, 6 deselected; after sensor / open-loop split 98 passed, 5 skipped, 6 deselected; dedicated `/test` 100 passed, 5 skipped, 6 deselected; after harden 101 passed, 5 skipped, 6 deselected (same lock-suite commands)
+- Lock-suite commands: `python3 -m pytest tests/test_swd444_estimation_seams.py tests/test_swd444_estimation_modules.py tests/test_swd289_sysid_services.py tests/test_sysid_param_overrides.py tests/test_sysid_initial_state.py tests/test_sysid_cache_consistency.py tests/test_estimation_internals.py tests/test_parameter_estimator.py tests/test_model_diagnostics.py tests/test_persist_estimated_params.py tests/test_estimator_2r2c.py tests/test_initial_state_estimator.py tests/test_no_online_gain_estimation.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py -m "not slow and not ondemand" -q`
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: engine `ControlEngine` (`control_loop.py`)
-- Packages: extract `_try_build_controller` / `_build_controller_from_config` and preview (`_preview_matches_live`, `preview_tuning_forecast`) into mixins; keep live `compute_actions` / NMPC apply on `ControlEngine`
+- Area: Ingress panel JS (page-detail gods; HA classic-script IIFE exception)
+- Packages: characterize then split `sysid-detail.js`, `schedules-detail.js`, `room-detail.js` along neighbour module seams; keep `?v=` cache-bust and IIFE boot shell.
 
 ## Workflow
 - Template: structure-safe
@@ -59,9 +56,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Tracker
 - Story: SWD-440
-- Task: SWD-443
-- Branch: `cursor/swd-443-adopt-control-engine-1253`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/640
+- Task: SWD-444
+- Branch: `cursor/swd-444-adopt-estimation-1253`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/641
 
 ## Next
-`/ship SWD-443` — merge PR #640 after CI; `/adopt` continues with SWD-444
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641; `/adopt` continues with SWD-445

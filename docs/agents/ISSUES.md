@@ -7,11 +7,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | Done | — | docs/agents/PLAN-p-deadband-nmpc-off.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/637 (`07c3ac0`) |
 | SWD-438 | Sub-task | Gated P deadband + live tuning keys | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-439 | Sub-task | Tuning pane, tests, CalVer, App sync | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
-| SWD-440 | Story | [Adopt] Meet structure catalog on the production tree | In Progress | — | docs/agents/ADOPT.md | `/adopt` — walk unit chain; frontier SWD-443 |
+| SWD-440 | Story | [Adopt] Meet structure catalog on the production tree | In Progress | — | docs/agents/ADOPT.md | `/adopt` — walk unit chain; frontier SWD-445 after SWD-444 merge |
 | SWD-441 | Task | [Adopt] Split engine controller facade into SDE, EKF, linearised, MPC | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/638 (`3b4122d`) |
 | SWD-442 | Task | [Adopt] Split HeatingRuntime into ticker, MQTT, NMPC, panel-state collaborators | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/639 (`3ac73c7`) |
-| SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | In Review | SWD-440 | docs/agents/ADOPT.md | `/ship SWD-443` |
-| SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-443 |
+| SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/640 (`1421b56`) |
+| SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | In Review | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641 (CI green; merging) |
 | SWD-445 | Task | [Adopt] Split remaining Ingress panel god modules | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-444 |
 | SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | To Do | SWD-440 | docs/agents/ADOPT.md | blocked by SWD-445 |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
@@ -169,6 +169,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-29 — `/adopt` SWD-444 characterize: lock suite 68 passed / 5 skipped / 6 deselected. Branch `cursor/swd-444-adopt-estimation-1253`. Next `/implement SWD-444`.
+- 2026-08-29 — `/ship` SWD-443 via PR #640 (`1421b56`): ControlEngine build/preview mixins; changelog skipped (internal structure). Next `/adopt SWD-444`.
 - 2026-08-29 — `/review-fix` SWD-443 CLEAN (focused): 0 blockers / 0 should-fix. COMMENT on PR #640. Lock suite 223 passed / 5 skipped. Next `/ship SWD-443`.
 - 2026-08-29 — `/harden` SWD-443: DRY live forecast cache via `_snapshot_from_controller`; flatten preview nested tries. Lock suite 223 passed / 5 skipped. PR https://github.com/marcuskrogh/HeatingAssistant/pull/640. Next `/review-fix SWD-443`.
 - 2026-08-29 — `/adopt` SWD-443 characterize: lock suite 221 passed / 5 skipped on current `control_loop.py`. Branch `cursor/swd-443-adopt-control-engine-1253`. Next `/implement SWD-443`.
