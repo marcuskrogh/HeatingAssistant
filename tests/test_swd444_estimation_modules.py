@@ -35,3 +35,27 @@ def test_open_loop_predictions_reexported_from_diagnostics() -> None:
         model_diagnostics.compute_open_loop_predictions
         is open_loop_predictions.compute_open_loop_predictions
     )
+
+
+def test_iso_time_returns_none_for_invalid_values() -> None:
+    from heatingassistant.app.sysid_common import _iso_time
+
+    assert _iso_time(None) is None
+    assert _iso_time("not-a-timestamp") is None
+
+
+def test_open_loop_predictions_reports_insufficient_history() -> None:
+    result = open_loop_predictions.compute_open_loop_predictions(
+        [], object(), ["room"], 1, 900.0
+    )
+    assert "error" in result
+    assert result["n_segments"] == 0
+    assert result["per_room"] == {}
+
+
+def test_iso_time_formats_unix_timestamp() -> None:
+    from heatingassistant.app.sysid_common import _iso_time
+
+    stamp = _iso_time(1_800_000_000.0)
+    assert stamp is not None
+    assert stamp.startswith("2027-01-15T08:00:00")

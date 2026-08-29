@@ -24,7 +24,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | done | SWD-441 |
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
-| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | In Progress | SWD-444 |
+| 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | test done; harden next | SWD-444 |
 | 5 | Ingress panel | Split remaining panel god modules | SWD-444 | To Do | SWD-445 |
 | 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
 
@@ -40,7 +40,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Characterize result: green — 68 passed, 5 skipped, 6 deselected (2026-08-29, current estimation/sysid tree); after NLP extract 69 passed, 5 skipped, 6 deselected (same commands + `tests/test_swd444_estimation_modules.py`)
+- Characterize result: green — 68 passed, 5 skipped, 6 deselected (2026-08-29, current estimation/sysid tree); after NLP extract 69 passed, 5 skipped, 6 deselected; after sensor / open-loop split 98 passed, 5 skipped, 6 deselected; dedicated `/test` 100 passed, 5 skipped, 6 deselected (same lock-suite commands)
 - Lock-suite commands: `python3 -m pytest tests/test_swd444_estimation_seams.py tests/test_swd444_estimation_modules.py tests/test_swd289_sysid_services.py tests/test_sysid_param_overrides.py tests/test_sysid_initial_state.py tests/test_sysid_cache_consistency.py tests/test_estimation_internals.py tests/test_parameter_estimator.py tests/test_model_diagnostics.py tests/test_persist_estimated_params.py tests/test_estimator_2r2c.py tests/test_initial_state_estimator.py tests/test_no_online_gain_estimation.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py -m "not slow and not ondemand" -q`
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
@@ -61,4 +61,4 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/641
 
 ## Next
-`/implement SWD-444` — remaining `sysid_services` / diagnostics splits on PR #641; `/adopt` continues after ship
+`/harden SWD-444` — lift remaining nested open-loop / log-likelihood helpers on PR #641
