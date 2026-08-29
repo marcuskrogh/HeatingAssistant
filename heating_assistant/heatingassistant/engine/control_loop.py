@@ -380,39 +380,21 @@ class ControlEngine(BuildMixin, PreviewMixin):
         return by_room
 
     def _cache_controller_forecast(self, controller: Any) -> None:
-        predictions = [dict(item) for item in list(getattr(controller, "predictions", []) or [])]
-        linearised = [
-            dict(item) for item in list(getattr(controller, "linearised_predictions", []) or [])
-        ]
-        heating_schedule = [
-            dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
-        ]
-        outdoor_forecast = [
-            float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
-        ]
-        solar_forecast = [
-            dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
-        ]
-        price_forecast = [
-            float(value) for value in list(getattr(controller, "price_forecast", []) or [])
-        ]
-        filtered: dict[str, float] = {}
-        raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
-        if isinstance(raw_filtered, Mapping):
-            for key, value in raw_filtered.items():
-                try:
-                    filtered[str(key)] = float(value)
-                except (TypeError, ValueError):
-                    continue
+        snap = _snapshot_from_controller(
+            controller,
+            dt=self._derived_dt(),
+            horizon=self._derived_horizon(),
+            compute_ts=datetime.now(timezone.utc),
+        )
         with self._forecast_lock:
-            self._last_predictions = predictions
-            self._last_linearised_predictions = linearised
-            self._last_heating_schedule = heating_schedule
-            self._last_outdoor_forecast = outdoor_forecast
-            self._last_solar_forecast = solar_forecast
-            self._last_price_forecast = price_forecast
-            self._last_filtered_temperatures = filtered
-            self._last_compute_ts = datetime.now(timezone.utc)
+            self._last_predictions = snap["predictions"]
+            self._last_linearised_predictions = snap["linearised_predictions"]
+            self._last_heating_schedule = snap["heating_schedule"]
+            self._last_outdoor_forecast = snap["outdoor_forecast"]
+            self._last_solar_forecast = snap["solar_forecast"]
+            self._last_price_forecast = snap["price_forecast"]
+            self._last_filtered_temperatures = snap["filtered_temperatures"]
+            self._last_compute_ts = snap["compute_ts"]
 
     def _clear_controller_forecast(self) -> None:
         with self._forecast_lock:

@@ -191,70 +191,110 @@ class PreviewMixin:
                 room.comfort_offset = preview_comfort
 
         try:
-            try:
-                preview_ctrl = self._build_controller_from_config(
-                    {**self.config, **ov},
-                    timing=timing,
-                    horizon=preview_horizon,
-                    dt=preview_dt,
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "preview_tuning_forecast: controller build failed: %s", exc
-                )
-                return {"error": "controller_unavailable"}
+            preview_ctrl = self._preview_controller(ov, timing, preview_dt, preview_horizon)
             if preview_ctrl is None:
                 return {"error": "controller_unavailable"}
-
-            if self._controller is not None:
-                try:
-                    x_hat, P = self._controller.ekf_state
-                    preview_ctrl.restore_ekf_state(x_hat, P)
-                except Exception:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "preview_tuning_forecast: could not copy EKF state",
-                        exc_info=True,
-                    )
-
+            self._copy_live_ekf_into(preview_ctrl)
             self._apply_measurements(room_temps, dict(setpoints or {}))
             compute_now = now or datetime.now(timezone.utc)
-            try:
-                plan = preview_ctrl.solve_nmpc(
-                    outdoor_temp,
-                    now=compute_now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    price_forecast=price_forecast,
-                )
-                preview_ctrl.apply_nmpc_result(plan)
-                preview_ctrl.compute(
-                    outdoor_temp,
-                    solar_gains=None,
-                    now=compute_now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    price_forecast=price_forecast,
-                    run_optimization=True,
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "preview_tuning_forecast: MPC compute failed: %s", exc
-                )
-                return {"error": "preview_compute_failed"}
-            return _snapshot_from_controller(
+            return self._preview_snapshot(
                 preview_ctrl,
-                dt=preview_dt,
-                horizon=preview_horizon,
-                compute_ts=compute_now,
+                outdoor_temp,
+                compute_now,
+                preview_dt,
+                preview_horizon,
+                outdoor_forecast=outdoor_forecast,
+                cloud_forecast=cloud_forecast,
+                cloud_cover_now=cloud_cover_now,
+                ghi_forecast=ghi_forecast,
+                ghi_now=ghi_now,
+                price_forecast=price_forecast,
             )
         finally:
             for name, value in saved_comfort.items():
                 room = self.model.rooms.get(name)
                 if room is not None:
                     room.comfort_offset = value
+
+    def _preview_controller(
+        self,
+        ov: Mapping[str, Any],
+        timing: Any,
+        preview_dt: float,
+        preview_horizon: int,
+    ) -> Any:
+        try:
+            return self._build_controller_from_config(
+                {**self.config, **ov},
+                timing=timing,
+                horizon=preview_horizon,
+                dt=preview_dt,
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "preview_tuning_forecast: controller build failed: %s", exc
+            )
+            return None
+
+    def _copy_live_ekf_into(self, preview_ctrl: Any) -> None:
+        if self._controller is None:
+            return
+        try:
+            x_hat, P = self._controller.ekf_state
+            preview_ctrl.restore_ekf_state(x_hat, P)
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "preview_tuning_forecast: could not copy EKF state",
+                exc_info=True,
+            )
+
+    def _preview_snapshot(
+        self,
+        preview_ctrl: Any,
+        outdoor_temp: float,
+        compute_now: datetime,
+        preview_dt: float,
+        preview_horizon: int,
+        *,
+        outdoor_forecast: list[float] | None,
+        cloud_forecast: list[float] | None,
+        cloud_cover_now: float | None,
+        ghi_forecast: list[float | None] | None,
+        ghi_now: float | None,
+        price_forecast: list[float] | None,
+    ) -> dict[str, Any]:
+        try:
+            plan = preview_ctrl.solve_nmpc(
+                outdoor_temp,
+                now=compute_now,
+                outdoor_forecast=outdoor_forecast,
+                cloud_forecast=cloud_forecast,
+                cloud_cover_now=cloud_cover_now,
+                ghi_forecast=ghi_forecast,
+                ghi_now=ghi_now,
+                price_forecast=price_forecast,
+            )
+            preview_ctrl.apply_nmpc_result(plan)
+            preview_ctrl.compute(
+                outdoor_temp,
+                solar_gains=None,
+                now=compute_now,
+                outdoor_forecast=outdoor_forecast,
+                cloud_forecast=cloud_forecast,
+                cloud_cover_now=cloud_cover_now,
+                ghi_forecast=ghi_forecast,
+                ghi_now=ghi_now,
+                price_forecast=price_forecast,
+                run_optimization=True,
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "preview_tuning_forecast: MPC compute failed: %s", exc
+            )
+            return {"error": "preview_compute_failed"}
+        return _snapshot_from_controller(
+            preview_ctrl,
+            dt=preview_dt,
+            horizon=preview_horizon,
+            compute_ts=compute_now,
+        )

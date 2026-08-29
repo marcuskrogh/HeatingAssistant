@@ -61,7 +61,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-443
 - Branch: `cursor/swd-443-adopt-control-engine-1253`
-- PR: (draft after first writer commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/640
 
 ## Next
-`/implement SWD-443` — extract ControlEngine build and preview mixins; `/adopt` continues the route after ship
+`/review-fix SWD-443` — lasers then code review; `/adopt` continues after ship
