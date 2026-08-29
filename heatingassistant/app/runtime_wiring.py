@@ -8,6 +8,37 @@ from typing import Any
 from heatingassistant.engine import const
 
 
+def bind_ha_entity(
+    entity_id: Any,
+    direction: str,
+    preferred_tag: str,
+    *,
+    previous: dict[tuple[str, str], str],
+    used_tags: set[str],
+    bindings: list[dict[str, str]],
+    entity_tag,
+) -> str | None:
+    """Reserve a unique MQTT tag for one HA entity binding."""
+
+    if not isinstance(entity_id, str):
+        return None
+    eid = entity_id.strip()
+    if not eid or "." not in eid:
+        return None
+    preferred = preferred_tag.strip() or entity_tag(eid)
+    tag = previous.get((eid, direction), preferred)
+    if not tag:
+        tag = preferred
+    base = tag
+    suffix = 2
+    while tag in used_tags:
+        tag = f"{base}_{suffix}"
+        suffix += 1
+    used_tags.add(tag)
+    bindings.append({"tag": tag, "entity_id": eid, "direction": direction})
+    return tag
+
+
 class WiringMixin:
     """Keep Ingress entity IDs, MQTT tags, and bindings aligned."""
 
@@ -45,23 +76,15 @@ class WiringMixin:
         used_tags: set[str] = set()
 
         def bind(entity_id: Any, direction: str, preferred_tag: str) -> str | None:
-            if not isinstance(entity_id, str):
-                return None
-            eid = entity_id.strip()
-            if not eid or "." not in eid:
-                return None
-            preferred = preferred_tag.strip() or self._entity_tag(eid)
-            tag = previous.get((eid, direction), preferred)
-            if not tag:
-                tag = preferred
-            base = tag
-            suffix = 2
-            while tag in used_tags:
-                tag = f"{base}_{suffix}"
-                suffix += 1
-            used_tags.add(tag)
-            bindings.append({"tag": tag, "entity_id": eid, "direction": direction})
-            return tag
+            return bind_ha_entity(
+                entity_id,
+                direction,
+                preferred_tag,
+                previous=previous,
+                used_tags=used_tags,
+                bindings=bindings,
+                entity_tag=self._entity_tag,
+            )
 
         rooms_out: list[dict[str, Any]] = []
         for room in self._rooms():

@@ -65,7 +65,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-442
 - Branch: `cursor/swd-442-adopt-runtime-1253`
-- PR: (opening)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/639
 
 ## Next
-`/adopt SWD-442` — extract HeatingRuntime collaborators (lock suite green)
+`/review-fix SWD-442` then `/ship SWD-442`. `/adopt` continues with SWD-443 after this Task ships
