@@ -1,12 +1,10 @@
 """MPC controller package — SDE model, EKF, and MPC facade."""
 
-from .facade import (
-    HeatingLinearisedMPC,
-    HeatingMPCController,
-    HouseThermalSDE,
-    _InnovationEKF,
-)
+from .ekf import _InnovationEKF
+from .facade import HeatingMPCController
 from .factory import ControllerBuildConfig, build_mpc_controller
+from .linearised import HeatingLinearisedMPC
+from .sde import HouseThermalSDE
 from ..const import MPC_STATS_BUFFER_SIZE
 
 __all__ = [
