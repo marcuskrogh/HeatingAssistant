@@ -1256,6 +1256,12 @@ class HeatingRuntime:
                 self.options.get("energy_price_weight", const.DEFAULT_ENERGY_PRICE_WEIGHT)
             ),
             "smoothing_weight": float(self.options.get("smoothing_weight", 0.05)),
+            const.CONF_P_DEADBAND: float(
+                self.options.get(const.CONF_P_DEADBAND, const.DEFAULT_P_DEADBAND)
+            ),
+            const.CONF_U_REF_GATE: float(
+                self.options.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
+            ),
             "soft_constraint_weight": float(self.options.get("soft_constraint_weight", 10.0)),
             "soft_constraint_linear_weight": float(
                 self.options.get("soft_constraint_linear_weight", 0.0)

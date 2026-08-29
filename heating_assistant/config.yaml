@@ -1,5 +1,5 @@
 name: "HeatingAssistant"
-version: "2026.08.32"
+version: "2026.08.33"
 slug: heatingassistant
 description: "Heating control App for Home Assistant OS"
 url: "https://github.com/marcuskrogh/HeatingAssistant"
