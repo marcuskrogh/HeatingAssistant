@@ -47,8 +47,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Lock-suite commands: `python3 -m pytest tests/test_swd442_runtime_seams.py tests/test_runtime_mqtt_start.py tests/test_runtime_reconfig.py tests/test_app_http.py tests/test_app_entity_wiring.py tests/test_app_persistence.py tests/test_app_options_path.py tests/test_swd276_wall_clock_ticker.py tests/test_swd418_nmpc_timer_drift.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py tests/test_window_override.py tests/test_swd318_id_sample_plot_cadence.py tests/test_swd281_history_persistence.py tests/test_swd280_climate_actuation.py tests/test_swd385_tag_quality.py tests/test_swd300_system_health.py tests/test_swd395_nmpc_p.py -m "not slow and not ondemand" -q`
-- Characterize result: green — 131 passed, 1 skipped (2026-08-29, current `runtime.py`)
+- Lock-suite commands: `python3 -m pytest tests/test_swd442_runtime_seams.py tests/test_swd442_runtime_modules.py tests/test_runtime_mqtt_start.py tests/test_runtime_reconfig.py tests/test_app_http.py tests/test_app_entity_wiring.py tests/test_app_persistence.py tests/test_app_options_path.py tests/test_swd276_wall_clock_ticker.py tests/test_swd418_nmpc_timer_drift.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py tests/test_window_override.py tests/test_swd318_id_sample_plot_cadence.py tests/test_swd281_history_persistence.py tests/test_swd280_climate_actuation.py tests/test_swd385_tag_quality.py tests/test_swd300_system_health.py tests/test_swd395_nmpc_p.py -m "not slow and not ondemand" -q`
+- Characterize result: green — 131 passed, 1 skipped (2026-08-29, current `runtime.py`); after split 132 passed, 1 skipped (same commands + `tests/test_swd442_runtime_modules.py`)
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
