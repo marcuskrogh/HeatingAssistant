@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-434` |
+| SWD-435 | Sub-task | Restore DISTURBANCES outdoor/solar history to solid lines | In Progress | SWD-434 | docs/agents/ITERATE.md | — |
+| SWD-436 | Sub-task | Tests, CalVer, changelog, App sync for DISTURBANCES lines | To Do | SWD-434 | docs/agents/ITERATE.md | — |
 | nmpc-input-bias | Task | [Bug] NMPC input bias (u_ref) must step on each accepted plan | Done | — | docs/agents/PLAN-nmpc-input-bias.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/635 (`ff1449e`) |
 | SWD-432 | Task | [Sandbox] Room-view temperature forecast oscillates while planned power is smooth | Done | — | docs/agents/SANDBOX-forecast-oscillation.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/634 (`9d815d1`) |
 | SWD-431 | Task | [Sandbox] Controller Tuning preview vs room view predictions in HA app plots | Done | — | docs/agents/SANDBOX-preview-room-plots.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/633 (`eb3fa55`) |
@@ -156,6 +159,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-29 — `/iterate` SWD-434 from SWD-321: restore DISTURBANCES outdoor/solar history to solid lines (keep colours); Relates SWD-321; Sub-tasks SWD-435–436. Next `/review-fix SWD-434`.
 - 2026-08-28 — `/ship` nmpc-input-bias via PR #635 (`ff1449e`): `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.31`. Next Done.
 - 2026-08-28 — `/review-fix` nmpc-input-bias CLEAN (focused): 0 blockers / 0 should-fix / 2 deferred notes (lock-timeout actuators vs `_u_prev`; un-awaited P publish coroutine). COMMENT (cannot APPROVE own PR). CI 6/6 green. Next `/ship`.
 - 2026-08-28 — `/implement` nmpc-input-bias In Review: `u_ref` steps on accept; NLP warm-start recedes one slow interval; P-only apply without EKF. PR https://github.com/marcuskrogh/HeatingAssistant/pull/635; CalVer 2026.08.31. Jira MCP unavailable. Next `/review-fix`.

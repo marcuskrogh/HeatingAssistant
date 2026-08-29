@@ -1,48 +1,47 @@
-# Iterate: Room view plots 15-minute steps instead of the 2-hour NMPC trajectory
+# Iterate: Room DISTURBANCES outdoor/solar history as solid lines
 
 ## Prior work
-- Task: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/627
-- Spec context: `docs/agents/PLAN-nmpc-p-ff.md`, `docs/agents/ITERATE.md` (SWD-414)
+- Task: [SWD-321](https://marcusknielsen.atlassian.net/browse/SWD-321)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/607
+- Spec context: `docs/agents/PLAN-disturbances-history-points.md`
 
 ## Problem
-- Controller Tuning preview shows the slow nonlinear model predictive
-  control (NMPC) plan: two-hour input holds and a relatively smooth
-  temperature path.
-- Room view Forecast / Planned Power instead look like the 15-minute
-  fast grid (jittery temperature, short power steps).
-- After each 15-minute `compute()`, Ingress caches the fast-grid
-  nonlinear rollout and outdoor-dependent display power, which
-  overwrites the installed slow plan (`U*` zero-order hold + `T_ref`).
+- After evaluating SWD-321, historical Outdoor Temperature and Solar Gain
+  on the room DISTURBANCES chart as Measured-style points are too cluttered
+  and messy.
+- Restore those series to solid lines (pre-SWD-321 styling). Keep the grey
+  outdoor and yellow solar colours. Forecasts stay dashed.
 
 ## Clarifications
-- Keep the 15-minute EKF then P loop for actuators.
-- Do not change NMPC timing defaults (2 h / 8 / 36 h).
-- Preview and room view should share the same installed-plan series.
+- Restore solar history fill (`rgba(255,213,79,0.08)`) with the solid line,
+  matching the pre-SWD-321 chart.
+- Indoor Measured on the temperature chart stays points.
 
 ## Acceptance criteria
-- After an accepted NMPC plan, a later 15-minute `compute()` still
-  plots that plan: Planned Power holds for `nmpc_period` even when
-  outdoor temperature varies; Forecast follows `T_ref`.
-- Controller Tuning preview and room-view snapshots use the same
-  power-run length (slow interval).
-- Tests, CalVer 2026.08.25, changelog, App sync.
+- Outdoor Temperature history is a solid `#90a4ae` line (`borderWidth: 2`),
+  not `showLine: false` points.
+- Solar Gain history is a solid `#ffd54f` line on `y2`, with the same fill
+  as before SWD-321.
+- Outdoor Forecast and Solar Gain Forecast stay dashed continuous lines.
+- Indoor Measured remains points.
+- Tests, CalVer 2026.08.32, changelog, App sync.
 
 ## Out of scope
-- Changing the P gain or NMPC solver.
-- Plotting a closed-loop P simulation over the horizon.
+- Indoor Measured styling.
+- Forecast dash style.
+- Backend resampling or interpolating history.
 
 ## Work packages
-1. Keep Ingress plots on the installed 2-hour NMPC plan (SWD-422)
-2. Tests, CalVer, changelog, App sync for 2-hour room plots (SWD-423)
+1. Restore DISTURBANCES outdoor/solar history to solid lines (SWD-435)
+2. Tests, CalVer, changelog, App sync for DISTURBANCES lines (SWD-436)
 
 ## Tracker
-- Task: [SWD-421](https://marcusknielsen.atlassian.net/browse/SWD-421)
-- Relates: [SWD-414](https://marcusknielsen.atlassian.net/browse/SWD-414)
-- Sub-tasks: [SWD-422](https://marcusknielsen.atlassian.net/browse/SWD-422),
-  [SWD-423](https://marcusknielsen.atlassian.net/browse/SWD-423)
-- Branch: `cursor/swd-421-room-view-nmpc-grid-7742`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/629
+- Task: [SWD-434](https://marcusknielsen.atlassian.net/browse/SWD-434)
+- Relates: [SWD-321](https://marcusknielsen.atlassian.net/browse/SWD-321)
+- Sub-tasks: [SWD-435](https://marcusknielsen.atlassian.net/browse/SWD-435),
+  [SWD-436](https://marcusknielsen.atlassian.net/browse/SWD-436)
+- Branch: `cursor/swd-434-disturbances-history-lines-071f`
+- PR: (pending)
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/629 (`c0a2c13`)
+`/review-fix SWD-434` — Review and auto-fix (single pass)
