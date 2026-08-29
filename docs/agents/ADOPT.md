@@ -10,7 +10,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 ## Inventory
 | Area | Catalog rows | Concrete moves | Status |
 |------|--------------|----------------|--------|
-| engine/controller (`facade.py`) | Small type, SRP, Divergent Change; nested source dispatch in `f` | Split SDE / EKF / linearised / MPC files; extract `f`/`dfdu` helpers | frontier (implement) |
+| engine/controller (`facade.py`) | Small type, SRP, Divergent Change; nested source dispatch in `f` | Split SDE / EKF / linearised / MPC files; extract `f`/`dfdu` helpers | done |
 | app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | open |
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | open |
 | estimation + `sysid_services` | Small type, Divergent Change | Split remaining god modules along existing seams | open |
@@ -21,7 +21,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 ## Route
 | Order | Area | Task | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
-| 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | In Progress | SWD-441 |
+| 1 | engine/controller | Split facade into SDE, EKF, linearised, MPC | — | done | SWD-441 |
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | To Do | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | To Do | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | To Do | SWD-444 |
@@ -49,8 +49,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: engine/controller
-- Packages: split `facade.py` → `sde.py` / `ekf.py` / `linearised.py` / thin `facade.py`; keep `controller/__init__.py` exports; extract nested `f`/`dfdx`/`dfdu` source dispatch
+- Area: app runtime (`HeatingRuntime`)
+- Packages: extract ticker, NMPC worker, HA state publisher, wiring, history sampler
 
 ## Workflow
 - Template: structure-safe
@@ -60,9 +60,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Tracker
 - Story: SWD-440
-- Task: SWD-441
+- Task: SWD-441 (this PR) then SWD-442
 - Branch: `cursor/swd-441-adopt-controller-1253`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/638
 
 ## Next
-`/review-fix SWD-441` — lasers then code review on PR #638
+`/adopt SWD-442` — characterize HeatingRuntime after this PR merges
