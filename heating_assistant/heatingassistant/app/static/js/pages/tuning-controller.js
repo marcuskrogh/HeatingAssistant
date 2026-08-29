@@ -8,7 +8,7 @@ import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=124';
+} from '../charts/mpc-preview-charts.js?v=140';
 import {
   updateControllerTuning,
   updateEstimationParams,

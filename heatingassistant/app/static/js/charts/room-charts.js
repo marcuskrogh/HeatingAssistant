@@ -339,11 +339,7 @@ export function buildDisturbanceChart(
   const datasets = [];
   if (!forecastOnly) {
     datasets.push(
-      makeDataset('Outdoor Temperature', outdoorHistory, '#90a4ae', {
-        borderWidth: 0, pointRadius: 3, pointHoverRadius: 5,
-        pointBackgroundColor: '#90a4ae', pointBorderColor: '#90a4ae',
-        showLine: false,
-      }),
+      makeDataset('Outdoor Temperature', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
     );
   }
   datasets.push(
@@ -354,9 +350,8 @@ export function buildDisturbanceChart(
   if (!forecastOnly) {
     datasets.push(
       makeDataset('Solar Gain', solarHistoryKw, '#ffd54f', {
-        borderWidth: 0, pointRadius: 3, pointHoverRadius: 5,
-        pointBackgroundColor: '#ffd54f', pointBorderColor: '#ffd54f',
-        showLine: false, yAxisID: 'y2',
+        borderWidth: 2, yAxisID: 'y2',
+        fill: true, backgroundColor: 'rgba(255,213,79,0.08)',
       }),
     );
   }

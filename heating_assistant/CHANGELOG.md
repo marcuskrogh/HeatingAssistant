@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.32
+
+- Room DISTURBANCES plots historical outdoor temperature and solar gain as
+  solid lines again, so the chart is easier to read than the previous point
+  cloud. Forecasts stay dashed. Grey outdoor and yellow solar colours are
+  unchanged.
+
 # 2026.08.31
 
 - When a new two-hour heating plan is accepted, heaters step to that plan
