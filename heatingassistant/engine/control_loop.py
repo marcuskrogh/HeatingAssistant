@@ -15,6 +15,18 @@ from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def reject_negative_p_deadband_knobs(mapping: Mapping[str, Any]) -> None:
+    """Raise if live P-deadband knobs are negative (before persist or rebuild)."""
+
+    for key in (const.CONF_P_DEADBAND, const.CONF_U_REF_GATE):
+        if key not in mapping:
+            continue
+        value = float(mapping[key])
+        if value < 0.0:
+            raise ValueError(f"{key} must be >= 0; got {value}")
+
+
 # MPC tuning keys accepted by Controller Tuning preview (exclude window detection).
 _PREVIEW_TUNING_KEYS = frozenset(
     {
@@ -123,6 +135,7 @@ class ControlEngine:
     def update_config(self, config: Mapping[str, Any]) -> None:
         """Rebuild model/controller state from an App config dictionary."""
 
+        reject_negative_p_deadband_knobs(config)
         self.config = dict(config)
         try:
             timing = self._nmpc_timing(self.config)
