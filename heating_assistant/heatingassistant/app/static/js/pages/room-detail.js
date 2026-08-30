@@ -31,7 +31,7 @@ import {
   computeYLimits,
   updatePowerChartBounds,
 } from '../charts/room-charts.js?v=140';
-import { loadChartsData } from './room-detail-history.js?v=143';
+import { loadChartsData } from './room-detail-history.js?v=144';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.

@@ -6,13 +6,13 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   sensorHistoriesToMinMaxSpan,
-  extendDatasetToNow,
 } from '../components/time-series-chart.js?v=124';
 import { entityValue, systemEntity } from '../utils.js?v=127';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
+  extendDatasetToNow,
 } from '../charts/room-charts.js?v=140';
 
 function appendCurrentValue(dataPoints, state, entityId) {

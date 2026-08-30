@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.34
+
+- The Heating Assistant panel loads again. A missing room-chart helper had
+  stopped the app on a load error after the last update.
+
 # 2026.08.33
 
 - During night or other planner-off intervals, heaters stay off unless room
