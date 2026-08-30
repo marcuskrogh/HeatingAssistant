@@ -95,4 +95,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-453` — Merge PR #647 after CLEAN review-fix (same branch)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647
