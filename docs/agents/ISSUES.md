@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-459 | Task | [Bug] PE historical heater power uses heating capacity for cooling | In Progress | — | docs/agents/PLAN-pe-asymmetric-cooling.md | `/test SWD-459` |
+| SWD-459 | Task | [Bug] PE historical heater power uses heating capacity for cooling | In Review | — | docs/agents/PLAN-pe-asymmetric-cooling.md | `/review-fix SWD-459` |
 | SWD-460 | Sub-task | Map PE heater power through asymmetric heating/cooling | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
 | SWD-461 | Sub-task | Tests, CalVer, changelog, App sync for PE cooling power | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
 | SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | Done | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 (`5d4f748`) |
@@ -181,6 +181,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/harden` SWD-459: heat-only `can_cool` guard; drop stray GSHP pellet comment. Next `/review-fix SWD-459`.
+- 2026-08-30 — `/test` SWD-459: 1088 passed / 88 skipped / 18 deselected (fast). Extra partial-cool and heat-only PE series. No extra product behaviour. Next `/harden SWD-459`.
 - 2026-08-30 — `/implement` SWD-459 In Progress: PE Heating Input uses cooling capacity for `u < 0`; CalVer 2026.08.37. Next `/test SWD-459`.
 - 2026-08-30 — `/define` SWD-459: PLAN `docs/agents/PLAN-pe-asymmetric-cooling.md` (bug / fix-fast). PE Heating Input used heating capacity for negative `u`; Sub-tasks SWD-460–461. Next `/implement SWD-459`.
 - 2026-08-30 — `/ship` SWD-453 via PR #647 (`5d4f748`): background PE job so Ingress does not drop week-length fits; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.36`. Next Done.

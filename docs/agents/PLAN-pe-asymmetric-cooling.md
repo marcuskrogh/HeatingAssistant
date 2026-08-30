@@ -89,9 +89,9 @@
 - Task: SWD-459
 - Sub-tasks: SWD-460, SWD-461
 - Branch: cursor/swd-459-pe-asymmetric-cooling-b2b6
-- PR: (draft, opened with this plan)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/649
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-459` — Dedicated testing phase after implement (same branch/PR)
+`/review-fix SWD-459` — Laser reviews then code review

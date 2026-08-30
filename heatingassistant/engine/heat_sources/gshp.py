@@ -118,7 +118,7 @@ class GroundSourceHeatPump(HeatSource):
         """Piecewise-linear model power [W]: +Q_heat·u or −Q_cool·|u|."""
         q_heat = self.max_power * self.heating_efficiency * self._power_scale
         q_cool = self._q_cool_const
-        if q_heat <= 0.0 or q_cool <= 0.0:
+        if not self.can_cool or q_heat <= 0.0 or q_cool <= 0.0:
             raw = q_heat * max(0.0, u)
             return _soft_ceiling(raw, self._q_heat_max) if raw > 0.0 else raw
         if u >= 0.0:
@@ -180,8 +180,3 @@ class GroundSourceHeatPump(HeatSource):
         offset = half_sat * (1.0 + logit_f / 5.0)
         offset = max(0.0, min(offset, self.delta_sat))
         return base_temp + math.copysign(offset, fraction)
-
-
-# ---------------------------------------------------------------------------
-# Pellet stove
-# ---------------------------------------------------------------------------

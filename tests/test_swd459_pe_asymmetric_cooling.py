@@ -61,7 +61,29 @@ def test_pe_series_heat_pump_cooling_respects_power_scale():
     )
 
 
-def test_pe_series_electric_heater_unchanged():
+def test_pe_series_heat_pump_partial_cool_scales_cooling_capacity():
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=7000.0,
+        cop_rated=3.5,
+        cooling_cop=2.5,
+    )
+    series = identification_aux_series([_record(-0.5)], [hp], "living_room")
+    assert series["heating_power"][0]["value"] == pytest.approx(
+        0.5 * hp.cooling_power(outdoor_temp=20.0)
+    )
+
+
+def test_pe_series_heat_only_heat_pump_ignores_negative_u():
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=7000.0,
+        hvac_mode="heat",
+    )
+    series = identification_aux_series([_record(-1.0)], [hp], "living_room")
+    assert series["heating_power"][0]["value"] == pytest.approx(0.0)
     heater = ElectricHeater("h", "living_room", 2000.0)
     series = identification_aux_series([_record(0.4)], [heater], "living_room")
     assert series["heating_power"][0]["value"] == pytest.approx(800.0)

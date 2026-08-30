@@ -382,8 +382,8 @@ class HeatPump(HeatSource):
         q_heat = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max)
         q_cool = self._q_cool_const
 
-        if q_heat <= 0.0 or q_cool <= 0.0:
-            # Degenerate case: fall back to linear heating-only model
+        if not self.can_cool or q_heat <= 0.0 or q_cool <= 0.0:
+            # Degenerate / heat-only: fall back to linear heating-only model
             return q_heat * max(0.0, u)
 
         # Piecewise-linear power curve: heating delivers +q_heat·u for u ≥ 0 and
