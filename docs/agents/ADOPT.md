@@ -14,8 +14,8 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | app `HeatingRuntime` | Small type, SRP, Divergent Change; nested ticker / `hass_states` | Extract ticker, NMPC worker, HA state publisher, wiring, history sampler | done |
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | done |
 | estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | done |
-| Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | frontier |
-| Remaining engine / MQTT / thin bridge | Re-scan after prior areas | Nested leftover or documented exception (heat-source polymorphism) | open |
+| Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | done |
+| Remaining engine / MQTT / thin bridge | Small type, SRP; `heat_sources.py` packs eight types; thin `__init__.py` owns `_BridgeManager` | Package heat-source types with re-exports; extract `_BridgeManager`; document remaining exceptions | frontier |
 | `heatingassistant/fusion/` | — | None — small averaging port | exception |
 
 ## Route
@@ -25,29 +25,27 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 2 | app runtime | Split HeatingRuntime collaborators | SWD-441 | done | SWD-442 |
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
-| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | In Review | SWD-445 |
-| 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | To Do | SWD-446 |
+| 5 | Ingress panel | Split remaining panel god modules | SWD-444 | done | SWD-445 |
+| 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | In Progress | SWD-446 |
 
 ## Behaviour map
 | Requirement | Current behaviour | Test path | Status |
 |-------------|-------------------|-----------|--------|
-| Dashboard boot is a classic-script IIFE | wrapped in `(() => {`; no `import.meta.url`; defines `ha-industrial-panel` | `tests/test_swd445_panel_seams.py` `test_industrial_dashboard_is_classic_script_iife`; `tests/test_app_ingress_panel.py` | locked |
-| Dashboard dynamically imports page modules with `?v=` | `room-detail`, PE, schedules, overview, tuning, system-status, config | `tests/test_swd445_panel_seams.py` `test_industrial_dashboard_dynamically_imports_page_modules` | locked |
-| Page-detail public renders stay on named modules | `renderRoomDetail`, `renderIdentificationDetail`, `renderScheduleDetail`; thin page wrappers import them | `tests/test_swd445_panel_seams.py` `test_page_detail_entry_exports_exist` | locked |
-| Ingress index cache-busts the dashboard entry | `industrial-dashboard.js?v=` in `index.html` | `tests/test_swd445_panel_seams.py` `test_index_html_cache_busts_dashboard_entry`; `tests/test_swd434_disturbance_history_lines.py` | locked |
-| Room-detail live chart helpers stay callable by name | `updateChartsFromState` extends live history before `mpcForecastStamp` early return | `tests/test_swd445_panel_seams.py` `test_room_detail_keeps_live_chart_update_helpers`; `tests/test_swd414_nmpc_trajectory.py` | locked |
-| PE detail keeps window/aux/tw0 identifiers | `getPeInputs`, `t_wall_locked`, `applySimulatedTw0` in `sysid-detail.js` | `tests/test_swd344_pe_sim_aux_tw0.py` `test_pe_guides_are_plain_dataset_requirements` | locked |
+| Heat-source types stay importable from `heat_sources` | ABC plus eight concrete types; `_soft_ceiling` / `_cop_at_temp` / `_SOFT_CEIL_K` stay on that import path | `tests/test_swd446_leftover_seams.py`; `tests/test_heat_sources.py` | locked |
+| Schedule build and resolve stay public | `build_schedule([])` yields empty periods; `resolve_effective_control_params` / `next_transition` callable | `tests/test_swd446_leftover_seams.py`; `tests/test_schedule.py` | locked |
+| MQTT bus factory and supervisor stay public | `create_mqtt_bus` and `apply_supervisor_mqtt_discovery` callable | `tests/test_swd446_leftover_seams.py`; `tests/test_swd270_mqtt_discovery.py` | locked |
+| Thin integration still exposes `_BridgeManager` | `_BridgeManager`, setup/unload, `climate_attributes_for_publish`, `_truthy` on `custom_components/heating_assistant` | `tests/test_swd446_leftover_seams.py`; `tests/test_swd280_climate_actuation.py` | locked |
+| Dashboard boot is a classic-script IIFE | wrapped in `(() => {`; defines `ha-industrial-panel` | `tests/test_swd445_panel_seams.py` | locked |
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Lock-suite commands: `python3 -m pytest tests/test_swd445_panel_seams.py tests/test_app_ingress_panel.py tests/test_panel_setup.py tests/test_swd414_nmpc_trajectory.py tests/test_swd434_disturbance_history_lines.py tests/test_swd430_timer_loading.py tests/test_swd344_pe_sim_aux_tw0.py tests/test_pe_coverage.py tests/test_swd426_nmpc_p_grid.py tests/test_swd400_nmpc_countdown.py -m "not slow and not ondemand" -q`
-- Characterize result: green — 62 passed, 1 skipped (2026-08-29, current Ingress panel tree)
-- After splits: 67 passed, 1 skipped (markup collaborators, ingress asset fetch, module-level history helpers)
+- Lock-suite commands: `python3 -m pytest tests/test_swd446_leftover_seams.py tests/test_heat_sources.py tests/test_schedule.py tests/test_swd270_mqtt_discovery.py tests/test_swd273_mqtt_discovery_retry.py tests/test_swd385_tag_quality.py tests/test_swd280_climate_actuation.py -m "not slow and not ondemand" -q`
+- Characterize result: green — 250 passed (2026-08-30, leftover seams on current tree)
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: Ingress panel JS (page-detail gods; HA classic-script IIFE exception)
-- Packages: split `sysid-detail.js`, `schedules-detail.js`, `room-detail.js` along neighbour module seams; keep `?v=` cache-bust and IIFE boot shell (`industrial-dashboard.js` exception).
+- Area: leftover engine / MQTT / thin bridge
+- Packages: split `heat_sources.py` into a re-exporting package; extract `_BridgeManager` from thin `__init__.py`. Document exceptions: heat-source ABC polymorphism; MQTT already split (`topics` / `supervisor` / `paho_bus` / `bridge`); `const.py` named-constants module; remaining `render*` closures and `KalmanMLEstimator.estimate` public entry points.
 
 ## Workflow
 - Template: structure-safe
@@ -57,9 +55,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Tracker
 - Story: SWD-440
-- Task: SWD-445
-- Branch: `cursor/swd-445-adopt-panel-1253`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/642
+- Task: SWD-446
+- Branch: `cursor/swd-446-adopt-leftover-1253`
+- PR: (pending)
 
 ## Next
-`/review-fix SWD-445` — focused lasers + COMMENT (cannot APPROVE own PR); then `/ship SWD-445`
+`/implement SWD-446` — split heat-source types and extract `_BridgeManager` on the SWD-446 delivery head
