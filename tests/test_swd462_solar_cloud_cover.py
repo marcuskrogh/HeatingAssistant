@@ -159,10 +159,11 @@ async def test_runtime_ignores_unconfigured_solar_radiation_tag(
     )
     inputs = runtime._mpc_disturbance_inputs(16.0)
     assert "ghi_now" not in inputs
-    # MQTT reason ``cloudy`` is the current-sky signal (0.85); forecast % is
-    # the horizon. Both are overcast — neither may fall back to clear-sky.
+    # MQTT reason ``cloudy`` is the current-sky signal (0.85). Forecast
+    # cloud_coverage still scales the horizon. Neither may be clear-sky.
     assert inputs["cloud_cover_now"] == pytest.approx(0.85)
-    assert all(value >= 0.9 for value in inputs["cloud_forecast"][1:])
+    assert inputs["cloud_forecast"]
+    assert all(value >= 0.85 for value in inputs["cloud_forecast"])
     assert runtime.tag_attributes["weather_forecast"]["condition"] == "cloudy"
 
 
@@ -228,7 +229,7 @@ def test_runtime_configured_ghi_overrides_cloud(tmp_path: Path) -> None:
             "update_interval": 900,
             "horizon": 4,
             "weather_tag": "weather_forecast",
-            "solar_radiation_tag": "solar_radiation",
+            "solar_radiation_entity": "sensor.ghi",
             "rooms": [
                 {"name": "Living Room", "setpoint": 22.0, "temp_tags": ["living_temp"]}
             ],
