@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-450 | Task | [Bug] Room plots missing optimal trajectories, price forecast, and outdoor temperature | In Review | — | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | `/ship SWD-450` |
+| SWD-450 | Task | [Bug] Room plots missing optimal trajectories, price forecast, and outdoor temperature | In Review | — | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/646 |
 | SWD-451 | Sub-task | Preserve forecast attrs on catalog overlay + outdoor fallback | Done | SWD-450 | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | — |
 | SWD-452 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-450 | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | — |
 | SWD-447 | Task | [Iterate] Ingress LOAD ERROR — extendDatasetToNow not found | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/645 (`d82931e`) |
@@ -175,6 +175,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/ship` SWD-450 closeout: catalog overlay keeps weather/price forecast attrs; CI green; changelog `heating_assistant/CHANGELOG.md` `# 2026.08.35`; PR https://github.com/marcuskrogh/HeatingAssistant/pull/646. Next Done.
 - 2026-08-30 — `/review-fix` SWD-450 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #646. Next `/ship SWD-450`.
 - 2026-08-30 — `/harden` SWD-450: outdoor °C extracted to `_temperature_from_tag`; overlay comment explains attr re-attach vs MQTT scalar-only. Next `/review-fix SWD-450`.
 - 2026-08-30 — `/test` SWD-450: 52 passed / 1 skipped (catalog overlay, SWD-278/279/385, price history, CalVer). No extra tests. Next `/harden SWD-450`.

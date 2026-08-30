@@ -16,9 +16,9 @@ Concrete defect: room-view forecast series (linearised temperature, planned heat
 
 Secondary: `_usable_catalog_value` returns weather condition strings (`"cloudy"`), overwriting numeric outdoor °C. `_outdoor_temperature` never falls back to `tag_attributes[weather]["temperature"]`. `_coerce_number` does not parse numeric strings.
 
-## Next (review-fix CLEAN)
+## Next
 
-`/ship SWD-450`
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/646
 
 ## Implement
 
