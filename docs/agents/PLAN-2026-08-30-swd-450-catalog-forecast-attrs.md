@@ -18,7 +18,7 @@ Secondary: `_usable_catalog_value` returns weather condition strings (`"cloudy"`
 
 ## Next
 
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/646
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/646 (`e9af33c`)
 
 ## Implement
 
