@@ -85,9 +85,9 @@
 - Task: SWD-462
 - Sub-tasks: SWD-463, SWD-464
 - Branch: cursor/solar-gain-cloud-cover-059e
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/650
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/650 (`27ccf06`)
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/650
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/650 (`27ccf06`)
