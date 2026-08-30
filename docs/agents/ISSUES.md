@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | In Progress | — | docs/agents/ITERATE.md | `/harden SWD-456` — https://github.com/marcuskrogh/HeatingAssistant/pull/648 |
+| SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-456` — https://github.com/marcuskrogh/HeatingAssistant/pull/648 |
 | SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | Done | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 (`5d4f748`) |
@@ -181,6 +181,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/harden` SWD-456: import sits with the other `nmpc_timing` helpers on `TickerMixin`; `_slow_slot_start` still one branch. No extract. Next `/review-fix SWD-456`.
 - 2026-08-30 — `/test` SWD-456: 75 passed (SWD-456, input-bias, SWD-426/414/395, CalVer). Added None-epoch `_slow_slot_start` and `_u_prev` lock. Working surface: none (no live HA). Next `/harden SWD-456`.
 - 2026-08-30 — `/iterate` SWD-456 In Progress: import `slow_slot_start_s` so NMPC apply can install the plan; PR https://github.com/marcuskrogh/HeatingAssistant/pull/648; CalVer 2026.08.37. Next `/test SWD-456`.
 - 2026-08-30 — `/ship` SWD-453 via PR #647 (`5d4f748`): background PE job so Ingress does not drop week-length fits; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.36`. Next Done.

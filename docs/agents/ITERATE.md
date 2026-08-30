@@ -43,4 +43,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/648
 
 ## Next
-`/harden SWD-456` — Structure pass (same catalog as implement; small diffs included)
+`/review-fix SWD-456` — Laser reviews then code review
