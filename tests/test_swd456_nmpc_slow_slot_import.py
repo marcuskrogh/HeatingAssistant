@@ -64,6 +64,12 @@ def test_slow_slot_start_returns_slot_origin(tmp_path: Path) -> None:
     assert start == pytest.approx(slow_slot_start_s(_EPOCH, runtime._nmpc_period_s(), _NOW))
 
 
+def test_slow_slot_start_returns_none_when_epoch_missing(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    runtime._last_nmpc_ts = None
+    assert runtime._slow_slot_start(_NOW) is None
+
+
 def test_nmpc_worker_passes_slow_slot_plan_epoch(tmp_path: Path, monkeypatch) -> None:
     runtime = _runtime(tmp_path)
     runtime._last_nmpc_ts = _EPOCH
@@ -123,6 +129,7 @@ def test_nmpc_worker_installs_p_on_heater_when_slot_origin_is_known(
     heat = runtime.actuator_outputs.get("heater_heat")
     assert heat is not None
     assert float(heat) == pytest.approx(0.4, abs=0.1)
+    assert float(ctrl._u_prev[0]) == pytest.approx(0.4, abs=0.1)
     topic = tag_out("haos", "heater_heat")
     heater_msgs = [item for item in runtime.bus.published if item[0] == topic]
     assert heater_msgs

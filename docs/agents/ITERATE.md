@@ -43,4 +43,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/648
 
 ## Next
-`/test SWD-456` — Dedicated testing phase, then harden and code review
+`/harden SWD-456` — Structure pass (same catalog as implement; small diffs included)
