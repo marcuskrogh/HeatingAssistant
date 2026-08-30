@@ -1555,19 +1555,32 @@ class HeatingRuntime(
                         tag = binding.tag
                         break
         if isinstance(tag, str) and tag:
-            outdoor = self._coerce_number(self.tag_values.get(tag))
+            outdoor = self._temperature_from_tag(tag)
             if outdoor is not None:
                 return outdoor
 
         weather_tag = self.options.get("weather_tag")
         if isinstance(weather_tag, str) and weather_tag:
-            return self._coerce_number(self.tag_values.get(weather_tag))
+            outdoor = self._temperature_from_tag(weather_tag)
+            if outdoor is not None:
+                return outdoor
         weather_entity = self.options.get(const.CONF_WEATHER_ENTITY)
         if isinstance(weather_entity, str) and weather_entity:
             for binding in self.bindings:
                 if binding.direction == "in" and binding.entity_id == weather_entity:
-                    return self._coerce_number(self.tag_values.get(binding.tag))
+                    return self._temperature_from_tag(binding.tag)
         return None
+
+    def _temperature_from_tag(self, tag: str) -> float | None:
+        """Return °C from the tag value, else weather ``temperature`` attr."""
+
+        outdoor = self._coerce_number(self.tag_values.get(tag))
+        if outdoor is not None:
+            return outdoor
+        attrs = self.tag_attributes.get(tag)
+        if not isinstance(attrs, Mapping):
+            return None
+        return self._coerce_number(attrs.get("temperature"))
 
     def _price_tag(self) -> str:
         """Return the configured electricity price tag (defaults to energy_price)."""
@@ -2428,6 +2441,14 @@ class HeatingRuntime(
             return None
         if isinstance(value, (int, float)):
             return float(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return float(text)
+            except ValueError:
+                return None
         return None
 
     def _inbound_tag_names(self) -> set[str]:
@@ -2487,7 +2508,7 @@ class HeatingRuntime(
         try:
             return float(text)
         except ValueError:
-            return text
+            return None
 
     def _is_stale_unavailable_payload(
         self,
@@ -2541,9 +2562,17 @@ class HeatingRuntime(
             status = self.tag_statuses.get(binding.tag)
             if status == "GOOD" and tag_ts is not None and tag_ts >= catalog_ts:
                 continue
+            # Catalog rows are scalars only. Re-attach stored forecast attrs so
+            # a newer picker snapshot does not wipe weather/price series
+            # (MQTT scalar-only still clears via update_tag).
             self.update_tag(
                 binding.tag,
-                MqttTagPayload(value=value, status="GOOD", ts=catalog_ts),
+                MqttTagPayload(
+                    value=value,
+                    status="GOOD",
+                    ts=catalog_ts,
+                    attributes=self.tag_attributes.get(binding.tag),
+                ),
             )
 
     def _save_runtime_state(self) -> None:

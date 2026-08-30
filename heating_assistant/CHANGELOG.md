@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.35
+
+- Room plots keep the planned temperature and heating trajectories, energy
+  price forecast, and outdoor forecast after Home Assistant refreshes its
+  entity list. Those series no longer go missing or flatten to a single value.
+
 # 2026.08.34
 
 - The Heating Assistant panel loads again. A missing room-chart helper had
