@@ -43,4 +43,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/648
 
 ## Next
-`/review-fix SWD-456` — Laser reviews then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648
