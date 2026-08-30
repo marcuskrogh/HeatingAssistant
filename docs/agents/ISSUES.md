@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-447 | Task | [Iterate] Ingress LOAD ERROR — extendDatasetToNow not found | In Progress | — | docs/agents/ITERATE.md | `/test SWD-447` — https://github.com/marcuskrogh/HeatingAssistant/pull/645 |
+| SWD-447 | Task | [Iterate] Ingress LOAD ERROR — extendDatasetToNow not found | In Review | — | docs/agents/ITERATE.md | `/ship SWD-447` — https://github.com/marcuskrogh/HeatingAssistant/pull/645 |
 | SWD-448 | Sub-task | Import extendDatasetToNow from room-charts | Done | SWD-447 | docs/agents/ITERATE.md | — |
 | SWD-449 | Sub-task | Tests, CalVer, changelog, App sync for panel import | Done | SWD-447 | docs/agents/ITERATE.md | — |
 | SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | Done | — | docs/agents/PLAN-p-deadband-nmpc-off.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/637 (`07c3ac0`) |
@@ -172,6 +172,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/review-fix` SWD-447 CLEAN (focused): 0 blockers / 0 should-fix. COMMENT on PR #645. CI green. Next `/ship SWD-447`.
 - 2026-08-30 — `/iterate` SWD-447 In Progress: Ingress LOAD ERROR — `extendDatasetToNow` imported from `room-charts.js`; PR https://github.com/marcuskrogh/HeatingAssistant/pull/645; CalVer 2026.08.34. Next `/test SWD-447`.
 - 2026-08-29 — `/adopt` SWD-444 characterize: lock suite 68 passed / 5 skipped / 6 deselected. Branch `cursor/swd-444-adopt-estimation-1253`. Next `/implement SWD-444`.
 - 2026-08-29 — `/ship` SWD-443 via PR #640 (`1421b56`): ControlEngine build/preview mixins; changelog skipped (internal structure). Next `/adopt SWD-444`.

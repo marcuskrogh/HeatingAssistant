@@ -35,4 +35,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/645
 
 ## Next
-`/test SWD-447` — Dedicated testing phase on the new delivery PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/645
