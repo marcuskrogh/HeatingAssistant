@@ -15,7 +15,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | engine `ControlEngine` | Small type, SRP; mixed build / live / preview | Extract construction and preview helpers | done |
 | estimation + `sysid_services` | Small type, Divergent Change; nested NLP in `KalmanMLEstimator.estimate` | Lift nested MSE/L-BFGS helpers; keep PE HTTP and estimator entry points | done |
 | Ingress panel JS | Small type, one level | Split remaining page-detail gods; keep HA classic-script IIFE | done |
-| Remaining engine / MQTT / thin bridge | Small type, SRP; `heat_sources.py` packs eight types; thin `__init__.py` owns `_BridgeManager` | Package heat-source types with re-exports; extract `_BridgeManager`; document remaining exceptions | frontier |
+| Remaining engine / MQTT / thin bridge | Small type, SRP; `heat_sources.py` packs eight types; thin `__init__.py` owns `_BridgeManager` | Package heat-source types with re-exports; extract `_BridgeManager`; document remaining exceptions | done |
 | `heatingassistant/fusion/` | — | None — small averaging port | exception |
 
 ## Route
@@ -26,7 +26,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 | 3 | engine control_loop | Split ControlEngine build / live / preview | SWD-442 | done | SWD-443 |
 | 4 | estimation + PE HTTP | Split estimation, diagnostics, sysid_services | SWD-443 | done | SWD-444 |
 | 5 | Ingress panel | Split remaining panel god modules | SWD-444 | done | SWD-445 |
-| 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | In Progress | SWD-446 |
+| 6 | leftover | Remaining engine, MQTT, thin-bridge rows | SWD-445 | done | SWD-446 |
 
 ## Behaviour map
 | Requirement | Current behaviour | Test path | Status |
@@ -45,8 +45,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
-- Area: leftover engine / MQTT / thin bridge
-- Packages: split `heat_sources.py` into a re-exporting package; extract `_BridgeManager` from thin `__init__.py`. Document exceptions: heat-source ABC polymorphism; MQTT already split (`topics` / `supervisor` / `paho_bus` / `bridge`); `const.py` named-constants module; remaining `render*` closures and `KalmanMLEstimator.estimate` public entry points.
+- Area: none — route Done
+- Packages: — 
+- Exceptions: heat-source ABC polymorphism; MQTT already split (`topics` / `supervisor` / `paho_bus` / `bridge`); `const.py` named-constants module; Ingress IIFE boot shell; remaining `render*` closures and `KalmanMLEstimator.estimate` as public entry points.
 
 ## Workflow
 - Template: structure-safe
@@ -55,10 +56,10 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Verify: non-regression; test.mode=dedicated; lock suite from characterize
 
 ## Tracker
-- Story: SWD-440
-- Task: SWD-446
+- Story: SWD-440 (Done)
+- Task: SWD-446 (Done)
 - Branch: `cursor/swd-446-adopt-leftover-1253`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/643
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/643 (`c7f67fb`)
 
 ## Next
-`/test SWD-446` — dedicated lock-suite pass on PR #643; then harden / review-fix / ship
+Done — adopt route complete.
