@@ -12,6 +12,7 @@ DST_INTEGRATION="${APP_DIR}/custom_components/heating_assistant"
 THIN_FILES=(
   manifest.json
   __init__.py
+  bridge_manager.py
   const.py
   mqtt_topics.py
   forecast_publish.py
@@ -159,6 +160,7 @@ src_integration = root / "custom_components" / "heating_assistant"
 for name in (
     "manifest.json",
     "__init__.py",
+    "bridge_manager.py",
     "const.py",
     "mqtt_topics.py",
     "forecast_publish.py",
