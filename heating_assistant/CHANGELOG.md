@@ -6,9 +6,10 @@ must be the exact calendar version on its own line.
 
 # 2026.08.37
 
-- Room plots show the accepted heating plan again. A missing import had
-  been discarding every new two-hour plan, so Forecast looked like the
-  heater was off and Planned Power stayed at 0 kW.
+- Room plots show the accepted heating plan again, and heaters step to
+  that plan. A missing import had been discarding every new two-hour
+  plan, so Forecast looked like the heater was off, Planned Power stayed
+  at 0 kW, and the heater never received a command.
 
 # 2026.08.36
 

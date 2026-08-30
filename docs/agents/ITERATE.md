@@ -8,15 +8,21 @@
 ## Problem
 - After SWD-450, room-view Forecast still spikes like a heater-off free
   response (~28 °C) and Planned Power stays at 0 kW for the whole window.
+- The heater never receives the planned power either.
 - `TickerMixin._slow_slot_start` calls `slow_slot_start_s` but
   `runtime_ticker.py` does not import it. The NMPC worker evaluates
   `plan_epoch=self._slow_slot_start(stamp)` before `apply_nmpc_result`.
 - When `last_nmpc_ts` is set, that is a `NameError`. The worker except path
-  records a reject, so U*/T* never reach the forecast snapshot or the P command.
+  records a reject, so U*/T* never reach the forecast snapshot, the P command
+  is never installed on `actuator_outputs`, and MQTT never publishes to the
+  heater.
 
 ## Acceptance criteria
 - `HeatingRuntime._slow_slot_start` returns the slow-slot origin (no NameError).
 - An NMPC worker apply can pass `plan_epoch` into `apply_nmpc_result`.
+- When `last_nmpc_ts` is set, an accepted worker result installs the P command
+  onto `actuator_outputs` and publishes it on the heater MQTT out topic
+  (no reject).
 - Tests, CalVer 2026.08.37, changelog, App sync.
 
 ## Out of scope

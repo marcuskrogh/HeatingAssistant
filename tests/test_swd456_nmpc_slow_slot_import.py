@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from heatingassistant.app.runtime import HeatingRuntime
 from heatingassistant.engine.nmpc_timing import slow_slot_start_s
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
+from heatingassistant.mqtt.topics import MqttTagPayload, tag_out
 
 
 pytestmark = pytest.mark.unit
@@ -22,6 +24,36 @@ def _runtime(tmp_path: Path) -> HeatingRuntime:
         tmp_path,
         bus=InMemoryMqttBus(),
         options={"instance_id": "haos", "system_enabled": False},
+    )
+
+
+def _heater_runtime(tmp_path: Path) -> HeatingRuntime:
+    return HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options={
+            "instance_id": "haos",
+            "system_enabled": True,
+            "nmpc_period": 1800,
+            "nmpc_fast_substeps": 2,
+            "nmpc_horizon_h": 0.5,
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "setpoint": 21.0,
+                    "temperature": 21.0,
+                }
+            ],
+            "heat_sources": [
+                {
+                    "name": "heater",
+                    "type": "electric_heater",
+                    "room": "Living Room",
+                    "max_power": 1500.0,
+                    "output_tag": "heater_heat",
+                }
+            ],
+        },
     )
 
 
@@ -60,3 +92,39 @@ def test_nmpc_worker_passes_slow_slot_plan_epoch(tmp_path: Path, monkeypatch) ->
     assert captured["plan_epoch"] == pytest.approx(
         slow_slot_start_s(_EPOCH, runtime._nmpc_period_s(), _NOW)
     )
+
+
+def test_nmpc_worker_installs_p_on_heater_when_slot_origin_is_known(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runtime = _heater_runtime(tmp_path)
+    runtime._last_nmpc_ts = _EPOCH
+    monkeypatch.setattr("heatingassistant.app.runtime_nmpc.time.time", lambda: _NOW)
+    ctrl = runtime.control_engine._controller
+    assert ctrl is not None
+    n_slow = ctrl.timing.n_slow
+    rejects = {"n": 0}
+    original_reject = ctrl._record_nmpc_reject
+
+    def counting_reject(*args, **kwargs):
+        rejects["n"] += 1
+        return original_reject(*args, **kwargs)
+
+    ctrl._record_nmpc_reject = counting_reject  # type: ignore[method-assign]
+    runtime.control_engine.solve_nmpc_blocking = lambda: {  # type: ignore[method-assign]
+        "accepted": True,
+        "u_star": np.full((n_slow, 1), 0.4),
+        "t_ref": np.full((ctrl.horizon, 1), 21.0),
+        "fun": 1.0,
+    }
+    runtime._nmpc_worker_thread()
+
+    assert rejects["n"] == 0
+    heat = runtime.actuator_outputs.get("heater_heat")
+    assert heat is not None
+    assert float(heat) == pytest.approx(0.4, abs=0.1)
+    topic = tag_out("haos", "heater_heat")
+    heater_msgs = [item for item in runtime.bus.published if item[0] == topic]
+    assert heater_msgs
+    payload = MqttTagPayload.decode(heater_msgs[-1][1])
+    assert float(payload.value) == pytest.approx(0.4, abs=0.1)
