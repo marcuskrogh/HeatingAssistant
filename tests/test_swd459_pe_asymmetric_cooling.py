@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from heatingassistant.engine.heat_sources import GroundSourceHeatPump, HeatPump
@@ -84,9 +86,25 @@ def test_pe_series_heat_only_heat_pump_ignores_negative_u():
     )
     series = identification_aux_series([_record(-1.0)], [hp], "living_room")
     assert series["heating_power"][0]["value"] == pytest.approx(0.0)
+
+
+def test_pe_series_electric_heater_unchanged():
     heater = ElectricHeater("h", "living_room", 2000.0)
     series = identification_aux_series([_record(0.4)], [heater], "living_room")
     assert series["heating_power"][0]["value"] == pytest.approx(800.0)
+
+
+def test_pe_series_cooling_capable_does_not_fall_back_to_heating_gain():
+    source = SimpleNamespace(
+        room="living_room",
+        can_cool=True,
+        max_power=7000.0,
+        power_scale=1.0,
+        smooth_thermal_power=lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+        thermal_power=lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    series = identification_aux_series([_record(-1.0)], [source], "living_room")
+    assert series["heating_power"][0]["value"] == pytest.approx(0.0)
 
 
 def test_heat_pump_thermal_power_negative_is_cooling_capacity():

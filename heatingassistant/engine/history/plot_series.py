@@ -56,6 +56,15 @@ def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
             power = _call_thermal(smooth, u_frac, outdoor)
             if power is not None:
                 return power
+        fn = getattr(source, "thermal_power", None)
+        if callable(fn):
+            power = _call_thermal(fn, u_frac, outdoor)
+            if power is not None:
+                return power
+        # Never map cooling through heating capacity if the piecewise
+        # call failed — that is the SWD-459 bug.
+        if u_frac < 0.0:
+            return 0.0
     fn = getattr(source, "thermal_power", None)
     if callable(fn):
         power = _call_thermal(fn, u_frac, outdoor)
