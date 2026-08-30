@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.37
+
+- Room plots show the accepted heating plan again, and heaters step to
+  that plan. A missing import had been discarding every new two-hour
+  plan, so Forecast looked like the heater was off, Planned Power stayed
+  at 0 kW, and the heater never received a command.
+
 # 2026.08.36
 
 - Running recommended parameter estimation on a week of stored data no
