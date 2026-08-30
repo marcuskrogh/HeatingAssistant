@@ -5,8 +5,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | In Progress | — | docs/agents/ITERATE.md | `/test SWD-456` — https://github.com/marcuskrogh/HeatingAssistant/pull/648 |
-| SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | In Progress | SWD-456 | docs/agents/ITERATE.md | — |
-| SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | In Progress | SWD-456 | docs/agents/ITERATE.md | — |
+| SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | Done | SWD-456 | docs/agents/ITERATE.md | — |
+| SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | Done | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 (`5d4f748`) |
 | SWD-454 | Sub-task | Background PE job so Ingress does not drop the request | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
 | SWD-455 | Sub-task | Tests, CalVer, changelog, App sync for PE job | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
