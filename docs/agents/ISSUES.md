@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-462 | Task | [Bug] Solar gain history is unattenuated clear-sky on cloudy days | In Progress | — | docs/agents/PLAN-solar-gain-cloud-cover.md | `/implement SWD-462` |
-| SWD-463 | Sub-task | Cloud-cover now + k=0 attenuation; no stray GHI | In Progress | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
-| SWD-464 | Sub-task | Tests, CalVer, changelog, App sync for solar cloud cover | In Progress | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
+| SWD-462 | Task | [Bug] Solar gain history is unattenuated clear-sky on cloudy days | In Review | — | docs/agents/PLAN-solar-gain-cloud-cover.md | `/test SWD-462` |
+| SWD-463 | Sub-task | Cloud-cover now + k=0 attenuation; no stray GHI | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
+| SWD-464 | Sub-task | Tests, CalVer, changelog, App sync for solar cloud cover | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
 | SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648 (`87be700`) |
 | SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | Done | SWD-456 | docs/agents/ITERATE.md | — |

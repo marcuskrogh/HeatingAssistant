@@ -85,9 +85,9 @@
 - Task: SWD-462
 - Sub-tasks: SWD-463, SWD-464
 - Branch: cursor/solar-gain-cloud-cover-059e
-- PR: (draft, opened after first push)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/650
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-462` — Build per PLAN.md workflow binding (same branch/PR)
+`/test SWD-462` — Dedicated tests per Workflow binding (same branch/PR)
