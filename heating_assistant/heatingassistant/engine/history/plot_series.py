@@ -30,18 +30,46 @@ def _u_fraction(raw: Any) -> float:
     return value
 
 
+def _call_thermal(fn: Any, u_frac: float, outdoor: float) -> float | None:
+    try:
+        return float(fn(u_frac, outdoor))
+    except TypeError:
+        try:
+            return float(fn(u_frac))
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
+    """Convert a stored command fraction to model thermal power [W].
+
+    Cooling-capable sources use the piecewise heating/cooling map
+    (``smooth_thermal_power``) so negative ``u`` is cooling capacity, not
+    ``−heating_capacity``. Heat-only sources stay on linear
+    ``thermal_power``.
+    """
+    if bool(getattr(source, "can_cool", False)):
+        smooth = getattr(source, "smooth_thermal_power", None)
+        if callable(smooth):
+            power = _call_thermal(smooth, u_frac, outdoor)
+            if power is not None:
+                return power
+        fn = getattr(source, "thermal_power", None)
+        if callable(fn):
+            power = _call_thermal(fn, u_frac, outdoor)
+            if power is not None:
+                return power
+        # Never map cooling through heating capacity if the piecewise
+        # call failed — that is the SWD-459 bug.
+        if u_frac < 0.0:
+            return 0.0
     fn = getattr(source, "thermal_power", None)
     if callable(fn):
-        try:
-            return float(fn(u_frac, outdoor))
-        except TypeError:
-            try:
-                return float(fn(u_frac))
-            except Exception:
-                pass
-        except Exception:
-            pass
+        power = _call_thermal(fn, u_frac, outdoor)
+        if power is not None:
+            return power
     gain = float(getattr(source, "max_power", 0.0) or 0.0)
     gain *= float(getattr(source, "power_scale", 1.0) or 1.0)
     efficiency = getattr(source, "efficiency", None)

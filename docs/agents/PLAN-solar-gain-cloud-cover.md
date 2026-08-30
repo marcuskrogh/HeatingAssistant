@@ -21,7 +21,7 @@
   the horizon).
 - Read GHI only when `solar_radiation_tag` is configured; ignore BAD tags.
 - Keep Kasten–Czeplak `1 − 0.75 c^3.4` as specified in THEORY.
-- Tests, CalVer `2026.08.38`, changelog, App package sync.
+- Tests, CalVer `2026.08.39`, changelog, App package sync.
 
 **Out**
 - Replacing Kasten–Czeplak with a linear `(1 − c)` factor.
@@ -71,7 +71,7 @@
    from the condition table.
 3. Unconfigured solar-radiation tag does not inject GHI (including 0).
 4. Configured GHI still overrides cloud for that step (THEORY Step 9).
-5. Fast suite passes. CalVer 2026.08.38; App package synced.
+5. Fast suite passes. CalVer 2026.08.39; App package synced.
 
 ## Work packages
 1. Cloud-cover now + k=0 attenuation; no stray GHI (SWD-463)

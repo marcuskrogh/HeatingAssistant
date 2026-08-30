@@ -4,12 +4,18 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.08.38
+# 2026.08.39
 
 - Solar gain on a cloudy day follows the weather cloud cover again, including
   the historical trace left of NOW. Missing current cloud percent no longer
   leaves that sample on an unattenuated clear-sky path while the forecast is
   scaled. An unused solar-irradiance tag is ignored.
+
+# 2026.08.38
+
+- Parameter Estimation Heating Input now plots cooling at the configured
+  cooling capacity. Full cool no longer shows as minus the heating max
+  (for example −7000 W when cooling is about −3500 W).
 
 # 2026.08.37
 
