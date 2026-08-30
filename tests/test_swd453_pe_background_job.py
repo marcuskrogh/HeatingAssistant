@@ -200,6 +200,39 @@ def test_http_estimate_returns_before_fit_and_poll_succeeds(
         assert job["job"]["success"] is True
 
 
+def test_http_second_start_while_running_does_not_relaunch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+    calls = {"n": 0}
+
+    async def fake_estimate(*args, **kwargs):
+        calls["n"] += 1
+        release.wait(timeout=2)
+        return _ok_result()
+
+    monkeypatch.setattr(sysid_services, "async_estimate_parameters_ml", fake_estimate)
+    runtime = _runtime(tmp_path)
+    payload = {
+        "domain": "heating_assistant",
+        "service": "estimate_parameters_ml",
+        "data": {"apply_parameters": False},
+    }
+
+    with app_server(runtime) as base_url:
+        first = send_json(base_url, "/api/services", "POST", payload)
+        second = send_json(base_url, "/api/services", "POST", payload)
+        assert first["status"] == "running"
+        assert second["status"] == "running"
+        assert first["started_at"] == second["started_at"]
+        assert calls["n"] == 1
+        release.set()
+        job = wait_pe_job(runtime)
+        assert job["status"] == "success"
+        assert calls["n"] == 1
+
+
 def test_http_post_unexpected_error_returns_500(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
 
