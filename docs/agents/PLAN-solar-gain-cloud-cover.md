@@ -90,4 +90,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-462` — Dedicated tests per Workflow binding (same branch/PR)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/650

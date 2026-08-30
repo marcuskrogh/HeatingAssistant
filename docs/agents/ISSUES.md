@@ -187,6 +187,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/ship` SWD-462 closeout: merged `origin/main`; CalVer 2026.08.39 (main shipped 38). Changelog `heating_assistant/CHANGELOG.md` `# 2026.08.39`. Next merge PR #650.
+- 2026-08-30 — `/review-fix` SWD-462 CLEAN (focused sequential): 0 blockers / 0 should-fix. APPROVE on PR #650. Next `/ship SWD-462`.
 - 2026-08-30 — `/define` SWD-462: PLAN `docs/agents/PLAN-solar-gain-cloud-cover.md` (bug / fix-fast). Historical solar k=0 must use cloud cover; Sub-tasks SWD-463–464. Next `/implement SWD-462`.
 - 2026-08-30 — `/ship` SWD-459 via PR #649 (`3a30be0`): PE Heating Input uses cooling capacity for `u < 0`; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.38`. Next Done.
 - 2026-08-30 — `/ship` SWD-459 closeout: merged `origin/main`; CalVer 2026.08.38 (main shipped 37). Changelog `heating_assistant/CHANGELOG.md` `# 2026.08.38`. Next merge PR #649.
