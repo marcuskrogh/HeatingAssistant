@@ -39,8 +39,9 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 
 ## Preserve behaviour
 - Required — CONCEPT_STRUCTURE Lock before restructure + Proof is the gate
-- Lock-suite commands: `python3 -m pytest tests/test_swd446_leftover_seams.py tests/test_heat_sources.py tests/test_schedule.py tests/test_swd270_mqtt_discovery.py tests/test_swd273_mqtt_discovery_retry.py tests/test_swd385_tag_quality.py tests/test_swd280_climate_actuation.py -m "not slow and not ondemand" -q`
+- Lock-suite commands: `python3 -m pytest tests/test_swd446_leftover_seams.py tests/test_swd446_leftover_modules.py tests/test_heat_sources.py tests/test_schedule.py tests/test_swd270_mqtt_discovery.py tests/test_swd273_mqtt_discovery_retry.py tests/test_swd385_tag_quality.py tests/test_swd280_climate_actuation.py -m "not slow and not ondemand" -q`
 - Characterize result: green — 250 passed (2026-08-30, leftover seams on current tree)
+- After splits: 265 passed (heat-source package re-exports + `_BridgeManager` extract; includes extra thin-bridge tests)
 - Verification: same tests, same requirements after every code-editing step; `test.mode=dedicated`
 
 ## Frontier
