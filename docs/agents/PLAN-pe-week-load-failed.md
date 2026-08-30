@@ -90,9 +90,9 @@
 - Sub-tasks: [SWD-454](https://marcusknielsen.atlassian.net/browse/SWD-454),
   [SWD-455](https://marcusknielsen.atlassian.net/browse/SWD-455)
 - Branch: `cursor/swd-453-pe-week-load-failed-66f5`
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/647
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-453` — Build per PLAN.md workflow binding (same branch/PR)
+`/ship SWD-453` — Merge PR #647 after CLEAN review-fix (same branch)
