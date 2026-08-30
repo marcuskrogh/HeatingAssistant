@@ -7,13 +7,13 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-437 | Task | [Tweak] P deadband when NMPC is near zero | Done | — | docs/agents/PLAN-p-deadband-nmpc-off.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/637 (`07c3ac0`) |
 | SWD-438 | Sub-task | Gated P deadband + live tuning keys | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
 | SWD-439 | Sub-task | Tuning pane, tests, CalVer, App sync | Done | SWD-437 | docs/agents/PLAN-p-deadband-nmpc-off.md | — |
-| SWD-440 | Story | [Adopt] Meet structure catalog on the production tree | In Progress | — | docs/agents/ADOPT.md | `/adopt` — frontier SWD-446 |
+| SWD-440 | Story | [Adopt] Meet structure catalog on the production tree | Done | — | docs/agents/ADOPT.md | Done — SWD-441–446; last PR #643 (`c7f67fb`) |
 | SWD-441 | Task | [Adopt] Split engine controller facade into SDE, EKF, linearised, MPC | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/638 (`3b4122d`) |
 | SWD-442 | Task | [Adopt] Split HeatingRuntime into ticker, MQTT, NMPC, panel-state collaborators | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/639 (`3ac73c7`) |
 | SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/640 (`1421b56`) |
 | SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641 (`9d736b6`) |
 | SWD-445 | Task | [Adopt] Split remaining Ingress panel god modules | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/642 (`01652bf`) |
-| SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | In Progress | SWD-440 | docs/agents/ADOPT.md | `/test SWD-446` — https://github.com/marcuskrogh/HeatingAssistant/pull/643 |
+| SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/643 (`c7f67fb`) |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
 | SWD-435 | Sub-task | Restore DISTURBANCES outdoor/solar history to solid lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
 | SWD-436 | Sub-task | Tests, CalVer, changelog, App sync for DISTURBANCES lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
