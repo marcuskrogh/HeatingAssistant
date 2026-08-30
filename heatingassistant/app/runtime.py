@@ -228,6 +228,9 @@ class HeatingRuntime(
         self._ticker_stop = threading.Event()
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
+        self._pe_lock = threading.Lock()
+        self._pe_job: dict[str, Any] = {"status": "idle"}
+        self._pe_thread: threading.Thread | None = None
         self._state_lock = threading.Lock()
         self._nmpc_thread: threading.Thread | None = None
         self._nmpc_loop: asyncio.AbstractEventLoop | None = None
@@ -826,8 +829,9 @@ class HeatingRuntime(
                 return {"config": await self._update_room_value(payload, "comfort_offset")}
             if service == "set_room_enabled":
                 return {"config": await self._set_room_enabled(payload)}
+            if service == "estimate_parameters_ml":
+                return sysid_services.start_estimate_parameters_ml(self, payload)
             sysid_handler = {
-                "estimate_parameters_ml": sysid_services.handle_estimate_parameters_ml,
                 "get_pe_coverage": sysid_services.handle_get_pe_coverage,
                 "get_pe_inputs": sysid_services.handle_get_pe_inputs,
                 "run_sysid_simulation": sysid_services.handle_run_sysid_simulation,
@@ -1291,6 +1295,7 @@ class HeatingRuntime(
             "mqtt_discovery_error": get_last_discovery_error(),
             "supervisor_token_present": bool(os.environ.get("SUPERVISOR_TOKEN")),
             "hass_states": self.hass_states(),
+            "pe_job": sysid_services.pe_job_snapshot(self),
         }
 
     @property

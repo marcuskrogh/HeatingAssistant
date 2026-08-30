@@ -11,6 +11,7 @@ from heatingassistant.app import sysid_services
 from heatingassistant.app.runtime import HeatingRuntime
 from heatingassistant.engine import const
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
+from tests.test_swd453_pe_background_job import wait_pe_job
 
 
 pytestmark = pytest.mark.unit
@@ -126,7 +127,10 @@ async def test_estimate_parameters_ml_dry_run_populates_sysid_sensor(
         {"apply_parameters": False, "horizon_hours": 12.0},
     )
 
-    assert result["success"] is True
+    assert result["status"] == "running"
+    job = wait_pe_job(runtime)
+    assert job["status"] == "success"
+
     assert runtime.sysid_results["Living Room"]["thermal_mass"] == pytest.approx(1_250_000.0)
     sensor = runtime.hass_states()["sensor.heating_assistant_living_room_sysid_simulation"]
     assert sensor["attributes"]["thermal_mass"] == pytest.approx(1_250_000.0)

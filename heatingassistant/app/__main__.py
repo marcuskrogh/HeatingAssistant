@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import mimetypes
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ from heatingassistant.mqtt.supervisor import (
 )
 from heatingassistant.persistence import load_config
 
+_LOGGER = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).with_name("static")
 
 # Supervisor App options (config.yaml schema) overlaid onto durable config.json.
@@ -105,6 +107,11 @@ class _Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             room_slug = query.get("room_slug", [None])[0]
             self._send_json({"datasets": self.runtime.datasets(room_slug)})
+            return
+        if path == "/api/pe_job":
+            from heatingassistant.app import sysid_services
+
+            self._send_json({"job": sysid_services.pe_job_snapshot(self.runtime)})
             return
         if path in {"/api/pe_coverage", "/api/pe_inputs"}:
             query = parse_qs(parsed.query)
@@ -245,6 +252,13 @@ class _Handler(BaseHTTPRequestHandler):
                 result = self.runtime.preview_tuning_forecast(payload, plot_hours)
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 - return HTTP 500 instead of dropping the socket
+            _LOGGER.exception("HTTP POST %s failed", path)
+            self.send_error(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                str(exc)[:300] or "internal error",
+            )
             return
         self._send_json(result)
 

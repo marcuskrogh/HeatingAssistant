@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -324,6 +325,100 @@ def _merge_ml_result(runtime: Any, result: Mapping[str, Any], horizon_hours: flo
     runtime._last_identified_heater_scales = {
         str(name): float(value) for name, value in dict(heater_scales).items()
     }
+
+
+def pe_job_snapshot(runtime: Any) -> dict[str, Any]:
+    """Return a copy of the current parameter-estimation job status."""
+
+    def _copy() -> dict[str, Any]:
+        return dict(getattr(runtime, "_pe_job", None) or {"status": "idle"})
+
+    lock = getattr(runtime, "_pe_lock", None)
+    if lock is None:
+        return _copy()
+    with lock:
+        return _copy()
+
+
+def _write_pe_job(runtime: Any, lock: threading.Lock, job: dict[str, Any]) -> None:
+    with lock:
+        runtime._pe_job = job
+
+
+def _run_pe_worker(
+    runtime: Any,
+    payload: dict[str, Any],
+    started_at: float,
+    lock: threading.Lock,
+) -> None:
+    try:
+        result = asyncio.run(handle_estimate_parameters_ml(runtime, payload))
+        success = bool(result.get("success"))
+        message = result.get("message")
+        if not success:
+            message = message or "Estimation failed"
+        _write_pe_job(
+            runtime,
+            lock,
+            {
+                "status": "success" if success else "error",
+                "started_at": started_at,
+                "finished_at": time.time(),
+                "success": success,
+                "message": message,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - surface any worker failure on the job
+        _LOGGER.exception("Parameter estimation job failed")
+        _write_pe_job(
+            runtime,
+            lock,
+            {
+                "status": "error",
+                "started_at": started_at,
+                "finished_at": time.time(),
+                "success": False,
+                "message": str(exc) or "Estimation failed",
+            },
+        )
+
+
+def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
+    """Start ML estimation on a worker thread; return immediately.
+
+    Ingress must not wait for the optimiser. A week-length fit takes tens of
+    seconds and the proxy drops the POST, which Safari surfaces as Load failed.
+    """
+
+    lock = getattr(runtime, "_pe_lock", None)
+    if lock is None:
+        runtime._pe_lock = threading.Lock()
+        lock = runtime._pe_lock
+    with lock:
+        current = dict(getattr(runtime, "_pe_job", None) or {})
+        if current.get("status") == "running":
+            return {
+                "status": "running",
+                "started_at": current.get("started_at"),
+            }
+        started_at = time.time()
+        runtime._pe_job = {
+            "status": "running",
+            "started_at": started_at,
+            "success": None,
+            "message": None,
+        }
+        payload = _payload(data)
+
+    thread = threading.Thread(
+        target=_run_pe_worker,
+        args=(runtime, payload, started_at, lock),
+        name="heatingassistant-pe",
+        daemon=True,
+    )
+    runtime._pe_thread = thread
+    thread.start()
+    return {"status": "running", "started_at": started_at}
 
 
 async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
@@ -731,6 +826,8 @@ __all__ = [
     "handle_delete_dataset",
     "handle_delete_parameter_history",
     "handle_estimate_parameters_ml",
+    "pe_job_snapshot",
+    "start_estimate_parameters_ml",
     "annotate_datasets_with_coverage",
     "handle_get_pe_coverage",
     "handle_get_pe_inputs",

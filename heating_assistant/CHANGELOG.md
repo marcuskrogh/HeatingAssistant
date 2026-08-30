@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.36
+
+- Running recommended parameter estimation on a week of stored data no
+  longer fails with Load failed. The fit now runs in the background
+  while the page waits for the result.
+
 # 2026.08.35
 
 - Room plots keep the planned temperature and heating trajectories, energy
