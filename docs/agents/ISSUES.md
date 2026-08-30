@@ -7,6 +7,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-459 | Task | [Bug] PE historical heater power uses heating capacity for cooling | In Review | — | docs/agents/PLAN-pe-asymmetric-cooling.md | `/ship SWD-459` |
 | SWD-460 | Sub-task | Map PE heater power through asymmetric heating/cooling | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
 | SWD-461 | Sub-task | Tests, CalVer, changelog, App sync for PE cooling power | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
+| SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648 (`87be700`) |
+| SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | Done | SWD-456 | docs/agents/ITERATE.md | — |
+| SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | Done | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 (`5d4f748`) |
 | SWD-454 | Sub-task | Background PE job so Ingress does not drop the request | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
 | SWD-455 | Sub-task | Tests, CalVer, changelog, App sync for PE job | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
@@ -184,8 +187,13 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-08-30 — `/review-fix` SWD-459 CLEAN (focused sequential): 0 blockers / 1 should-fix (cooling fallback to heating gain) fixed forward. COMMENT on PR #649. Next `/ship SWD-459`.
 - 2026-08-30 — `/harden` SWD-459: heat-only `can_cool` guard; drop stray GSHP pellet comment. Next `/review-fix SWD-459`.
 - 2026-08-30 — `/test` SWD-459: 1088 passed / 88 skipped / 18 deselected (fast). Extra partial-cool and heat-only PE series. No extra product behaviour. Next `/harden SWD-459`.
-- 2026-08-30 — `/implement` SWD-459 In Progress: PE Heating Input uses cooling capacity for `u < 0`; CalVer 2026.08.37. Next `/test SWD-459`.
+- 2026-08-30 — `/implement` SWD-459 In Progress: PE Heating Input uses cooling capacity for `u < 0`; CalVer 2026.08.38. Next `/test SWD-459`.
 - 2026-08-30 — `/define` SWD-459: PLAN `docs/agents/PLAN-pe-asymmetric-cooling.md` (bug / fix-fast). PE Heating Input used heating capacity for negative `u`; Sub-tasks SWD-460–461. Next `/implement SWD-459`.
+- 2026-08-30 — `/ship` SWD-456 via PR #648 (`87be700`): restore NMPC plan on plots and heater command; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.37`. Next Done.
+- 2026-08-30 — `/review-fix` SWD-456 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #648. Next `/ship SWD-456`.
+- 2026-08-30 — `/harden` SWD-456: import sits with the other `nmpc_timing` helpers on `TickerMixin`; `_slow_slot_start` still one branch. No extract. Next `/review-fix SWD-456`.
+- 2026-08-30 — `/test` SWD-456: 75 passed (SWD-456, input-bias, SWD-426/414/395, CalVer). Added None-epoch `_slow_slot_start` and `_u_prev` lock. Working surface: none (no live HA). Next `/harden SWD-456`.
+- 2026-08-30 — `/iterate` SWD-456 In Progress: import `slow_slot_start_s` so NMPC apply can install the plan; PR https://github.com/marcuskrogh/HeatingAssistant/pull/648; CalVer 2026.08.37. Next `/test SWD-456`.
 - 2026-08-30 — `/ship` SWD-453 via PR #647 (`5d4f748`): background PE job so Ingress does not drop week-length fits; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.36`. Next Done.
 - 2026-08-30 — `/review-fix` SWD-453 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #647. Next `/ship SWD-453`.
 - 2026-08-30 — `/harden` SWD-453: clump PE worker args into `_PeJobWork`; snapshot copy extracted. Next `/review-fix SWD-453`.
