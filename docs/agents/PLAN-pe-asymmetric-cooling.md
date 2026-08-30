@@ -19,7 +19,7 @@
   overstate heat removal.
 - GSHP gains `smooth_thermal_power` so a cooling-capable GSHP matches
   the air-source map (SDE already calls that method when `can_cool`).
-- Tests, CalVer `2026.08.37`, changelog, App package sync.
+- Tests, CalVer `2026.08.38`, changelog, App package sync.
 
 **Out**
 - Changing NMPC / P actuation or room-view Planned Power (those already
@@ -73,7 +73,7 @@
 2. Heating (`u ≥ 0`) PE series is unchanged (COP-limited heating watts,
    including `power_scale`).
 3. Electric-heater PE aux series still scale as `max_power × u × scale`.
-4. Fast suite passes. CalVer 2026.08.37; App package synced.
+4. Fast suite passes. CalVer 2026.08.38; App package synced.
 
 ## Work packages
 1. Asymmetric thermal map for PE series + heat-pump `thermal_power` (SWD-460)
@@ -94,4 +94,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-459` — review-fix CLEAN; merge remaining on PR #649
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/649
