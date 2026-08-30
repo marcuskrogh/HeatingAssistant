@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from heatingassistant.app.sysid_common import _dt, _iso_time
 from heatingassistant.app.sysid_sensors import (
@@ -345,14 +345,19 @@ def _write_pe_job(runtime: Any, lock: threading.Lock, job: dict[str, Any]) -> No
         runtime._pe_job = job
 
 
-def _run_pe_worker(
-    runtime: Any,
-    payload: dict[str, Any],
-    started_at: float,
-    lock: threading.Lock,
-) -> None:
+class _PeJobWork(NamedTuple):
+    runtime: Any
+    payload: dict[str, Any]
+    started_at: float
+    lock: threading.Lock
+
+
+def _run_pe_worker(work: _PeJobWork) -> None:
+    runtime = work.runtime
+    lock = work.lock
+    started_at = work.started_at
     try:
-        result = asyncio.run(handle_estimate_parameters_ml(runtime, payload))
+        result = asyncio.run(handle_estimate_parameters_ml(runtime, work.payload))
         success = bool(result.get("success"))
         message = result.get("message")
         if not success:
@@ -412,7 +417,7 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
 
     thread = threading.Thread(
         target=_run_pe_worker,
-        args=(runtime, payload, started_at, lock),
+        args=(_PeJobWork(runtime, payload, started_at, lock),),
         name="heatingassistant-pe",
         daemon=True,
     )
