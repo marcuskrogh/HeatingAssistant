@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-459 | Task | [Bug] PE historical heater power uses heating capacity for cooling | In Review | — | docs/agents/PLAN-pe-asymmetric-cooling.md | shipping closeout — PR #649 |
+| SWD-459 | Task | [Bug] PE historical heater power uses heating capacity for cooling | Done | — | docs/agents/PLAN-pe-asymmetric-cooling.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/649 (`3a30be0`) |
 | SWD-460 | Sub-task | Map PE heater power through asymmetric heating/cooling | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
 | SWD-461 | Sub-task | Tests, CalVer, changelog, App sync for PE cooling power | Done | SWD-459 | docs/agents/PLAN-pe-asymmetric-cooling.md | — |
 | SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648 (`87be700`) |
@@ -184,6 +184,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/ship` SWD-459 via PR #649 (`3a30be0`): PE Heating Input uses cooling capacity for `u < 0`; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.38`. Next Done.
 - 2026-08-30 — `/ship` SWD-459 closeout: merged `origin/main`; CalVer 2026.08.38 (main shipped 37). Changelog `heating_assistant/CHANGELOG.md` `# 2026.08.38`. Next merge PR #649.
 - 2026-08-30 — `/review-fix` SWD-459 CLEAN (focused sequential): 0 blockers / 1 should-fix (cooling fallback to heating gain) fixed forward. COMMENT on PR #649. Next `/ship SWD-459`.
 - 2026-08-30 — `/harden` SWD-459: heat-only `can_cool` guard; drop stray GSHP pellet comment. Next `/review-fix SWD-459`.
