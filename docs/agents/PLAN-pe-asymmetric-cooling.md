@@ -94,4 +94,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review-fix SWD-459` — Laser reviews then code review
+`/ship SWD-459` — review-fix CLEAN; merge remaining on PR #649
