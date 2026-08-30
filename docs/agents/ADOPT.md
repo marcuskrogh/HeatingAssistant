@@ -58,7 +58,7 @@ Meet the structure catalog across the existing tree; executable behaviour unchan
 - Story: SWD-440
 - Task: SWD-446
 - Branch: `cursor/swd-446-adopt-leftover-1253`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/643
 
 ## Next
-`/implement SWD-446` — split heat-source types and extract `_BridgeManager` on the SWD-446 delivery head
+`/test SWD-446` — dedicated lock-suite pass on PR #643; then harden / review-fix / ship

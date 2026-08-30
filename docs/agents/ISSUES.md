@@ -13,7 +13,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-443 | Task | [Adopt] Split ControlEngine build, live loop, and tuning preview | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/640 (`1421b56`) |
 | SWD-444 | Task | [Adopt] Split estimation, diagnostics, and PE HTTP god modules | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/641 (`9d736b6`) |
 | SWD-445 | Task | [Adopt] Split remaining Ingress panel god modules | Done | SWD-440 | docs/agents/ADOPT.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/642 (`01652bf`) |
-| SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | In Progress | SWD-440 | docs/agents/ADOPT.md | `/implement SWD-446` — leftover heat-source package + `_BridgeManager` |
+| SWD-446 | Task | [Adopt] Remaining engine, MQTT, and thin-bridge catalog rows | In Progress | SWD-440 | docs/agents/ADOPT.md | `/test SWD-446` — https://github.com/marcuskrogh/HeatingAssistant/pull/643 |
 | SWD-434 | Task | [Iterate] Room DISTURBANCES outdoor/solar history as solid lines | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/636 (`161ad7f`) |
 | SWD-435 | Sub-task | Restore DISTURBANCES outdoor/solar history to solid lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
 | SWD-436 | Sub-task | Tests, CalVer, changelog, App sync for DISTURBANCES lines | Done | SWD-434 | docs/agents/ITERATE.md | — |
