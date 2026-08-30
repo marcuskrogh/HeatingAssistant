@@ -34,6 +34,7 @@
 - Sub-tasks: [SWD-457](https://marcusknielsen.atlassian.net/browse/SWD-457),
   [SWD-458](https://marcusknielsen.atlassian.net/browse/SWD-458)
 - Branch: `cursor/swd-456-nmpc-slow-slot-import-6bcb`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/648
 
 ## Next
 `/test SWD-456` — Dedicated testing phase, then harden and code review
