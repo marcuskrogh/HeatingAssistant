@@ -175,14 +175,15 @@ class HeatPump(HeatSource):
         """
         Model thermal power [W] including the identified ``power_scale``.
 
+        Heating (``u ≥ 0``) is COP-limited heating capacity times the
+        fraction. Cooling (``u < 0``) is rated cooling capacity times the
+        fraction — not heating capacity with a negative sign, which would
+        overstate heat removal by about ``cop_rated / cooling_cop``.
+
         Used by the MPC/EKF plant model only.  For sensors and plots use
         :meth:`display_thermal_power` instead.
         """
-        if outdoor_temp < self.min_outdoor_temp:
-            return 0.0
-        cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        power = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
-        return power
+        return self.smooth_thermal_power(float(setpoint_fraction), outdoor_temp)
 
     def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
         """COP-limited rated heating capacity at ``u = 1`` without ``power_scale``."""

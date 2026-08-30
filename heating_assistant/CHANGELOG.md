@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.37
+
+- Parameter Estimation Heating Input now plots cooling at the configured
+  cooling capacity. Full cool no longer shows as minus the heating max
+  (for example −7000 W when cooling is about −3500 W).
+
 # 2026.08.36
 
 - Running recommended parameter estimation on a week of stored data no

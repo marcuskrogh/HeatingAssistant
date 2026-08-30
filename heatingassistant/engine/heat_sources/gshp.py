@@ -105,15 +105,54 @@ class GroundSourceHeatPump(HeatSource):
         """Rated heating capacity [W] — flat, no outdoor-temp correction."""
         return self.max_power * self.heating_efficiency
 
+    @property
+    def rated_cooling_power(self) -> float:
+        """Rated cooling capacity [W], without ``power_scale``."""
+        if not self.can_cool or self.cop_rated <= 0:
+            return 0.0
+        return self._electric_max * self.cooling_cop * self.cooling_efficiency
+
+    def smooth_thermal_power(
+        self, u: float, outdoor_temp: float = 0.0, k_base: float = 5.0,
+    ) -> float:
+        """Piecewise-linear model power [W]: +Q_heat·u or −Q_cool·|u|."""
+        q_heat = self.max_power * self.heating_efficiency * self._power_scale
+        q_cool = self._q_cool_const
+        if q_heat <= 0.0 or q_cool <= 0.0:
+            raw = q_heat * max(0.0, u)
+            return _soft_ceiling(raw, self._q_heat_max) if raw > 0.0 else raw
+        if u >= 0.0:
+            return _soft_ceiling(q_heat * u, self._q_heat_max)
+        return q_cool * u
+
+    def display_smooth_thermal_power(
+        self, u: float, outdoor_temp: float = 0.0, k_base: float = 5.0,
+    ) -> float:
+        """Configured thermal output [W] at *u* (ignores ``power_scale``)."""
+        q_heat = self.rated_heating_capacity(outdoor_temp)
+        q_cool = self.rated_cooling_power
+        if q_heat <= 0.0 or q_cool <= 0.0:
+            return q_heat * max(0.0, u)
+        return q_heat * u if u >= 0.0 else q_cool * u
+
+    def display_thermal_power(
+        self, setpoint_fraction: float, outdoor_temp: float = 0.0,
+    ) -> float:
+        if self.can_cool:
+            return self.display_smooth_thermal_power(
+                float(setpoint_fraction), outdoor_temp,
+            )
+        return super().display_thermal_power(setpoint_fraction, outdoor_temp)
+
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
         Thermal power [W].  Linear in setpoint_fraction; no outdoor-temp COP
         correction (ground temperature is stable year-round).
 
-        A soft ceiling is applied to prevent numerical overshoot in the solver.
+        Heating uses the rated heating capacity (soft-ceilinged). Cooling
+        uses electrical input × cooling COP, not ``−max_power``.
         """
-        raw = self.max_power * self.heating_efficiency * self._power_scale * setpoint_fraction
-        return _soft_ceiling(raw, self._q_heat_max)
+        return self.smooth_thermal_power(float(setpoint_fraction), outdoor_temp)
 
     def cooling_power(self, outdoor_temp: float = 0.0) -> float:
         """Cooling (heat-removal) power [W] — negative value."""
