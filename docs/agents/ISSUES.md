@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | In Progress | — | docs/agents/ITERATE.md | `/test SWD-456` |
+| SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | In Progress | SWD-456 | docs/agents/ITERATE.md | — |
+| SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | In Progress | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | Done | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 (`5d4f748`) |
 | SWD-454 | Sub-task | Background PE job so Ingress does not drop the request | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
 | SWD-455 | Sub-task | Tests, CalVer, changelog, App sync for PE job | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
@@ -178,6 +181,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/iterate` SWD-456 from SWD-450: room view still idle U=0 / free-response because `runtime_ticker.py` never imported `slow_slot_start_s`; Relates SWD-450; Sub-tasks SWD-457–458. Next `/test SWD-456`.
 - 2026-08-30 — `/ship` SWD-453 via PR #647 (`5d4f748`): background PE job so Ingress does not drop week-length fits; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.36`. Next Done.
 - 2026-08-30 — `/review-fix` SWD-453 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #647. Next `/ship SWD-453`.
 - 2026-08-30 — `/harden` SWD-453: clump PE worker args into `_PeJobWork`; snapshot copy extracted. Next `/review-fix SWD-453`.
