@@ -31,6 +31,8 @@
 - Relates: [SWD-445](https://marcusknielsen.atlassian.net/browse/SWD-445)
 - Sub-tasks: [SWD-448](https://marcusknielsen.atlassian.net/browse/SWD-448),
   [SWD-449](https://marcusknielsen.atlassian.net/browse/SWD-449)
+- Branch: `cursor/swd-447-extend-dataset-import-9922`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/645
 
 ## Next
 `/test SWD-447` — Dedicated testing phase on the new delivery PR
