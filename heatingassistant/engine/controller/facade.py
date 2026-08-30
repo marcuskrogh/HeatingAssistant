@@ -1279,10 +1279,6 @@ class HeatingMPCController:
         """
         if now is None:
             now = datetime.now(tz=timezone.utc)
-        if solar_gains is None:
-            solar_gains = self._current_solar(
-                now, cloud_cover=cloud_cover_now, ghi=ghi_now
-            )
 
         N = self._horizon
         p = np.array([], dtype=float)  # no estimated parameters
@@ -1299,6 +1295,11 @@ class HeatingMPCController:
             ghi_forecast=ghi_forecast,
             ghi_now=ghi_now,
         )
+        if solar_gains is None:
+            # Same k=0 cloud/GHI path as the plotted history/NOW sample.
+            solar_gains = dict(solar_seq[0])
+        else:
+            solar_seq[0] = dict(solar_gains)
 
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
@@ -1549,7 +1550,10 @@ class HeatingMPCController:
         Returns N+1 entries where solar_seq[k] = solar gains computed with
         sun position at now + k * dt, for k = 0, ..., N.
 
-        * k = 0 uses current measured GHI/cloud (ghi_now, cloud_cover_now).
+        * k = 0 uses current measured GHI when present, and current cloud
+          cover.  When ``cloud_cover_now`` is missing, k = 0 still takes the
+          first cloud-forecast step so history/NOW is not an unattenuated
+          clear-sky spike beside a cloudy horizon.
         * k >= 1 uses ghi_forecast[k-1] / cloud_forecast[k-1], which are
           interpolated at now + k*dt, matching the sun position time.
         * k = N is one step beyond the OCP horizon for visualisation.
@@ -1566,6 +1570,8 @@ class HeatingMPCController:
             if k == 0:
                 g = ghi_now
                 cc = cloud_cover_now
+                if cc is None:
+                    cc = select_cloud_for_step(cloud_forecast, 0)
             else:
                 g = select_ghi_for_step(ghi_forecast, k - 1)
                 cc = select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)

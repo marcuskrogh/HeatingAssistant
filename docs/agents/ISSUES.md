@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-462 | Task | [Bug] Solar gain history is unattenuated clear-sky on cloudy days | In Progress | — | docs/agents/PLAN-solar-gain-cloud-cover.md | `/implement SWD-462` |
+| SWD-463 | Sub-task | Cloud-cover now + k=0 attenuation; no stray GHI | In Progress | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
+| SWD-464 | Sub-task | Tests, CalVer, changelog, App sync for solar cloud cover | In Progress | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
 | SWD-456 | Task | [Iterate] Room view still shows idle U=0 / free-response instead of the NMPC plan | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648 (`87be700`) |
 | SWD-457 | Sub-task | Import slow_slot_start_s so NMPC apply can install the plan | Done | SWD-456 | docs/agents/ITERATE.md | — |
 | SWD-458 | Sub-task | Tests, CalVer, changelog, App sync for NMPC plan plot | Done | SWD-456 | docs/agents/ITERATE.md | — |
@@ -181,6 +184,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/define` SWD-462: PLAN `docs/agents/PLAN-solar-gain-cloud-cover.md` (bug / fix-fast). Historical solar k=0 must use cloud cover; Sub-tasks SWD-463–464. Next `/implement SWD-462`.
 - 2026-08-30 — `/ship` SWD-456 via PR #648 (`87be700`): restore NMPC plan on plots and heater command; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.37`. Next Done.
 - 2026-08-30 — `/review-fix` SWD-456 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #648. Next `/ship SWD-456`.
 - 2026-08-30 — `/harden` SWD-456: import sits with the other `nmpc_timing` helpers on `TickerMixin`; `_slow_slot_start` still one branch. No extract. Next `/review-fix SWD-456`.

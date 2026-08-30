@@ -31,6 +31,7 @@ from heatingassistant.app import core_restart
 from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine, reject_negative_p_gating_knobs
+from heatingassistant.engine.weather import attach_condition_from_reason
 from heatingassistant.engine import const
 from heatingassistant.engine.datasets import DatasetStore
 from heatingassistant.engine.electricity_price import (
@@ -635,10 +636,18 @@ class HeatingRuntime(
             self.tag_attributes.pop(tag, None)
         elif payload.attributes is not None:
             # Explicit empty dict clears prior forecast attrs (SWD-278).
-            self.tag_attributes[tag] = dict(payload.attributes)
+            attrs = dict(payload.attributes)
+            attach_condition_from_reason(attrs, payload.reason)
+            self.tag_attributes[tag] = attrs
         else:
             # GOOD scalar-only update: drop stale day-ahead / weather attrs.
+            # Keep a weather condition copied from MQTT reason so solar does
+            # not revert to unattenuated clear-sky when forecast JSON failed.
             self.tag_attributes.pop(tag, None)
+            cond_attrs: dict[str, Any] = {}
+            attach_condition_from_reason(cond_attrs, payload.reason)
+            if cond_attrs:
+                self.tag_attributes[tag] = cond_attrs
         self._recompute_room_temperatures()
         self._record_history_samples()
         # Plot writers also feed ID history (SWD-318); interval gate dedupes
@@ -1233,9 +1242,16 @@ class HeatingRuntime(
         price_tag = self.options.get("price_tag") or "energy_price"
         if not isinstance(price_tag, str) or not price_tag:
             price_tag = "energy_price"
-        solar_tag = self.options.get("solar_radiation_tag") or "solar_radiation"
-        if not isinstance(solar_tag, str) or not solar_tag:
-            solar_tag = "solar_radiation"
+        solar_tag = self.options.get("solar_radiation_tag")
+        solar_value = None
+        solar_attrs = None
+        if isinstance(solar_tag, str) and solar_tag.strip():
+            # Only a configured irradiance entity may drive GHI. A leftover
+            # ``solar_radiation`` tag (SWD-271 cleared the Environment field)
+            # must not zero or spike the cloud-scaled model.
+            if self.tag_statuses.get(solar_tag) != "BAD":
+                solar_value = self._coerce_number(self.tag_values.get(solar_tag))
+                solar_attrs = self.tag_attributes.get(solar_tag)
         net = float(
             self.options.get(const.CONF_PRICE_NET_TARIFF, const.DEFAULT_PRICE_NET_TARIFF) or 0.0
         )
@@ -1250,8 +1266,8 @@ class HeatingRuntime(
             weather_attrs=self.tag_attributes.get(weather_tag),
             price_value=self._coerce_number(self.tag_values.get(price_tag)),
             price_attrs=self.tag_attributes.get(price_tag),
-            solar_value=self._coerce_number(self.tag_values.get(solar_tag)),
-            solar_attrs=self.tag_attributes.get(solar_tag),
+            solar_value=solar_value,
+            solar_attrs=solar_attrs,
             horizon=use_horizon,
             dt_s=use_dt,
             price_adder=net + surcharge,

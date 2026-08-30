@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _LOGGER = logging.getLogger(__name__)
@@ -102,11 +103,49 @@ def coerce_cloud_cover_percent(value: Any) -> Optional[float]:
     return max(0.0, min(1.0, f / 100.0))
 
 
+def resolve_cloud_cover_now(
+    attrs: Mapping[str, Any] | None,
+    *,
+    condition: str | None = None,
+) -> Optional[float]:
+    """Current cloud-cover fraction from weather attributes / condition.
+
+    Prefers numeric ``cloud_coverage`` (percent). Falls back to the HA
+    condition string (``condition`` kwarg, then ``attrs['condition']`` /
+    ``attrs['state']``) via :data:`CONDITION_CLOUD_COVER`. Returns ``None``
+    when neither signal is present — the solar model must not treat that as
+    clear sky if a forecast series still has cloud cover.
+    """
+    attrs = dict(attrs or {})
+    frac = coerce_cloud_cover_percent(attrs.get("cloud_coverage"))
+    if frac is not None:
+        return frac
+    for raw in (condition, attrs.get("condition"), attrs.get("state")):
+        mapped = _coerce_condition(raw)
+        if mapped is not None:
+            return mapped
+    return None
+
+
 def _coerce_condition(value: Any) -> Optional[float]:
     """Map a weather condition string to its representative cloud fraction."""
     if isinstance(value, str):
         return CONDITION_CLOUD_COVER.get(value)
     return None
+
+
+def attach_condition_from_reason(
+    attrs: dict[str, Any], reason: str | None
+) -> dict[str, Any]:
+    """Copy a weather-condition MQTT ``reason`` into ``attrs['condition']``.
+
+    The thin bridge stores HA weather ``state`` (e.g. ``cloudy``) on the tag
+    payload reason because the numeric value is outdoor °C.  The App solar
+    path reads attributes only, so the condition must land there.
+    """
+    if reason in CONDITION_CLOUD_COVER:
+        attrs.setdefault("condition", reason)
+    return attrs
 
 
 # ---------------------------------------------------------------------------
@@ -439,12 +478,9 @@ def read_cloud_cover_now(hass: Any, weather_entity: Optional[str]) -> Optional[f
     if state is None or state.state in _UNAVAILABLE_STATES:
         return None
 
-    frac = coerce_cloud_cover_percent(state.attributes.get("cloud_coverage"))
-    if frac is not None:
-        return frac
-
-    # Weather entities expose the condition as the entity state.
-    return CONDITION_CLOUD_COVER.get(state.state)
+    return resolve_cloud_cover_now(
+        state.attributes, condition=str(state.state)
+    )
 
 
 async def fetch_forecast_entries(

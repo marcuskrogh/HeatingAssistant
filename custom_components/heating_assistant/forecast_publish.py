@@ -13,6 +13,7 @@ FORECAST_ATTR_KEYS = (
     "forecast",
     "temperature",
     "cloud_coverage",
+    "condition",
     "wind_speed",
     "wind_speed_unit",
     "raw_today",
@@ -53,6 +54,12 @@ async def forecast_attributes_for_publish(
 
     domain = getattr(state, "domain", None)
     entity_id = getattr(state, "entity_id", None)
+    # Weather entities report the sky condition as ``state`` (e.g. cloudy).
+    # The App maps that to cloud cover when ``cloud_coverage`` is missing.
+    if domain == "weather" and "condition" not in selected:
+        cond = getattr(state, "state", None)
+        if cond not in (None, "", "unknown", "unavailable"):
+            selected["condition"] = str(cond)
     # Modern HA weather entities no longer expose ``forecast`` on state attrs;
     # call weather.get_forecasts so outdoor/cloud series reach the App (SWD-279).
     if domain == "weather" and entity_id and not selected.get("forecast"):

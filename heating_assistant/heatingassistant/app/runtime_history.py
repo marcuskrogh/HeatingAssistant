@@ -176,7 +176,7 @@ class HistoryMixin:
         if outdoor is None:
             outdoor = 0.0
 
-        solar = self.control_engine.applied_solar_gains()
+        solar = self._applied_solar_gains()
         for name in room_names:
             if name not in solar:
                 solar[name] = 0.0
