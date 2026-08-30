@@ -22,7 +22,7 @@ def test_live_version_is_calver_2026_08_10() -> None:
         (ROOT / "heating_assistant" / "config.yaml").read_text(encoding="utf-8")
     )
     version = str(config["version"])
-    assert version == "2026.08.35"
+    assert version == "2026.08.36"
     match = CALVER_RE.fullmatch(version)
     assert match is not None
     assert 1 <= int(match.group(2)) <= 12

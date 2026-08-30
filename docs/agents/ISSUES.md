@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-453 | Task | [Bug] Parameter estimation Load failed on one-week dataset | In Review | — | docs/agents/PLAN-pe-week-load-failed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/647 |
+| SWD-454 | Sub-task | Background PE job so Ingress does not drop the request | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
+| SWD-455 | Sub-task | Tests, CalVer, changelog, App sync for PE job | Done | SWD-453 | docs/agents/PLAN-pe-week-load-failed.md | — |
 | SWD-450 | Task | [Bug] Room plots missing optimal trajectories, price forecast, and outdoor temperature | Done | — | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/646 (`e9af33c`) |
 | SWD-451 | Sub-task | Preserve forecast attrs on catalog overlay + outdoor fallback | Done | SWD-450 | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | — |
 | SWD-452 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-450 | docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md | — |
@@ -175,6 +178,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-30 — `/ship` SWD-453 closeout: changelog `heating_assistant/CHANGELOG.md` `# 2026.08.36`; merging PR #647.
+- 2026-08-30 — `/review-fix` SWD-453 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #647. Next `/ship SWD-453`.
+- 2026-08-30 — `/harden` SWD-453: clump PE worker args into `_PeJobWork`; snapshot copy extracted. Next `/review-fix SWD-453`.
+- 2026-08-30 — `/test` SWD-453: 1080 passed / 88 skipped / 18 deselected (fast). Extra HTTP double-start while running. No extra product behaviour. Next `/harden SWD-453`.
+- 2026-08-30 — `/implement` SWD-453 In Progress: background PE job + Ingress poll; CalVer 2026.08.36; PR https://github.com/marcuskrogh/HeatingAssistant/pull/647. Next `/test SWD-453`.
+- 2026-08-30 — `/define` SWD-453: PLAN `docs/agents/PLAN-pe-week-load-failed.md` (bug / fix-fast). Background PE job so Ingress does not drop one-week fits; Sub-tasks SWD-454–455. Next `/implement SWD-453`.
 - 2026-08-30 — `/ship` SWD-450 via PR #646 (`e9af33c`): catalog overlay keeps weather/price forecast attrs; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.35`. Next Done.
 - 2026-08-30 — `/review-fix` SWD-450 CLEAN (focused sequential): 0 blockers / 0 should-fix. COMMENT on PR #646. Next `/ship SWD-450`.
 - 2026-08-30 — `/harden` SWD-450: outdoor °C extracted to `_temperature_from_tag`; overlay comment explains attr re-attach vs MQTT scalar-only. Next `/review-fix SWD-450`.

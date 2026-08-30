@@ -71,6 +71,21 @@ export class HaConnection {
     }
   }
 
+  async getPeJob() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_pe_job',
+      });
+      if (result && result.job && typeof result.job === 'object') {
+        return result.job;
+      }
+      return (result && typeof result === 'object') ? result : null;
+    } catch (e) {
+      console.warn('Failed to fetch PE job status:', e);
+      return null;
+    }
+  }
+
   async getPeCoverage(opts = {}) {
     try {
       const msg = { type: 'heating_assistant/get_pe_coverage' };

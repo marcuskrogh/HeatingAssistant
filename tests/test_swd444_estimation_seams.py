@@ -29,6 +29,8 @@ def test_kalman_ml_estimator_reexported_from_compat_module() -> None:
 def test_sysid_services_public_handlers_exist() -> None:
     for name in (
         "handle_estimate_parameters_ml",
+        "start_estimate_parameters_ml",
+        "pe_job_snapshot",
         "handle_get_pe_coverage",
         "handle_get_pe_inputs",
         "handle_run_sysid_simulation",
@@ -55,7 +57,7 @@ def test_runtime_maps_pe_services_to_sysid_handlers() -> None:
 
     source = HeatingRuntime.apply_service.__code__.co_names
     for handler in (
-        "handle_estimate_parameters_ml",
+        "start_estimate_parameters_ml",
         "handle_create_dataset",
         "handle_store_identified_parameters",
         "handle_run_open_loop_simulation",

@@ -14,7 +14,7 @@ import {
   updateEstimationParams,
 } from '../ha-services.js?v=124';
 import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=132';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=145';
 import {
   actionsCardHtml,
   paramsCardHtml,
@@ -1066,24 +1066,49 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // Button interactions
   // -----------------------------------------------------------------------
 
-  // Shared parameter estimation routine: runs a dry-run ML estimation over the
+  // Shared parameter estimation routine: starts a background ML fit over the
   // data described by ``idData`` (a window, horizon, single dataset_id or a
-  // list of dataset_ids), then populates the parameter fields from the result
-  // for review. Used by the datasets section's "Run on Selected" button.
-  // Returns true on success.
+  // list of dataset_ids), waits for the job, then populates the parameter
+  // fields from the result for review. Used by Stored Datasets "Run
+  // recommended estimation". Returns true on success.
+  async function waitForPeJob() {
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+      if (!connection || typeof connection.getPeJob !== 'function') {
+        throw new Error('Parameter estimation status is unavailable.');
+      }
+      const job = await connection.getPeJob();
+      if (job != null) {
+        const status = job.status || 'idle';
+        if (status === 'success') return job;
+        if (status === 'error') {
+          throw new Error(job.message || 'Estimation failed');
+        }
+      }
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+    throw new Error('Parameter estimation timed out');
+  }
+
   async function runAutoIdentification(idData, statusEl) {
     setStatus(statusEl, 'Running parameter estimation…', 'running');
     try {
       const lp = buildLockedParams();
-      await estimateParametersMl(hass, {
+      const started = await estimateParametersMl(hass, {
         apply_parameters: false,
         ...idData,
         ...(lp ? { locked_params: lp } : {}),
       });
-      // The coordinator updates sysid_results and fires async_update_listeners()
-      // before the service call resolves.  Allow ~800 ms for the HA websocket
-      // state event to arrive and update latestState via the update() callback.
-      await new Promise((res) => setTimeout(res, 800));
+      const payload = started?.response ?? started;
+      if (payload && payload.status === 'running') {
+        await waitForPeJob();
+      } else if (payload && payload.success === false) {
+        throw new Error(payload.message || 'Estimation failed');
+      }
+      if (typeof hass.refresh === 'function') {
+        await hass.refresh();
+      }
+      await new Promise((res) => setTimeout(res, 200));
       populateModelFromSysid(roomSlug, latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
