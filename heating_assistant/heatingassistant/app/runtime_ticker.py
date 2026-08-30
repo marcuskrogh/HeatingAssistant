@@ -8,7 +8,11 @@ import time
 
 from heatingassistant.app.runtime_const import _HISTORY_MIN_INTERVAL_S, _logger
 from heatingassistant.engine import const
-from heatingassistant.engine.nmpc_timing import grid_slot_index, next_grid_ts
+from heatingassistant.engine.nmpc_timing import (
+    grid_slot_index,
+    next_grid_ts,
+    slow_slot_start_s,
+)
 
 
 class TickerMixin:

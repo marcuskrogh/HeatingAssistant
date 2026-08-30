@@ -1,38 +1,39 @@
-# Iterate: Ingress LOAD ERROR — extendDatasetToNow not found
+# Iterate: Room view still shows idle U=0 / free-response instead of the NMPC plan
 
 ## Prior work
-- Task: [SWD-445](https://marcusknielsen.atlassian.net/browse/SWD-445)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/642
-- Spec context: `docs/agents/ADOPT.md` (Ingress panel split)
+- Task: [SWD-450](https://marcusknielsen.atlassian.net/browse/SWD-450)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/646
+- Spec context: `docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md`
 
 ## Problem
-- After the SWD-445 page-detail split, the Heating Assistant app UI fails to
-  load with `LOAD ERROR — Importing binding name 'extendDatasetToNow' is not found.`
-- `room-detail-history.js` still named-imports `extendDatasetToNow` from
-  `time-series-chart.js`. That helper now lives on `charts/room-charts.js`.
+- After SWD-450, room-view Forecast still spikes like a heater-off free
+  response (~28 °C) and Planned Power stays at 0 kW for the whole window.
+- `TickerMixin._slow_slot_start` calls `slow_slot_start_s` but
+  `runtime_ticker.py` does not import it. The NMPC worker evaluates
+  `plan_epoch=self._slow_slot_start(stamp)` before `apply_nmpc_result`.
+- When `last_nmpc_ts` is set, that is a `NameError`. The worker except path
+  records a reject, so U*/T* never reach the forecast snapshot or the P command.
 
 ## Acceptance criteria
-- `room-detail-history.js` imports `extendDatasetToNow` from `room-charts.js`.
-- Named ESM imports under `heatingassistant/app/static/js` resolve to exports
-  on the target module.
-- Cache-bust token on the dashboard entry and the history module is 144.
-- Tests, CalVer 2026.08.34, changelog, App sync.
+- `HeatingRuntime._slow_slot_start` returns the slow-slot origin (no NameError).
+- An NMPC worker apply can pass `plan_epoch` into `apply_nmpc_result`.
+- Tests, CalVer 2026.08.37, changelog, App sync.
 
 ## Out of scope
-- Further panel splits.
-- Moving `extendDatasetToNow` back onto `time-series-chart.js`.
+- Catalog overlay (SWD-450).
+- NMPC cost weights.
+- Plot styling.
 
 ## Work packages
-1. Import `extendDatasetToNow` from room-charts (SWD-448)
-2. Tests, CalVer, changelog, App sync for panel import (SWD-449)
+1. Import `slow_slot_start_s` so NMPC apply can install the plan (SWD-457)
+2. Tests, CalVer, changelog, App sync for NMPC plan plot (SWD-458)
 
 ## Tracker
-- Task: [SWD-447](https://marcusknielsen.atlassian.net/browse/SWD-447)
-- Relates: [SWD-445](https://marcusknielsen.atlassian.net/browse/SWD-445)
-- Sub-tasks: [SWD-448](https://marcusknielsen.atlassian.net/browse/SWD-448),
-  [SWD-449](https://marcusknielsen.atlassian.net/browse/SWD-449)
-- Branch: `cursor/swd-447-extend-dataset-import-9922`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/645
+- Task: [SWD-456](https://marcusknielsen.atlassian.net/browse/SWD-456)
+- Relates: [SWD-450](https://marcusknielsen.atlassian.net/browse/SWD-450)
+- Sub-tasks: [SWD-457](https://marcusknielsen.atlassian.net/browse/SWD-457),
+  [SWD-458](https://marcusknielsen.atlassian.net/browse/SWD-458)
+- Branch: `cursor/swd-456-nmpc-slow-slot-import-6bcb`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/645 (`d82931e`)
+`/test SWD-456` — Dedicated testing phase, then harden and code review
