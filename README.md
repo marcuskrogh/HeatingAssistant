@@ -98,6 +98,9 @@ Give the controller one control cycle (default **15 minutes**) to plan and actua
 - Check window area and orientation (compass direction the window faces).
 - Site latitude/longitude default to `0.0` in the App until set in Configuration;
   set them when accurate solar modelling matters.
+- Confirm a **weather** entity is set under Environment so cloud cover can
+  scale the clear-sky model. Optional solar-irradiance sensors are not
+  required; they replace the cloud-scaled model only when configured.
 
 ## Contributing
 

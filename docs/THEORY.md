@@ -194,7 +194,7 @@ Inside the thermal model the (scaled) gain splits between the two room nodes: $(
 
 #### Cloud cover correction
 
-When a `weather_entity` is configured, cloud cover is extracted from the weather forecast (as an explicit field or mapped from the weather condition string, e.g. `sunny` → 0.0, `cloudy` → 0.85).  The clear-sky **GHI** is attenuated by the Kasten–Czeplak factor $1 - 0.75\,c^{3.4}$ and the attenuated GHI is re-decomposed through the Erbs correlation (Step 3) — so the *total* horizontal radiation follows the classic single-factor model exactly, while the beam/diffuse balance shifts toward diffuse as cloud builds.
+When a `weather_entity` is configured, cloud cover is extracted from the weather forecast (as an explicit field or mapped from the weather condition string, e.g. `sunny` → 0.0, `cloudy` → 0.85).  That fraction is applied at **every** horizon step, including the current (`k = 0`) sample that is recorded as historical Solar Gain — missing current percent must not leave NOW on an unattenuated clear-sky path while later steps use the forecast.  The clear-sky **GHI** is attenuated by the Kasten–Czeplak factor $1 - 0.75\,c^{3.4}$ and the attenuated GHI is re-decomposed through the Erbs correlation (Step 3) — so the *total* horizontal radiation follows the classic single-factor model exactly, while the beam/diffuse balance shifts toward diffuse as cloud builds.
 
 #### Step 9 — Optional: drive the intensity from a solar-radiation forecast
 

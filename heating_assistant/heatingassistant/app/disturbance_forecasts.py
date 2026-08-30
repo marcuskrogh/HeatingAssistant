@@ -13,9 +13,9 @@ from heatingassistant.engine.solar_forecast import (
     parse_irradiance_forecast,
 )
 from heatingassistant.engine.weather import (
-    coerce_cloud_cover_percent,
     parse_cloud_forecast,
     parse_temperature_forecast,
+    resolve_cloud_cover_now,
 )
 
 
@@ -46,6 +46,9 @@ def build_mpc_disturbance_inputs(
     weather_attrs = dict(weather_attrs or {})
     price_attrs = dict(price_attrs or {})
     solar_attrs = dict(solar_attrs or {})
+    horizon_n = max(1, int(horizon))
+
+    cloud_now = resolve_cloud_cover_now(weather_attrs)
 
     forecast_data = weather_attrs.get("forecast")
     if isinstance(forecast_data, list) and forecast_data:
@@ -54,7 +57,6 @@ def build_mpc_disturbance_inputs(
         )
         if outdoor_seq:
             result["outdoor_forecast"] = outdoor_seq
-        cloud_now = coerce_cloud_cover_percent(weather_attrs.get("cloud_coverage"))
         cloud_seq = parse_cloud_forecast(
             forecast_data,
             horizon=horizon,
@@ -64,12 +66,17 @@ def build_mpc_disturbance_inputs(
         )
         if cloud_seq:
             result["cloud_forecast"] = cloud_seq
-            if cloud_now is not None:
-                result["cloud_cover_now"] = cloud_now
+            if cloud_now is None:
+                cloud_now = cloud_seq[0]
 
     if outdoor_temp is not None and "outdoor_forecast" not in result:
         # Persistence so Ingress always has an outdoor series for plots.
-        result["outdoor_forecast"] = [float(outdoor_temp)] * max(1, horizon)
+        result["outdoor_forecast"] = [float(outdoor_temp)] * horizon_n
+
+    if cloud_now is not None:
+        result["cloud_cover_now"] = cloud_now
+        if "cloud_forecast" not in result:
+            result["cloud_forecast"] = [cloud_now] * horizon_n
 
     ghi_now = None
     if solar_value is not None:

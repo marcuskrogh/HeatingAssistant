@@ -474,10 +474,9 @@ def cloud_attenuation_factor(cloud_cover: float) -> float:
 
         GHI_cloudy / GHI_clear = 1 − 0.75 · c^3.4
 
-    where ``c ∈ [0, 1]`` is the cloud-cover fraction.  Returns ~1.0 for
-    clear sky, ~0.75 at 50 % cover, and ~0.25 fully overcast — a reasonable
-    match to measured GHI on overcast days, and the simplest single-factor
-    correction that captures the dominant effect.
+    where ``c ∈ [0, 1]`` is the cloud-cover fraction.  Returns 1.0 for
+    clear sky, ≈0.93 at 50 % cover (the cubic power barely bites until
+    skies are nearly overcast), and 0.25 fully overcast.
 
     Note: strictly, beam (DNI) and diffuse (DHI) attenuate at very different
     rates under cloud — DNI collapses much faster than DHI.  We apply the
