@@ -24,4 +24,4 @@
 - Branch: `cursor/swd-465-p-frozen-tref-105a`
 
 ## Next
-`/implement SWD-465` — Build to this shape
+`/review SWD-465` — Lasers then fix then code review
