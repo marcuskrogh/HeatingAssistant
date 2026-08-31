@@ -1,4 +1,4 @@
-"""Room-view Forecast resims the remaining NMPC U*, not an unshifted replay."""
+"""Room-view Forecast plots remaining accept-time T_ref, not U* resim."""
 
 from __future__ import annotations
 
@@ -93,7 +93,13 @@ def _plotted(ctrl: HeatingMPCController) -> np.ndarray:
     )
 
 
-def test_apply_resim_uses_ocp_step_not_dummy_t_ref():
+def _remaining_t_ref(ctrl: HeatingMPCController) -> np.ndarray:
+    air = ctrl._forecast_T(ctrl.horizon)
+    assert air is not None
+    return np.asarray(air, dtype=float)[:, 0]
+
+
+def test_forecast_uses_accept_time_t_ref_not_ocp_resim():
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
     temps = _install_plan(ctrl, U)
@@ -101,14 +107,14 @@ def test_apply_resim_uses_ocp_step_not_dummy_t_ref():
     U_rem = ctrl._forecast_U(n_fast)
     U_fast = np.repeat(U, ctrl.timing.m, axis=0)
     assert np.allclose(U_rem, U_fast[:n_fast])
-    expected = _roll_air(
+    resim = _roll_air(
         ctrl,
         U_rem,
         [5.0] * n_fast,
         [{"living_room": 0.0} for _ in range(n_fast)],
     )[:, 0]
-    assert temps == pytest.approx(expected, abs=1e-12)
-    assert float(np.max(np.abs(temps - 22.0))) > 0.05
+    assert temps == pytest.approx(np.full(n_fast, 22.0), abs=1e-12)
+    assert float(np.max(np.abs(resim - 22.0))) > 0.05
 
 
 def test_resim_matches_mean_ocp_when_u_x0_d_match() -> None:
@@ -137,10 +143,10 @@ def test_resim_matches_mean_ocp_when_u_x0_d_match() -> None:
     ctrl._outdoor_forecast = list(outdoor)
     ctrl._solar_forecast = [dict(step) for step in solar_seq[:n_fast]]
     assert ctrl.apply_nmpc_result(plan, now=_NOW.timestamp()) is True
-    assert _plotted(ctrl) == pytest.approx(air[:, 0], abs=1e-12)
+    assert _plotted(ctrl) == pytest.approx(t_ocp[:, 0], abs=1e-12)
 
 
-def test_remaining_resim_matches_t_ref_tail_when_state_followed_the_plan() -> None:
+def test_remaining_forecast_matches_t_ref_tail() -> None:
     ctrl = _ctrl()
     n_fast = ctrl.horizon
     outdoor = [5.0] * n_fast
@@ -173,14 +179,13 @@ def test_remaining_resim_matches_t_ref_tail_when_state_followed_the_plan() -> No
     ctrl._solar_forecast = [dict(s) for s in solar]
     ctrl._nmpc_k = start
     assert ctrl.rebuild_forecast_from_plan() is True
-    remaining = ctrl._forecast_U(n_fast)
-    expected = _roll_air(ctrl, remaining, outdoor, solar, x0=x)[:, 0]
-    assert _plotted(ctrl) == pytest.approx(expected, abs=1e-12)
+    plotted = _plotted(ctrl)
+    assert plotted == pytest.approx(_remaining_t_ref(ctrl), abs=1e-12)
     n_overlap = n_fast - start
-    assert expected[:n_overlap] == pytest.approx(t_ocp[start:, 0], abs=1e-9)
+    assert plotted[:n_overlap] == pytest.approx(t_ocp[start:, 0], abs=1e-12)
 
 
-def test_changed_outdoor_moves_forecast_off_frozen_t_ref() -> None:
+def test_changed_outdoor_does_not_move_forecast_off_t_ref() -> None:
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
     n_fast = ctrl.horizon
@@ -193,8 +198,8 @@ def test_changed_outdoor_moves_forecast_off_frozen_t_ref() -> None:
     ctrl._outdoor_forecast = [25.0] * n_fast
     assert ctrl.rebuild_forecast_from_plan() is True
     t_hot = _plotted(ctrl)
-    assert float(np.max(np.abs(t_hot - t_cold))) > 0.05
-    assert t_hot != pytest.approx(t_ref.ravel().tolist(), abs=1e-3)
+    assert t_hot == pytest.approx(t_cold, abs=1e-12)
+    assert t_hot == pytest.approx(t_ref.ravel(), abs=1e-12)
 
 
 def test_remaining_u_is_two_hour_zoh_shifted_by_plan_index():
@@ -238,10 +243,10 @@ def test_compute_publishes_remaining_u_then_advances_plan_index():
     assert np.allclose(remaining[0], U_fast[1])
     published_t = _plotted(ctrl)
     assert len(published_t) == n_fast
-    assert published_t != pytest.approx(np.full(n_fast, 22.0))
+    assert published_t == pytest.approx(np.full(n_fast, 22.0), abs=1e-12)
 
 
-def test_rebuild_without_solar_still_resims():
+def test_rebuild_without_solar_still_plots_remaining_t_ref():
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
     n_fast = ctrl.horizon
@@ -253,14 +258,16 @@ def test_rebuild_without_solar_still_resims():
     ctrl._nmpc_k = start
     assert ctrl.rebuild_forecast_from_plan() is True
     published = _plotted(ctrl)
-    remaining = ctrl._forecast_U(n_fast)
-    expected = _roll_air(ctrl, remaining, [5.0] * n_fast, [])[:, 0]
-    assert published == pytest.approx(expected, abs=1e-12)
-    assert published != pytest.approx(
+    remaining_u = ctrl._forecast_U(n_fast)
+    remaining_t = _remaining_t_ref(ctrl)
+    resim = _roll_air(ctrl, remaining_u, [5.0] * n_fast, [])[:, 0]
+    assert published == pytest.approx(remaining_t, abs=1e-12)
+    assert published == pytest.approx(
         [float(t_ref[min(start + k, n_fast - 1), 0]) for k in range(n_fast)]
     )
+    assert published != pytest.approx(resim, abs=1e-3)
     watts = [float(step["living_room"]) for step in ctrl.heating_schedule]
-    first = ctrl._system.display_heating_powers(remaining[0], 5.0)["living_room"]
+    first = ctrl._system.display_heating_powers(remaining_u[0], 5.0)["living_room"]
     assert watts[0] == pytest.approx(first, abs=1.0)
 
 
@@ -291,6 +298,7 @@ def test_compute_keeps_new_plan_index_when_apply_lands_during_roll():
     assert ctrl._nmpc_k == 0
     remaining = ctrl._forecast_U(n_fast)
     assert np.allclose(remaining[0], np.repeat(new_U, m, axis=0)[0])
+    assert _plotted(ctrl) == pytest.approx(np.full(n_fast, 21.0), abs=1e-12)
 
 
 def test_rebuild_forecast_pads_short_outdoor_on_remaining_u():
@@ -305,9 +313,10 @@ def test_rebuild_forecast_pads_short_outdoor_on_remaining_u():
     watts = [float(step["living_room"]) for step in ctrl.heating_schedule]
     assert max(abs(w) for w in watts) > 1.0
     assert np.ptp(watts) < 1.0
+    assert _plotted(ctrl) == pytest.approx(np.full(n_fast, 21.0), abs=1e-12)
 
 
-def test_forecast_after_ticks_is_remaining_ocp_resim() -> None:
+def test_forecast_after_ticks_is_remaining_t_ref() -> None:
     ctrl = _ctrl()
     n_fast = ctrl.horizon
     outdoor = [5.0] * n_fast
@@ -335,18 +344,12 @@ def test_forecast_after_ticks_is_remaining_ocp_resim() -> None:
         )
     assert ctrl._nmpc_k == ticks
     assert ctrl.rebuild_forecast_from_plan() is True
-    remaining = ctrl._forecast_U(n_fast)
-    solar = [dict(s) for s in ctrl._solar_forecast][:n_fast] or [
-        {"living_room": 0.0} for _ in range(n_fast)
-    ]
-    outdoor_now = list(ctrl._outdoor_forecast)[:n_fast]
-    expected = _roll_air(ctrl, remaining, outdoor_now, solar)[:, 0]
-    assert _plotted(ctrl) == pytest.approx(expected, abs=1e-12)
+    remaining = _remaining_t_ref(ctrl)
+    assert _plotted(ctrl) == pytest.approx(remaining, abs=1e-12)
     frozen = np.array(
         [float(t_ocp[min(ticks + k, n_fast - 1), 0]) for k in range(n_fast)]
     )
-    # Live EKF + current d need not equal the solve-time T_ref tail.
-    assert frozen.shape == expected.shape
+    assert remaining == pytest.approx(frozen, abs=1e-12)
 
 
 def test_resim_holds_horizon_mean_wind_like_ocp() -> None:
@@ -396,7 +399,7 @@ def test_resim_holds_horizon_mean_wind_like_ocp() -> None:
     assert float(np.max(np.abs(np.array(per_step, dtype=float) - expected))) > 1e-6
 
 
-def test_changed_solar_moves_forecast() -> None:
+def test_changed_solar_does_not_move_forecast() -> None:
     ctrl = _ctrl()
     U = _distinct_U(ctrl)
     n_fast = ctrl.horizon
@@ -408,4 +411,23 @@ def test_changed_solar_moves_forecast() -> None:
     ctrl._solar_forecast = [{"living_room": 800.0} for _ in range(n_fast)]
     assert ctrl.rebuild_forecast_from_plan() is True
     t_sun = _plotted(ctrl)
-    assert float(np.max(np.abs(t_sun - t_dark))) > 0.05
+    assert t_sun == pytest.approx(t_dark, abs=1e-12)
+    assert t_sun == pytest.approx(np.full(n_fast, 22.0), abs=1e-12)
+
+
+def test_changed_wind_does_not_move_forecast() -> None:
+    ctrl = _ctrl()
+    U = _distinct_U(ctrl)
+    n_fast = ctrl.horizon
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(-1, 1)
+    ctrl.set_accepted_path(U, t_ref)
+    ctrl._outdoor_forecast = [5.0] * n_fast
+    ctrl._solar_forecast = [{"living_room": 0.0} for _ in range(n_fast)]
+    ctrl._wind_forecast = [1.0] * n_fast
+    assert ctrl.rebuild_forecast_from_plan() is True
+    t_calm = _plotted(ctrl)
+    ctrl._wind_forecast = [12.0] * n_fast
+    assert ctrl.rebuild_forecast_from_plan() is True
+    t_windy = _plotted(ctrl)
+    assert t_windy == pytest.approx(t_calm, abs=1e-12)
+    assert t_windy == pytest.approx(t_ref.ravel(), abs=1e-12)
