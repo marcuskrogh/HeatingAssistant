@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.40
+
+- Room Forecast stays on the two-hour planned temperature path when
+  outdoor or solar updates arrive. The chart no longer redraws a
+  free-response that looks like the house is leaving the comfort zone.
+  The fast feedback loop still tracks that plan. Planned Power stays
+  leftover planner power.
+
 # 2026.08.39
 
 - Solar gain on a cloudy day follows the weather cloud cover again, including
