@@ -6,38 +6,41 @@
   interval (default 2 h).
 - P is the regulator. New outdoor / solar / wind during the window must
   move the tracking error, not the reference.
-- Room-view Forecast may still resimulate leftover `U*` with current
-  disturbances. That series is display only. It must not become the P
-  reference.
+- Room-view Forecast is the leftover accept-time `T_ref` for that same
+  window. Do not resim leftover `U*` with updated disturbances on each
+  15-minute tick — that chart would show the house leaving the comfort
+  zone even though P keeps air on the plan. Planned Power stays leftover
+  `U*` with one outdoor sample per 2 h hold.
 
 ## Scope / Decisions / Constraints
 **In**
 - `_nmpc_T_ref` and `_nmpc_U` are installed only in `set_accepted_path`
   (accept) and cleared on watchdog reject. Store copies so later mutation
-  of the solver arrays cannot move the P reference.
+  of the solver arrays cannot move the P reference or Forecast.
 - `_p_command_vector` reads that frozen path at the wall-clock fast index.
-  It does not read `_predictions` or `rebuild_forecast_from_plan` air.
-- `rebuild_forecast_from_plan` / `_publish_plan_rollout` stay plot-only.
+  It does not read `_predictions`.
+- `_publish_plan_rollout` / `rebuild_forecast_from_plan` plot remaining
+  `T_ref` (`T_ref[k:]` padded) and leftover `U*`. Open-loop roll of `U*`
+  is only the no-plan fallback.
 - Regression: after `compute()` with a changed outdoor/solar forecast,
-  `_nmpc_T_ref` equals the accept-time path and the P command uses that
-  `T_ref`, not the resimulated Forecast sample.
+  `_nmpc_T_ref` equals the accept-time path, P uses that `T_ref`, and
+  Forecast temperatures equal the remaining frozen `T_ref`.
 - Dual tree: edit `heatingassistant/`, then
-  `scripts/sync-ha-app-package.sh`. CalVer + changelog only if the P
-  reference was actually being overwritten (user-visible control change).
+  `scripts/sync-ha-app-package.sh`. Plot freeze is user-visible → CalVer
+  + changelog.
 
 **Out**
-- Changing Forecast / Planned Power plot policy (SWD-417 / SWD-431
-  remaining-`U*` resim stays).
 - Changing `K_p`, deadband, idle NMPC retry, or the slow NLP.
 - Re-solving NMPC inside the 2 h window for a non-idle plan.
+- Changing Planned Power leftover-`U*` / 2 h outdoor hold policy.
 
 **Decisions**
 - Class is a **bug**: expected hierarchical behaviour is known from the
-  model (`docs/agents/MODEL-nmpc-p-ff.md`). If the P reference follows
-  updated disturbances, that is wrong.
-- Investigation found `_nmpc_T_ref` is already only written on accept.
-  The work is to freeze copies at that seam and lock the split with a
-  test so Forecast resim cannot leak into P.
+  model (`docs/agents/MODEL-nmpc-p-ff.md`). If P or Forecast follows
+  updated disturbances inside the slow interval, that is wrong.
+- P already used the accept-time path. The remaining defect is Forecast
+  resim on the room plot (SWD-417 / SWD-431 accepted that split; this
+  Task reverses the plot policy).
 
 **Constraints**
 - Dual tree as above.
@@ -46,8 +49,8 @@
 ## Classification
 - Class: bug
 - Confidence: high
-- Why: P must track the accept-time NMPC path for the slow interval;
-  retargeting a disturbance-updated air path is a known defect if present
+- Why: P and room Forecast must show the accept-time NMPC path for the
+  slow interval; retargeting a disturbance-updated air path is a defect
 
 ## Workflow
 - Template: fix-fast
@@ -63,15 +66,15 @@
   - side_paths: none
   - sandbox: none
 - Chain: architect → implement → test → restructure → review → ship
-- Rationale: contained controller seam; unit test pins P vs Forecast.
-  Test and harden stay on (catalog floor). Localized, so focused single
-  review.
+- Rationale: contained controller seam; unit tests pin P and Forecast
+  to leftover `T_ref`. Test and harden stay on (catalog floor). Localized,
+  so focused single review.
 
 ## Inputs
 - Model: `docs/agents/MODEL-nmpc-p-ff.md` (fast law tracks solve-time
   `T_ref` under accepted `U*`)
-- Prior plot split: SWD-417 / SWD-431 Forecast resim (not freeze-`T_ref`
-  on the chart)
+- Prior plot split: SWD-417 / SWD-431 remaining-`U*` resim (reversed here
+  for Forecast temperature)
 
 ## Acceptance criteria
 1. After `set_accepted_path`, `_nmpc_T_ref` is a copy of the NMPC air
@@ -79,14 +82,17 @@
 2. `compute()` / `rebuild_forecast_from_plan` with new outdoor/solar
    must not change `_nmpc_T_ref` or `_nmpc_U`.
 3. `_p_command_vector` after those calls equals
-   `p_command(u_ref, T_ref_accept[k], T_hat, …)`, not
-   `p_command(u_ref, Forecast[0], T_hat, …)` when Forecast has moved.
-4. Forecast may still differ from the frozen `T_ref` (plot resim).
-5. Fast suite for the touched path passes.
+   `p_command(u_ref, T_ref_accept[k], T_hat, …)`.
+4. Forecast temperatures equal remaining accept-time `T_ref` (`T_ref[k:]`
+   padded). Changed outdoor/solar/wind must not move that series.
+5. Planned Power remains leftover `U*` with one outdoor sample per hold.
+6. Fast suite for the touched path passes. CalVer + changelog for the
+   plot change.
 
 ## Work packages
 1. Freeze P `T_ref` / `U*` copies at accept (SWD-466)
 2. Tests, CalVer/changelog/App sync if product behaviour changed (SWD-467)
+3. Room-view Forecast leftover `T_ref`; tests + CalVer (SWD-468)
 
 ## Open items
 - None
@@ -95,11 +101,11 @@
 - Provider: jira
 - Story: —
 - Task: SWD-465
-- Sub-tasks: SWD-466, SWD-467
+- Sub-tasks: SWD-466, SWD-467, SWD-468
 - Branch: `cursor/swd-465-p-frozen-tref-105a`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/651
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/review SWD-465` — Lasers then fix then code review
+`/test SWD-465` — Dedicated testing phase, then restructure, then review

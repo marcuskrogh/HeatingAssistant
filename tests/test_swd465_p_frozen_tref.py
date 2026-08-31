@@ -97,16 +97,10 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     assert actual == pytest.approx(expected)
 
     pred0 = float(ctrl.predictions[0][_ROOM])
-    assert abs(pred0 - pred_before) > 0.05
-    assert abs(pred0 - float(frozen_t[idx, 0])) > 0.5
-    tracking_resim = p_command(
-        float(frozen_u[n, 0]),
-        pred0,
-        t_hat,
-        float(src.p_gain),
-        float(src.u_min),
-        float(src.u_max),
-        u_ref_gate=ctrl._u_ref_gate,
-        p_deadband=ctrl._p_deadband,
+    assert pred0 == pytest.approx(pred_before)
+    assert pred0 == pytest.approx(float(frozen_t[0, 0]))
+    plotted = np.array(
+        [float(step[_ROOM]) for step in ctrl.predictions], dtype=float
     )
-    assert actual != pytest.approx(tracking_resim)
+    # compute() publishes remaining T_ref at k, then advances k.
+    assert plotted == pytest.approx(frozen_t[:n_fast, 0], abs=1e-12)

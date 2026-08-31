@@ -77,15 +77,7 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
 
     plan_watts = _watts(ctrl.heating_schedule, _ROOM)
     plan_temps = _temps(ctrl.predictions, _ROOM)
-    expected0 = ctrl._compute_nonlinear_predictions(
-        np.repeat(u_star, m, axis=0)[:n_fast],
-        list(ctrl._outdoor_forecast),
-        [dict(step) for step in ctrl._solar_forecast],
-        ctrl._system._room_list,
-        ctrl._system._n_rooms,
-    )
-    assert plan_temps == pytest.approx(_temps(expected0, _ROOM), abs=1e-9)
-    assert plan_temps != pytest.approx([30.0] * n_fast)
+    assert plan_temps == pytest.approx([30.0] * n_fast)
     _assert_slow_holds(plan_watts, m, atol=1.0)
 
     U_fast = np.repeat(u_star, m, axis=0)
@@ -107,19 +99,14 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
     after_temps = _temps(ctrl.predictions, _ROOM)
     _assert_slow_holds(after_watts, m, atol=1.0)
     assert after_watts == pytest.approx(plan_watts, abs=1.0)
-    assert after_temps != pytest.approx([30.0] * n_fast)
+    assert after_temps == pytest.approx([30.0] * n_fast)
     assert ctrl.rebuild_forecast_from_plan() is True
-    expected = ctrl._compute_nonlinear_predictions(
-        ctrl._forecast_U(n_fast),
-        list(ctrl._outdoor_forecast),
-        [dict(step) for step in ctrl._solar_forecast],
-        ctrl._system._room_list,
-        ctrl._system._n_rooms,
-        wind_seq=list(ctrl._wind_forecast) or None,
-    )
+    remaining_t = ctrl._forecast_T(n_fast)
+    assert remaining_t is not None
     assert _temps(ctrl.predictions, _ROOM) == pytest.approx(
-        _temps(expected, _ROOM), abs=1e-9
+        remaining_t[:, 0].tolist(), abs=1e-12
     )
+    assert _temps(ctrl.predictions, _ROOM) == pytest.approx([30.0] * n_fast)
 
 
 def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
@@ -170,7 +157,7 @@ def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
     temps = _temps(snap["predictions"], _ENGINE_ROOM)
     assert watts == pytest.approx(preview_watts, abs=1.0)
     _assert_slow_holds(watts, m, atol=1.0)
-    assert temps != pytest.approx(t_ref.ravel().tolist(), abs=1e-9)
+    assert temps == pytest.approx(t_ref.ravel().tolist(), abs=1e-12)
     assert snap["dt"] == pytest.approx(ctrl._dt)
 
     payload = build_app_forecast_payload(

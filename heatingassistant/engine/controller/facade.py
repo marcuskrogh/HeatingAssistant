@@ -68,6 +68,30 @@ def _diag_np(n: int, v: float) -> np.ndarray:
     return np.eye(n) * v
 
 
+def _pad_plan_tail(
+    arr: Optional[np.ndarray],
+    start: int,
+    n_fast: int,
+    n_cols: int,
+) -> Optional[np.ndarray]:
+    """Remaining plan rows from ``start``, padded to ``n_fast`` with the last row."""
+    if arr is None:
+        return None
+    M = np.asarray(arr, dtype=float)
+    if M.ndim == 1:
+        M = M.reshape(-1, max(int(n_cols), 1))
+    if M.shape[0] == 0:
+        return None
+    i = min(max(int(start), 0), M.shape[0])
+    if i >= M.shape[0]:
+        return np.tile(M[-1:], (n_fast, 1))
+    tail = M[i:]
+    if tail.shape[0] >= n_fast:
+        return tail[:n_fast].copy()
+    pad = np.tile(tail[-1:], (n_fast - tail.shape[0], 1))
+    return np.vstack([tail, pad])
+
+
 class HeatingMPCController:
     """
     Application facade for house-heating NMPC + P tracking.
@@ -87,7 +111,7 @@ class HeatingMPCController:
          still forces ``u = 0``).
          ``T_ref`` / ``u_ref`` stay the accept-time NMPC path for the
          whole slow interval. New disturbances move ``T_hat``, not the
-         reference. Forecast resim of leftover ``U*`` is plot-only.
+         reference. Room-view Forecast is that leftover ``T_ref``.
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -736,8 +760,8 @@ class HeatingMPCController:
     ) -> None:
         """Install a slow plan for the fast P-law (tests and worker).
 
-        Copies ``U*`` and ``T_ref`` so later solver or Forecast resim
-        arrays cannot retarget P during the slow interval.
+        Copies ``U*`` and ``T_ref`` so later solver arrays cannot retarget
+        P or room-view Forecast during the slow interval.
         """
         U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu).copy()
         T = np.asarray(t_ref, dtype=float)
@@ -871,6 +895,26 @@ class HeatingMPCController:
             )
         return schedule
 
+    def _predictions_from_air(
+        self,
+        air: np.ndarray,
+        room_list: List[str],
+        n_rooms: int,
+    ) -> List[Dict[str, float]]:
+        """Map an air path ``(n, n_rooms)`` to per-step room temperature dicts."""
+        T = np.asarray(air, dtype=float)
+        if T.ndim == 1:
+            T = T.reshape(-1, max(n_rooms, 1))
+        n = int(T.shape[0])
+        cols = min(int(T.shape[1]), n_rooms)
+        return [
+            {
+                name: float(T[k, i]) if i < cols else 0.0
+                for i, name in enumerate(room_list[:n_rooms])
+            }
+            for k in range(n)
+        ]
+
     def _publish_plan_rollout(
         self,
         U_abs: np.ndarray,
@@ -878,34 +922,37 @@ class HeatingMPCController:
         solar_seq: List[Dict[str, float]],
         wind_seq: Optional[List[float]] = None,
     ) -> None:
-        """Resimulate remaining U* on the OCP plant with current disturbances.
+        """Publish leftover U* (Planned Power) and accept-time T_ref (Forecast).
 
-        Temperature uses ``roll_fast_air_path`` (the same implicit-Euler hold
-        ``MeanOcp`` uses: ``n_int`` substeps, U and d held). Outdoor/solar are
-        the latest forecasts. Wind is the horizon mean, as in the NLP — not
-        the solve-time ``T_ref``. Planned Power is leftover ``U*`` with one
-        outdoor sample per 2 h hold.
+        Temperature is the remaining NMPC air path. New outdoor/solar/wind
+        during the slow interval must not retarget that series — P rejects
+        those disturbances against the frozen reference. Planned Power is
+        leftover ``U*`` with one outdoor sample per 2 h hold. With no
+        accepted path, Forecast falls back to an open-loop roll of ``U_abs``.
         """
         self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
         room_list = self._system._room_list
         n_rooms = self._system._n_rooms
-        self._predictions = self._compute_nonlinear_predictions(
-            U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
-        )
+        n = max(int(self._horizon), 1)
+        air = self._forecast_T(n)
+        if air is not None:
+            self._predictions = self._predictions_from_air(air, room_list, n_rooms)
+        else:
+            self._predictions = self._compute_nonlinear_predictions(
+                U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
+            )
         self._linearised_predictions = [dict(step) for step in self._predictions]
 
     def rebuild_forecast_from_plan(self) -> bool:
-        """Resimulate remaining accepted U* from the current EKF state.
+        """Publish remaining accepted U* and T_ref from the current plan index.
 
-        Room view may re-roll leftover two-hour holds when outdoor/solar/wind
-        forecasts change. The plant step is the OCP hold (implicit Euler,
-        ``n_int`` on ``_control_system``). Wind is the current horizon mean,
-        matching the NLP. Do not replay U* from slow index 0 against a later
-        state. Display power uses one outdoor sample per leftover hold so COP
-        does not invent 15-minute watt steps.
+        Forecast temperature is the leftover accept-time ``T_ref``. Do not
+        re-roll leftover two-hour holds when outdoor/solar/wind forecasts
+        change. Display power uses leftover ``U*`` with one outdoor sample
+        per hold so COP does not invent 15-minute watt steps. Do not replay
+        U* from slow index 0 against a later state.
 
-        Plot-only: do not write ``_nmpc_T_ref`` / ``_nmpc_U``. P keeps the
-        accept-time path while this resim moves Forecast.
+        Does not write ``_nmpc_T_ref`` / ``_nmpc_U``.
         """
         with self._nmpc_lock:
             has_plan = self._nmpc_U_fast is not None
@@ -1104,7 +1151,7 @@ class HeatingMPCController:
                 idx = min(max(k, 0), n_fast - 1)
                 n = min(idx // m, n_slow - 1)
                 u_ref = U[n]
-                # Accept-time NMPC air path, not Forecast resim.
+                # Accept-time NMPC air path (same leftover T_ref as Forecast).
                 t_ref_row = T_ref[idx]
                 for j, src in enumerate(self._sources):
                     ri = room_index.get(src.room, 0)
@@ -1176,23 +1223,23 @@ class HeatingMPCController:
         """Remaining accepted U* from the current plan index, padded to n_fast."""
         n_u = self._system.nu
         with self._nmpc_lock:
-            U_fast = self._nmpc_U_fast
-            k = int(self._nmpc_k)
-            if U_fast is None:
-                return np.zeros((n_fast, n_u), dtype=float)
-            U = np.asarray(U_fast, dtype=float)
-            if U.ndim == 1:
-                U = U.reshape(-1, n_u)
-            if U.shape[0] == 0:
-                return np.zeros((n_fast, n_u), dtype=float)
-            start = min(max(k, 0), U.shape[0])
-            if start >= U.shape[0]:
-                return np.tile(U[-1:], (n_fast, 1))
-            tail = U[start:]
-            if tail.shape[0] >= n_fast:
-                return tail[:n_fast].copy()
-            pad = np.tile(tail[-1:], (n_fast - tail.shape[0], 1))
-            return np.vstack([tail, pad])
+            remaining = _pad_plan_tail(
+                self._nmpc_U_fast, int(self._nmpc_k), n_fast, n_u
+            )
+        if remaining is None:
+            return np.zeros((n_fast, n_u), dtype=float)
+        return remaining
+
+    def _forecast_T(self, n_fast: int) -> Optional[np.ndarray]:
+        """Remaining accept-time T_ref from the current plan index, padded.
+
+        Returns None when no air path is installed so callers can fall back.
+        """
+        n_rooms = self._system._n_rooms
+        with self._nmpc_lock:
+            return _pad_plan_tail(
+                self._nmpc_T_ref, int(self._nmpc_k), n_fast, n_rooms
+            )
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -1675,10 +1722,4 @@ class HeatingMPCController:
             )
         finally:
             plant.set_wind_speed(wind_restore)
-        return [
-            {
-                name: float(air[k, i])
-                for i, name in enumerate(room_list[:n_rooms])
-            }
-            for k in range(int(air.shape[0]))
-        ]
+        return self._predictions_from_air(air, room_list, n_rooms)
