@@ -740,7 +740,7 @@ class HeatingMPCController:
         arrays cannot retarget P during the slow interval.
         """
         U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu).copy()
-        T = np.asarray(t_ref, dtype=float).copy()
+        T = np.asarray(t_ref, dtype=float)
         n_fast = self._timing.n_fast
         n_rooms = self._system._n_rooms
         stamp = time.time() if now is None else float(now)
@@ -749,7 +749,7 @@ class HeatingMPCController:
         if T.shape[0] < n_fast:
             pad = np.tile(T[-1:], (n_fast - T.shape[0], 1))
             T = np.vstack([T, pad])
-        T = np.asarray(T[:n_fast, :n_rooms], dtype=float).copy()
+        T = np.array(T[:n_fast, :n_rooms], dtype=float, copy=True)
         with self._nmpc_lock:
             self._nmpc_U = U
             self._nmpc_T_ref = T

@@ -97,9 +97,9 @@
 - Task: SWD-465
 - Sub-tasks: SWD-466, SWD-467
 - Branch: `cursor/swd-465-p-frozen-tref-105a`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/651
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-465` — Build to ARCHITECTURE.md (same branch)
+`/review SWD-465` — Lasers then fix then code review

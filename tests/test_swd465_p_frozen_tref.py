@@ -22,7 +22,6 @@ def _ctrl() -> HeatingMPCController:
         _ROOM, 5e6, 0.05, temperature=22.0, setpoint=21.0, comfort_offset=2.0
     )
     heater = ElectricHeater("h", _ROOM, max_power=2000.0)
-    heater.p_gain = 0.4
     return HeatingMPCController(
         HouseModel([room]),
         [heater],
@@ -53,22 +52,23 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     ctrl = _ctrl()
     n_fast = ctrl.horizon
     n_slow = ctrl.timing.n_slow
-    t_ref = np.linspace(25.0, 28.0, n_fast).reshape(n_fast, 1)
+    t_ref = np.full((n_fast, 1), 26.0)
     u_star = np.full((n_slow, 1), 0.4)
     outdoor_solve = [8.0] * n_fast
     outdoor_new = [-18.0] * n_fast
-    solar_new = {_ROOM: 900.0}
+    solar0 = {_ROOM: 0.0}
 
     ctrl._outdoor_forecast = list(outdoor_solve)
-    ctrl._solar_forecast = [{_ROOM: 0.0} for _ in range(n_fast)]
+    ctrl._solar_forecast = [dict(solar0) for _ in range(n_fast)]
     ctrl.set_accepted_path(u_star, t_ref, now=_EPOCH, plan_epoch=_EPOCH)
     frozen_t = np.asarray(ctrl._nmpc_T_ref, dtype=float).copy()
     frozen_u = np.asarray(ctrl._nmpc_U, dtype=float).copy()
     assert ctrl.rebuild_forecast_from_plan() is True
+    pred_before = float(ctrl.predictions[0][_ROOM])
 
     ctrl.compute(
         outdoor_new[0],
-        solar_gains=solar_new,
+        solar_gains=solar0,
         now=_NOW,
         outdoor_forecast=outdoor_new,
     )
@@ -97,7 +97,8 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     assert actual == pytest.approx(expected)
 
     pred0 = float(ctrl.predictions[0][_ROOM])
-    assert abs(pred0 - float(frozen_t[idx, 0])) > 0.2
+    assert abs(pred0 - pred_before) > 0.05
+    assert abs(pred0 - float(frozen_t[idx, 0])) > 0.5
     tracking_resim = p_command(
         float(frozen_u[n, 0]),
         pred0,
