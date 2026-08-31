@@ -29,4 +29,4 @@
 - Branch: `cursor/swd-465-p-frozen-tref-105a`
 
 ## Next
-`/review SWD-465` — Lasers then fix then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/651
