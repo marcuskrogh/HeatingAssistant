@@ -29,4 +29,4 @@
 - Branch: `cursor/swd-465-p-frozen-tref-105a`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/651
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/651 (`3719368`)
