@@ -85,6 +85,9 @@ class HeatingMPCController:
          is inside the P temperature deadband.  With no plan, P toward
          the setpoint while air is outside the comfort band (watchdog
          still forces ``u = 0``).
+         ``T_ref`` / ``u_ref`` stay the accept-time NMPC path for the
+         whole slow interval. New disturbances move ``T_hat``, not the
+         reference. Forecast resim of leftover ``U*`` is plot-only.
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -731,9 +734,13 @@ class HeatingMPCController:
         now: Optional[float] = None,
         plan_epoch: Optional[float] = None,
     ) -> None:
-        """Install a slow plan for the fast P-law (tests and worker)."""
-        U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu)
-        T = np.asarray(t_ref, dtype=float)
+        """Install a slow plan for the fast P-law (tests and worker).
+
+        Copies ``U*`` and ``T_ref`` so later solver or Forecast resim
+        arrays cannot retarget P during the slow interval.
+        """
+        U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu).copy()
+        T = np.asarray(t_ref, dtype=float).copy()
         n_fast = self._timing.n_fast
         n_rooms = self._system._n_rooms
         stamp = time.time() if now is None else float(now)
@@ -742,7 +749,7 @@ class HeatingMPCController:
         if T.shape[0] < n_fast:
             pad = np.tile(T[-1:], (n_fast - T.shape[0], 1))
             T = np.vstack([T, pad])
-        T = T[:n_fast, :n_rooms]
+        T = np.asarray(T[:n_fast, :n_rooms], dtype=float).copy()
         with self._nmpc_lock:
             self._nmpc_U = U
             self._nmpc_T_ref = T
@@ -896,6 +903,9 @@ class HeatingMPCController:
         matching the NLP. Do not replay U* from slow index 0 against a later
         state. Display power uses one outdoor sample per leftover hold so COP
         does not invent 15-minute watt steps.
+
+        Plot-only: do not write ``_nmpc_T_ref`` / ``_nmpc_U``. P keeps the
+        accept-time path while this resim moves Forecast.
         """
         with self._nmpc_lock:
             has_plan = self._nmpc_U_fast is not None
@@ -1094,6 +1104,7 @@ class HeatingMPCController:
                 idx = min(max(k, 0), n_fast - 1)
                 n = min(idx // m, n_slow - 1)
                 u_ref = U[n]
+                # Accept-time NMPC air path, not Forecast resim.
                 t_ref_row = T_ref[idx]
                 for j, src in enumerate(self._sources):
                     ri = room_index.get(src.room, 0)
