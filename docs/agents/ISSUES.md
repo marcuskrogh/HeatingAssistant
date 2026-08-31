@@ -7,7 +7,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-465 | Task | [Bug] P-controller must track original NMPC trajectory for the 2 h window | In Progress | — | docs/agents/PLAN-p-frozen-nmpc-tref.md | `/test SWD-465` |
 | SWD-466 | Sub-task | Keep P T_ref frozen at the last accepted NMPC plan | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-467 | Sub-task | Tests, CalVer, changelog, App sync for frozen P T_ref | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
-| SWD-468 | Sub-task | Room view Forecast stays on original NMPC T_ref | In Progress | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | `/test SWD-465` |
+| SWD-468 | Sub-task | Room view Forecast stays on original NMPC T_ref | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-462 | Task | [Bug] Solar gain history is unattenuated clear-sky on cloudy days | Done | — | docs/agents/PLAN-solar-gain-cloud-cover.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/650 (`27ccf06`) |
 | SWD-463 | Sub-task | Cloud-cover now + k=0 attenuation; no stray GHI | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
 | SWD-464 | Sub-task | Tests, CalVer, changelog, App sync for solar cloud cover | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
