@@ -114,4 +114,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-465` — Dedicated testing phase, then restructure, then review
+`/review SWD-465` — Lasers then fix then code review

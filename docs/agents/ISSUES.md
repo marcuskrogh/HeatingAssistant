@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-465 | Task | [Bug] P-controller must track original NMPC trajectory for the 2 h window | In Progress | — | docs/agents/PLAN-p-frozen-nmpc-tref.md | `/test SWD-465` |
+| SWD-465 | Task | [Bug] P-controller must track original NMPC trajectory for the 2 h window | In Review | — | docs/agents/PLAN-p-frozen-nmpc-tref.md | `/review SWD-465` |
 | SWD-466 | Sub-task | Keep P T_ref frozen at the last accepted NMPC plan | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-467 | Sub-task | Tests, CalVer, changelog, App sync for frozen P T_ref | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-468 | Sub-task | Room view Forecast stays on original NMPC T_ref | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
@@ -191,7 +191,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-31 — `/implement` SWD-465: T_ref is the fast-grid OCP air trajectory inside each 2 h `U*` hold, not a two-hour constant. Forecast and P follow `T_ref[k]`. Next `/test SWD-465`.
+- 2026-08-31 — `/test`+`/restructure` SWD-465: 93 passed. Wind-stable leftover `T_ref`; pad-past-end and no-plan `_forecast_T`. `_pad_plan_tail` campground OK (flat C=6). Next `/review SWD-465`.
 - 2026-08-31 — `/test`+`/harden` SWD-465: 87 passed (frozen T_ref, input-bias, deadband, plot grid, forecast resim, SWD-395). Copy at accept only. Next `/review SWD-465`.
 - 2026-08-31 — `/implement` SWD-465 In Progress: freeze P `T_ref` copies at accept; PR https://github.com/marcuskrogh/HeatingAssistant/pull/651. Next `/test SWD-465`.
 - 2026-08-31 — `/define` SWD-465: PLAN `docs/agents/PLAN-p-frozen-nmpc-tref.md` (bug / fix-fast). P tracks accept-time NMPC `(T_ref, u_ref)` for the 2 h window; Forecast resim stays plot-only. Sub-tasks SWD-466–467. Next `/implement SWD-465`.
