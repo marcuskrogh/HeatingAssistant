@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-465 | Task | [Bug] P-controller must track original NMPC trajectory for the 2 h window | To Do | — | docs/agents/PLAN-p-frozen-nmpc-tref.md | `/implement SWD-465` |
+| SWD-466 | Sub-task | Keep P T_ref frozen at the last accepted NMPC plan | To Do | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
+| SWD-467 | Sub-task | Tests, CalVer, changelog, App sync for frozen P T_ref | To Do | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-462 | Task | [Bug] Solar gain history is unattenuated clear-sky on cloudy days | Done | — | docs/agents/PLAN-solar-gain-cloud-cover.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/650 (`27ccf06`) |
 | SWD-463 | Sub-task | Cloud-cover now + k=0 attenuation; no stray GHI | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
 | SWD-464 | Sub-task | Tests, CalVer, changelog, App sync for solar cloud cover | Done | SWD-462 | docs/agents/PLAN-solar-gain-cloud-cover.md | — |
@@ -187,6 +190,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-31 — `/define` SWD-465: PLAN `docs/agents/PLAN-p-frozen-nmpc-tref.md` (bug / fix-fast). P tracks accept-time NMPC `(T_ref, u_ref)` for the 2 h window; Forecast resim stays plot-only. Sub-tasks SWD-466–467. Next `/implement SWD-465`.
 - 2026-08-30 — `/ship` SWD-462 via PR #650 (`27ccf06`): historical solar gain follows weather cloud cover; review-fix CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.39`. Next Done.
 - 2026-08-30 — `/review-fix` SWD-462 CLEAN (focused sequential): 0 blockers / 0 should-fix. APPROVE on PR #650. Next `/ship SWD-462`.
 - 2026-08-30 — `/define` SWD-462: PLAN `docs/agents/PLAN-solar-gain-cloud-cover.md` (bug / fix-fast). Historical solar k=0 must use cloud cover; Sub-tasks SWD-463–464. Next `/implement SWD-462`.
