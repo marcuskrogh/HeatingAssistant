@@ -6,11 +6,12 @@ must be the exact calendar version on its own line.
 
 # 2026.08.40
 
-- Room Forecast stays on the two-hour planned temperature path when
-  outdoor or solar updates arrive. The chart no longer redraws a
+- Room Forecast shows the last NMPC temperature trajectory — the air
+  path under two-hour heater holds, including the solver's fast-grid
+  substeps, not a single constant. Weather updates no longer redraw a
   free-response that looks like the house is leaving the comfort zone.
-  The fast feedback loop still tracks that plan. Planned Power stays
-  leftover planner power.
+  The fast loop tracks that same trajectory. Planned Power stays leftover
+  planner power, which still steps only every two hours.
 
 # 2026.08.39
 

@@ -52,7 +52,7 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     ctrl = _ctrl()
     n_fast = ctrl.horizon
     n_slow = ctrl.timing.n_slow
-    t_ref = np.full((n_fast, 1), 26.0)
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(n_fast, 1)
     u_star = np.full((n_slow, 1), 0.4)
     outdoor_solve = [8.0] * n_fast
     outdoor_new = [-18.0] * n_fast
@@ -104,3 +104,45 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     )
     # compute() publishes remaining T_ref at k, then advances k.
     assert plotted == pytest.approx(frozen_t[:n_fast, 0], abs=1e-12)
+    assert float(np.max(plotted[: int(ctrl.timing.m)]) - np.min(plotted[: int(ctrl.timing.m)])) > 0.2
+
+
+def test_p_follows_fast_grid_t_ref_inside_slow_u_hold() -> None:
+    ctrl = _ctrl()
+    n_fast = ctrl.horizon
+    n_slow = ctrl.timing.n_slow
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(n_fast, 1)
+    u_star = np.full((n_slow, 1), 0.4)
+    ctrl.set_accepted_path(u_star, t_ref, now=_EPOCH, plan_epoch=_EPOCH)
+    t_hat = float(ctrl._ekf.x_hat[0])
+    src = ctrl._sources[0]
+
+    def _p_at(k: int) -> float:
+        ctrl._nmpc_k = k
+        return float(ctrl._p_command_vector(None, None, None)[0])
+
+    u0 = _p_at(0)
+    u1 = _p_at(1)
+    expected0 = p_command(
+        0.4,
+        float(t_ref[0, 0]),
+        t_hat,
+        float(src.p_gain),
+        float(src.u_min),
+        float(src.u_max),
+        u_ref_gate=ctrl._u_ref_gate,
+        p_deadband=ctrl._p_deadband,
+    )
+    expected1 = p_command(
+        0.4,
+        float(t_ref[1, 0]),
+        t_hat,
+        float(src.p_gain),
+        float(src.u_min),
+        float(src.u_max),
+        u_ref_gate=ctrl._u_ref_gate,
+        p_deadband=ctrl._p_deadband,
+    )
+    assert u0 == pytest.approx(expected0)
+    assert u1 == pytest.approx(expected1)
+    assert u0 != pytest.approx(u1)

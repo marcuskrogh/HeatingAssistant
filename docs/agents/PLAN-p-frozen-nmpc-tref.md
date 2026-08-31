@@ -2,29 +2,33 @@
 
 ## Summary
 - The proportional (P) controller must track the last accepted nonlinear
-  model predictive control (NMPC) path `(T_ref, u_ref)` for the whole slow
-  interval (default 2 h).
+  model predictive control (NMPC) **air trajectory** `T_ref(τ)` and the
+  held input `u_ref` for the whole slow interval (default 2 h).
+- `U*` is zero-order-held every 2 h. `T_ref` is **not** a two-hour
+  constant: the OCP rolls the plant with fast-grid / integrator
+  substeps, so the air path can vary inside each hold.
 - P is the regulator. New outdoor / solar / wind during the window must
-  move the tracking error, not the reference.
-- Room-view Forecast is the leftover accept-time `T_ref` for that same
-  window. Do not resim leftover `U*` with updated disturbances on each
-  15-minute tick — that chart would show the house leaving the comfort
-  zone even though P keeps air on the plan. Planned Power stays leftover
-  `U*` with one outdoor sample per 2 h hold.
+  move the tracking error, not retarget that trajectory.
+- Room-view Forecast is leftover accept-time `T_ref` on the fast grid.
+  Do not resim leftover `U*` with updated disturbances on each 15-minute
+  tick, and do not flatten Forecast to a single temperature per hold.
+  Planned Power stays leftover `U*` with one outdoor sample per 2 h hold.
 
 ## Scope / Decisions / Constraints
 **In**
 - `_nmpc_T_ref` and `_nmpc_U` are installed only in `set_accepted_path`
   (accept) and cleared on watchdog reject. Store copies so later mutation
   of the solver arrays cannot move the P reference or Forecast.
-- `_p_command_vector` reads that frozen path at the wall-clock fast index.
+- `_p_command_vector` reads that accept-time trajectory at the wall-clock
+  fast index `k` (`T_ref[k]`, not `T_ref[0]` held for 2 h).
   It does not read `_predictions`.
 - `_publish_plan_rollout` / `rebuild_forecast_from_plan` plot remaining
   `T_ref` (`T_ref[k:]` padded) and leftover `U*`. Open-loop roll of `U*`
   is only the no-plan fallback.
 - Regression: after `compute()` with a changed outdoor/solar forecast,
-  `_nmpc_T_ref` equals the accept-time path, P uses that `T_ref`, and
-  Forecast temperatures equal the remaining frozen `T_ref`.
+  `_nmpc_T_ref` equals the accept-time trajectory, P uses `T_ref[k]`, and
+  Forecast temperatures equal the remaining fast-grid `T_ref` (varies
+  inside a slow `U*` hold).
 - Dual tree: edit `heatingassistant/`, then
   `scripts/sync-ha-app-package.sh`. Plot freeze is user-visible → CalVer
   + changelog.
@@ -84,7 +88,9 @@
 3. `_p_command_vector` after those calls equals
    `p_command(u_ref, T_ref_accept[k], T_hat, …)`.
 4. Forecast temperatures equal remaining accept-time `T_ref` (`T_ref[k:]`
-   padded). Changed outdoor/solar/wind must not move that series.
+   padded) on the fast grid. The series may vary inside a 2 h `U*` hold.
+   Changed outdoor/solar/wind must not move that series, and it must not
+   collapse to a two-hour constant.
 5. Planned Power remains leftover `U*` with one outdoor sample per hold.
 6. Fast suite for the touched path passes. CalVer + changelog for the
    plot change.

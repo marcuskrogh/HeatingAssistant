@@ -109,9 +109,12 @@ class HeatingMPCController:
          is inside the P temperature deadband.  With no plan, P toward
          the setpoint while air is outside the comfort band (watchdog
          still forces ``u = 0``).
-         ``T_ref`` / ``u_ref`` stay the accept-time NMPC path for the
-         whole slow interval. New disturbances move ``T_hat``, not the
-         reference. Room-view Forecast is that leftover ``T_ref``.
+         ``T_ref`` is the OCP air trajectory on the fast grid (``m`` samples
+         per slow ``U*`` hold from integrator substeps). It is not a
+         two-hour constant. ``u_ref`` is the zero-order hold of ``U*``.
+         That accept-time path stays for the whole slow interval: new
+         disturbances move ``T_hat``, not the reference. Room-view
+         Forecast is leftover ``T_ref``.
       3. Apply the command to all heat sources.
 
     The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
@@ -760,8 +763,10 @@ class HeatingMPCController:
     ) -> None:
         """Install a slow plan for the fast P-law (tests and worker).
 
-        Copies ``U*`` and ``T_ref`` so later solver arrays cannot retarget
-        P or room-view Forecast during the slow interval.
+        Copies ``U*`` and the OCP air trajectory ``T_ref`` so later solver
+        arrays cannot retarget P or room-view Forecast during the slow
+        interval. ``T_ref`` stays the fast-grid solution path (not a
+        two-hour constant).
         """
         U = np.asarray(u_star, dtype=float).reshape(self._timing.n_slow, self._system.nu).copy()
         T = np.asarray(t_ref, dtype=float)
@@ -924,11 +929,13 @@ class HeatingMPCController:
     ) -> None:
         """Publish leftover U* (Planned Power) and accept-time T_ref (Forecast).
 
-        Temperature is the remaining NMPC air path. New outdoor/solar/wind
-        during the slow interval must not retarget that series — P rejects
-        those disturbances against the frozen reference. Planned Power is
-        leftover ``U*`` with one outdoor sample per 2 h hold. With no
-        accepted path, Forecast falls back to an open-loop roll of ``U_abs``.
+        Temperature is the remaining NMPC air trajectory on the fast grid.
+        That path already has OCP substep fidelity under two-hour ``U*``
+        holds — do not collapse it to a constant, and do not retarget it
+        when outdoor/solar/wind update. P tracks the same series.
+        Planned Power is leftover ``U*`` with one outdoor sample per 2 h
+        hold. With no accepted path, Forecast falls back to an open-loop
+        roll of ``U_abs``.
         """
         self._heating_schedule = self._heating_schedule_from_u(U_abs, outdoor_seq)
         room_list = self._system._room_list
@@ -946,11 +953,12 @@ class HeatingMPCController:
     def rebuild_forecast_from_plan(self) -> bool:
         """Publish remaining accepted U* and T_ref from the current plan index.
 
-        Forecast temperature is the leftover accept-time ``T_ref``. Do not
-        re-roll leftover two-hour holds when outdoor/solar/wind forecasts
-        change. Display power uses leftover ``U*`` with one outdoor sample
-        per hold so COP does not invent 15-minute watt steps. Do not replay
-        U* from slow index 0 against a later state.
+        Forecast temperature is the leftover accept-time air trajectory
+        (fast-grid OCP path, not a two-hour constant). Do not re-roll leftover
+        two-hour holds when outdoor/solar/wind forecasts change. Display
+        power uses leftover ``U*`` with one outdoor sample per hold so COP
+        does not invent 15-minute watt steps. Do not replay U* from slow
+        index 0 against a later state.
 
         Does not write ``_nmpc_T_ref`` / ``_nmpc_U``.
         """
@@ -1151,7 +1159,7 @@ class HeatingMPCController:
                 idx = min(max(k, 0), n_fast - 1)
                 n = min(idx // m, n_slow - 1)
                 u_ref = U[n]
-                # Accept-time NMPC air path (same leftover T_ref as Forecast).
+                # Accept-time OCP air trajectory on the fast grid (same T_ref as Forecast).
                 t_ref_row = T_ref[idx]
                 for j, src in enumerate(self._sources):
                     ri = room_index.get(src.room, 0)

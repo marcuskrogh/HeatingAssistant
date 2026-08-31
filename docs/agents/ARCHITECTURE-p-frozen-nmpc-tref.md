@@ -9,7 +9,9 @@
   `x_hat` for the tracking error only
 - Seams: `set_accepted_path` is the only writer of the P / Forecast
   reference; tests call it, then `compute()` / `rebuild_forecast_from_plan`,
-  then `_p_command_vector` and `predictions`
+  then `_p_command_vector` and `predictions`. P reads `T_ref[k]` on the
+  fast grid; Forecast is leftover `T_ref[k:]` (trajectory, not a 2 h
+  constant). `u_ref` is the slow ZOH of `U*`.
 - Will not add: a second reference trajectory type, a plot-to-P adapter,
   or a new control module
 

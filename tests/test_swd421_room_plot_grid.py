@@ -69,7 +69,7 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
     n_fast = int(ctrl.horizon)
     outdoor = _varying_outdoor(n_fast)
     u_star = np.array([[0.8], [0.25]], dtype=float)
-    t_ref = np.full((n_fast, 1), 30.0, dtype=float)
+    t_ref = np.linspace(21.0, 24.5, n_fast).reshape(-1, 1)
 
     ctrl._outdoor_forecast = list(outdoor)
     ctrl.set_accepted_path(u_star, t_ref)
@@ -77,7 +77,9 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
 
     plan_watts = _watts(ctrl.heating_schedule, _ROOM)
     plan_temps = _temps(ctrl.predictions, _ROOM)
-    assert plan_temps == pytest.approx([30.0] * n_fast)
+    assert plan_temps == pytest.approx(t_ref.ravel().tolist(), abs=1e-12)
+    # T_ref is the fast-grid OCP path, not a 2 h constant like U*.
+    assert float(np.max(plan_temps[:m]) - np.min(plan_temps[:m])) > 0.2
     _assert_slow_holds(plan_watts, m, atol=1.0)
 
     U_fast = np.repeat(u_star, m, axis=0)
@@ -99,14 +101,14 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
     after_temps = _temps(ctrl.predictions, _ROOM)
     _assert_slow_holds(after_watts, m, atol=1.0)
     assert after_watts == pytest.approx(plan_watts, abs=1.0)
-    assert after_temps == pytest.approx([30.0] * n_fast)
+    assert after_temps == pytest.approx(t_ref.ravel().tolist(), abs=1e-12)
     assert ctrl.rebuild_forecast_from_plan() is True
     remaining_t = ctrl._forecast_T(n_fast)
     assert remaining_t is not None
     assert _temps(ctrl.predictions, _ROOM) == pytest.approx(
         remaining_t[:, 0].tolist(), abs=1e-12
     )
-    assert _temps(ctrl.predictions, _ROOM) == pytest.approx([30.0] * n_fast)
+    assert float(np.max(remaining_t[:m, 0]) - np.min(remaining_t[:m, 0])) > 0.2
 
 
 def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
