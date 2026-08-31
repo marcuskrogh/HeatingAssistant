@@ -146,3 +146,23 @@ def test_p_follows_fast_grid_t_ref_inside_slow_u_hold() -> None:
     assert u0 == pytest.approx(expected0)
     assert u1 == pytest.approx(expected1)
     assert u0 != pytest.approx(u1)
+
+
+def test_forecast_t_none_without_accepted_path() -> None:
+    ctrl = _ctrl()
+    assert ctrl._forecast_T(ctrl.horizon) is None
+    assert ctrl.rebuild_forecast_from_plan() is False
+
+
+def test_forecast_t_pads_last_row_when_index_past_end() -> None:
+    ctrl = _ctrl()
+    n_fast = ctrl.horizon
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(n_fast, 1)
+    ctrl.set_accepted_path(
+        np.full((ctrl.timing.n_slow, 1), 0.4), t_ref, now=_EPOCH, plan_epoch=_EPOCH
+    )
+    ctrl._nmpc_k = n_fast + 3
+    remaining = ctrl._forecast_T(n_fast)
+    assert remaining is not None
+    assert remaining.shape == (n_fast, 1)
+    assert remaining == pytest.approx(np.full((n_fast, 1), float(t_ref[-1, 0])))

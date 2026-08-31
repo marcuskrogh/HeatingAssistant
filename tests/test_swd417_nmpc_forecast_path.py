@@ -413,3 +413,21 @@ def test_changed_solar_does_not_move_forecast() -> None:
     t_sun = _plotted(ctrl)
     assert t_sun == pytest.approx(t_dark, abs=1e-12)
     assert t_sun == pytest.approx(np.full(n_fast, 22.0), abs=1e-12)
+
+
+def test_changed_wind_does_not_move_forecast() -> None:
+    ctrl = _ctrl()
+    U = _distinct_U(ctrl)
+    n_fast = ctrl.horizon
+    t_ref = np.linspace(20.0, 24.0, n_fast).reshape(-1, 1)
+    ctrl.set_accepted_path(U, t_ref)
+    ctrl._outdoor_forecast = [5.0] * n_fast
+    ctrl._solar_forecast = [{"living_room": 0.0} for _ in range(n_fast)]
+    ctrl._wind_forecast = [1.0] * n_fast
+    assert ctrl.rebuild_forecast_from_plan() is True
+    t_calm = _plotted(ctrl)
+    ctrl._wind_forecast = [12.0] * n_fast
+    assert ctrl.rebuild_forecast_from_plan() is True
+    t_windy = _plotted(ctrl)
+    assert t_windy == pytest.approx(t_calm, abs=1e-12)
+    assert t_windy == pytest.approx(t_ref.ravel(), abs=1e-12)
