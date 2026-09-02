@@ -4,6 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-469 | Task | [Feature] Expandable KPI detail cards on Overview and room view | To Do | — | docs/agents/PLAN-kpi-expand-detail.md | `/architect SWD-469` |
+| SWD-470 | Sub-task | Expand host + CSS for KPI detail cards | To Do | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
+| SWD-471 | Sub-task | KPI detail copy catalog + last NMPC duration | To Do | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
+| SWD-472 | Sub-task | Wire Overview and room-view KPI expansion | To Do | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
+| SWD-473 | Sub-task | Tests, CalVer, changelog, App sync for KPI expand | To Do | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
 | SWD-465 | Task | [Bug] P-controller must track original NMPC trajectory for the 2 h window | Done | — | docs/agents/PLAN-p-frozen-nmpc-tref.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/651 (`3719368`) |
 | SWD-466 | Sub-task | Keep P T_ref frozen at the last accepted NMPC plan | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
 | SWD-467 | Sub-task | Tests, CalVer, changelog, App sync for frozen P T_ref | Done | SWD-465 | docs/agents/PLAN-p-frozen-nmpc-tref.md | — |
@@ -191,6 +196,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-02 — `/define` SWD-469: PLAN `docs/agents/PLAN-kpi-expand-detail.md` (feature / feature-standard, sandbox inject). Click KPI → top of section + detail panel; last NMPC duration on expand. Sub-tasks SWD-470–473. Next `/architect SWD-469`.
 - 2026-08-31 — `/ship` SWD-465 via PR #651 (`3719368`): P and room Forecast stay on the original NMPC air trajectory for the 2 h window; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.40`. Next Done.
 - 2026-08-31 — `/test`+`/restructure` SWD-465: 93 passed. Wind-stable leftover `T_ref`; pad-past-end and no-plan `_forecast_T`. `_pad_plan_tail` campground OK (flat C=6). Next `/review SWD-465`.
 - 2026-08-31 — `/test`+`/harden` SWD-465: 87 passed (frozen T_ref, input-bias, deadband, plot grid, forecast resim, SWD-395). Copy at accept only. Next `/review SWD-465`.
