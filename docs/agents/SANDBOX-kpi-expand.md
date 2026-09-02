@@ -58,4 +58,4 @@ Promotion input for `/implement`. Supportive isolation — not production source
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/implement SWD-469` — Promote accepted expand look into production (already wired on this branch after accept).
+Done — promoted into production on the same delivery PR.

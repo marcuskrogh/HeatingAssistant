@@ -173,4 +173,4 @@ Missing values render as `—`. Hidden gauges stay omitted from the grid.
 - Workflow: feature-standard (`sandbox=inject`)
 
 ## Next
-`/review SWD-469` — focused sequential lasers then code review (same PR). Closeout after CLEAN.
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652
