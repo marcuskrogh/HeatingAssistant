@@ -1,7 +1,8 @@
 import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=124';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=127';
+import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=146';
+import { bindKpiExpandSection } from '../components/kpi-expand.js?v=146';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=124';
@@ -15,6 +16,16 @@ import {
   solarGainGaugeMax,
   roomModelFit,
 } from '../kpi-engine.js?v=124';
+import {
+  energyPriceDetail,
+  heatLossDetail,
+  nextControlDetail,
+  nextNmpcDetail,
+  roomModelFitDetail,
+  roomPowerDetail,
+  solarGainDetail,
+  timeInRangeDetail,
+} from '../kpi-detail-catalog.js?v=146';
 import { setPanelHash } from '../panel-hash.js?v=124';
 import {
   setRoomComfortOffset,
@@ -150,6 +161,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'grid-kpi';
   container.appendChild(kpiGrid);
+  const kpiExpand = bindKpiExpandSection(kpiGrid);
 
   // KPIs use the same gauge design as the overview page (label + value +
   // severity bar). At room level these are the *current system values for this
@@ -218,17 +230,41 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     severity: KPI_SEVERITY.modelFit,
   });
 
-  kpiGrid.appendChild(timeInRangeGauge);
-  kpiGrid.appendChild(powerGauge);
-  kpiGrid.appendChild(priceGauge);
-  kpiGrid.appendChild(solarGauge);
-  kpiGrid.appendChild(heatLossGauge);
-  kpiGrid.appendChild(modelFitGauge);
+  kpiExpand.register(timeInRangeGauge, {
+    key: 'time-in-range',
+    detail: (s) => timeInRangeDetail(s, room, isRoomActive(s, roomSlug)),
+  });
+  kpiExpand.register(powerGauge, {
+    key: 'power',
+    detail: (s) => roomPowerDetail(s, room, powerBounds),
+  });
+  kpiExpand.register(priceGauge, {
+    key: 'energy-price',
+    detail: (s) => energyPriceDetail(s, priceEntity, priceBounds),
+  });
+  kpiExpand.register(solarGauge, {
+    key: 'solar-gain',
+    detail: (s) => solarGainDetail(s, room),
+  });
+  kpiExpand.register(heatLossGauge, {
+    key: 'heat-loss',
+    detail: (s) => heatLossDetail(s, room),
+  });
+  kpiExpand.register(modelFitGauge, {
+    key: 'model-fit',
+    detail: (s) => roomModelFitDetail(s, room),
+  });
 
   const countdown = createCountdown(state, true);
-  kpiGrid.appendChild(countdown.element);
+  kpiExpand.register(countdown.element, {
+    key: 'next-control',
+    detail: nextControlDetail,
+  });
   const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: true });
-  kpiGrid.appendChild(nmpcCountdown.element);
+  kpiExpand.register(nmpcCountdown.element, {
+    key: 'next-nmpc',
+    detail: nextNmpcDetail,
+  });
 
   function paintCountdownLoading(s) {
     setCountdownComputing(
@@ -327,6 +363,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   paintSolarGauge(entityValue(state, solarEntity));
   paintHeatLossGauge(state);
   paintModelFitGauge(state);
+  kpiExpand.paint(state);
 
   // ── Schedule overview ──────────────────────────────────────────────────────
   // Mirrors the schedules index-card design; clicking opens the editable
@@ -510,6 +547,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       paintHeatLossGauge(newState);
       paintModelFitGauge(newState);
       paintCountdownLoading(newState);
+      kpiExpand.paint(newState);
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.

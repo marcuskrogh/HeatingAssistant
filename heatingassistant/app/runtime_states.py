@@ -72,6 +72,7 @@ class HassStatesMixin:
                 "control_computing": bool(self._control_computing),
                 "nmpc_result_ts": self._nmpc_result_ts,
                 "last_control_ran_ts": self._last_control_ran_ts,
+                "last_nmpc_duration_s": self._last_nmpc_duration_s,
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
             },

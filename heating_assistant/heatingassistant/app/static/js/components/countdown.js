@@ -50,6 +50,12 @@ export function setCountdownComputing(container, computing) {
   container.classList.toggle('countdown--computing', !!computing);
 }
 
+export function countdownRemaining(state, options = false) {
+  const spec = resolveSpec(options);
+  const dtS = getDtSeconds(state, spec);
+  return computeRemaining(state, dtS, spec);
+}
+
 // The control countdown is meaningless while the system is stopped: no control
 // action is taken at the next tick, so the ring is frozen and the value is
 // blanked rather than counting down. Driven by the same system_enabled flag the

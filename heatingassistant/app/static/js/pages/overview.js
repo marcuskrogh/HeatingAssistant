@@ -1,6 +1,7 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=127';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=146';
+import { bindKpiExpandSection } from '../components/kpi-expand.js?v=146';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
 import {
@@ -15,6 +16,18 @@ import {
   mpcLoadPercent,
 } from '../kpi-engine.js?v=124';
 import {
+  comfortDetail,
+  dailyEnergyDetail,
+  heatingPowerDetail,
+  houseModelFitDetail,
+  mpcLoadDetail,
+  nextControlDetail,
+  nextNmpcDetail,
+  overallHealthDetail,
+  systemCopDetail,
+  trackingErrorDetail,
+} from '../kpi-detail-catalog.js?v=146';
+import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue, entityAttr, systemEntity,
 } from '../utils.js?v=127';
@@ -27,8 +40,12 @@ export function renderOverview(container, rooms, state, connection, hass) {
   const systemGrid = document.createElement('div');
   systemGrid.className = 'grid-kpi';
 
+  const systemExpand = bindKpiExpandSection(systemGrid);
   const systemGauges = buildSystemStatusGauges(state);
-  systemGauges.forEach((g) => systemGrid.appendChild(g.element));
+  systemGauges.forEach((g) => {
+    systemExpand.register(g.element, { key: g.key, detail: g.detail });
+  });
+  systemExpand.paint(state);
   kpiSection.appendChild(systemGrid);
   container.appendChild(kpiSection);
 
@@ -36,14 +53,24 @@ export function renderOverview(container, rooms, state, connection, hass) {
   controllerSection.innerHTML = '<div class="section-header">CONTROLLER KPIS</div>';
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'grid-kpi';
+  const controllerExpand = bindKpiExpandSection(kpiGrid);
 
   const gauges = buildControllerGauges(state, rooms, connection);
-  gauges.forEach((g) => kpiGrid.appendChild(g.element));
+  gauges.forEach((g) => {
+    controllerExpand.register(g.element, { key: g.key, detail: g.detail });
+  });
 
   const countdown = createCountdown(state, false);
-  kpiGrid.appendChild(countdown.element);
+  controllerExpand.register(countdown.element, {
+    key: 'next-control',
+    detail: nextControlDetail,
+  });
   const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: false });
-  kpiGrid.appendChild(nmpcCountdown.element);
+  controllerExpand.register(nmpcCountdown.element, {
+    key: 'next-nmpc',
+    detail: nextNmpcDetail,
+  });
+  controllerExpand.paint(state);
 
   const applyComputing = (s) => {
     setCountdownComputing(
@@ -128,6 +155,8 @@ export function renderOverview(container, rooms, state, connection, hass) {
       systemGauges.forEach((g) => g.updater(newState));
       gauges.forEach((g) => g.updater(newState));
       applyComputing(newState);
+      systemExpand.paint(newState);
+      controllerExpand.paint(newState);
       tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
       updateCountdown(nmpcCountdown, newState);
@@ -157,6 +186,8 @@ function buildSystemStatusGauges(state) {
     severity: { good: 80, warning: 40 },
   });
   gauges.push({
+    key: 'overall-health',
+    detail: overallHealthDetail,
     element: healthGauge,
     updater: (s) => {
       const q = systemQualityFromState(s);
@@ -179,6 +210,8 @@ function buildSystemStatusGauges(state) {
     severity: KPI_SEVERITY.mpcLoad,
   });
   gauges.push({
+    key: 'mpc-load',
+    detail: mpcLoadDetail,
     element: mpcGauge,
     updater: (s) => updateGauge(mpcGauge, {
       value: mpcLoadPercent(s) ?? 0, min: 0, max: 100,
@@ -224,6 +257,8 @@ function buildControllerGauges(state, rooms, connection) {
   });
   if (houseComfortIndex(state, rooms) === null) comfortGauge.style.display = 'none';
   gauges.push({
+    key: 'comfort',
+    detail: (s) => comfortDetail(s, rooms),
     element: comfortGauge,
     updater: (s) => {
       const idx = houseComfortIndex(s, rooms);
@@ -247,6 +282,8 @@ function buildControllerGauges(state, rooms, connection) {
     severity: KPI_SEVERITY.houseHeatingPower,
   });
   gauges.push({
+    key: 'heating-power',
+    detail: heatingPowerDetail,
     element: powerGauge,
     updater: (s) => {
       const fill = houseHeatingPowerGaugeFill(s) ?? 0;
@@ -270,6 +307,8 @@ function buildControllerGauges(state, rooms, connection) {
   });
   if (initialCop === null) copGauge.style.display = 'none';
   gauges.push({
+    key: 'system-cop',
+    detail: systemCopDetail,
     element: copGauge,
     updater: (s) => {
       const cop = houseEffectiveCop(s);
@@ -305,7 +344,12 @@ function buildControllerGauges(state, rooms, connection) {
       severity: KPI_SEVERITY.dailyEnergy,
     });
   }
-  gauges.push({ element: energyGauge, updater: paintEnergy });
+  gauges.push({
+    key: 'daily-energy',
+    detail: () => dailyEnergyDetail(dailyEnergy.value(), dailyEnergy._ready),
+    element: energyGauge,
+    updater: paintEnergy,
+  });
 
   // ── Mean tracking error ──────────────────────────────────────────────────────
   const trackingGauge = createGauge({
@@ -318,6 +362,8 @@ function buildControllerGauges(state, rooms, connection) {
   });
   if (houseMeanTrackingError(state, rooms) === null) trackingGauge.style.display = 'none';
   gauges.push({
+    key: 'tracking-error',
+    detail: (s) => trackingErrorDetail(s, rooms),
     element: trackingGauge,
     updater: (s) => {
       const err = houseMeanTrackingError(s, rooms);
@@ -341,6 +387,8 @@ function buildControllerGauges(state, rooms, connection) {
     severity: KPI_SEVERITY.modelFit,
   });
   gauges.push({
+    key: 'model-fit',
+    detail: (s) => houseModelFitDetail(s, rooms),
     element: fitGauge,
     updater: (s) => {
       const fit = houseModelFit(s, rooms);

@@ -50,8 +50,10 @@ class NmpcMixin:
         self._nmpc_thread.start()
 
     def _nmpc_worker_thread(self) -> None:
+        started = time.time()
         try:
             result = self.control_engine.solve_nmpc_blocking()
+            self._last_nmpc_duration_s = max(0.0, time.time() - started)
             stamp = time.time()
             applied = self.control_engine.apply_nmpc_result(
                 result,
@@ -64,6 +66,7 @@ class NmpcMixin:
             if applied:
                 self._install_nmpc_p_command()
         except Exception:
+            self._last_nmpc_duration_s = max(0.0, time.time() - started)
             _logger.exception("NMPC worker failed")
             controller = getattr(self.control_engine, "_controller", None)
             if controller is not None:

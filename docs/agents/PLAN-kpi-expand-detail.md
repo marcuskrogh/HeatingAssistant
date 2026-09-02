@@ -120,7 +120,8 @@ Missing values render as `—`. Hidden gauges stay omitted from the grid.
 ## Inputs
 - Research: none
 - Model: none
-- Sandbox: none yet (`sandbox/kpi-expand/` after `/sandbox`)
+- Sandbox: `docs/agents/SANDBOX-kpi-expand.md` (`sandbox/kpi-expand/inspect/`)
+- Architecture: `docs/agents/ARCHITECTURE-kpi-expand-detail.md`
 - Prior: SWD-430 countdown computing overlay; SWD-300 Overview KPI split;
   `heatingassistant/app/static/js/components/gauge.js`;
   `heatingassistant/app/static/js/pages/overview.js`;
@@ -167,11 +168,9 @@ Missing values render as `—`. Hidden gauges stay omitted from the grid.
 - Task: [SWD-469](https://marcusknielsen.atlassian.net/browse/SWD-469)
 - Sub-tasks: SWD-470, SWD-471, SWD-472, SWD-473
 - Branch: `cursor/swd-469-kpi-expand-e3f0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/652 (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/652
 - Classification: feature
 - Workflow: feature-standard (`sandbox=inject`)
 
 ## Next
-`/architect SWD-469` — Shape the expand host and catalog on this branch (`ARCHITECTURE.md`), then `/sandbox SWD-469`.
-
-(`/ship SWD-469` finishes remaining along the bound chain.)
+`/review SWD-469` — focused sequential lasers then code review (same PR). Closeout after CLEAN.
