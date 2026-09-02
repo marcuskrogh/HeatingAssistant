@@ -167,7 +167,7 @@ Missing values render as `—`. Hidden gauges stay omitted from the grid.
 - Task: [SWD-469](https://marcusknielsen.atlassian.net/browse/SWD-469)
 - Sub-tasks: SWD-470, SWD-471, SWD-472, SWD-473
 - Branch: `cursor/swd-469-kpi-expand-e3f0`
-- PR: (draft, this define)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/652 (draft)
 - Classification: feature
 - Workflow: feature-standard (`sandbox=inject`)
 
