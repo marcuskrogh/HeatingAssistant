@@ -210,6 +210,9 @@ class HeatingRuntime(
         self._last_control_duration_s: float = float(
             self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
         )
+        self._last_nmpc_duration_s: float | None = self._coerce_number(
+            self.state.get("last_nmpc_duration_s")
+        )
         self._last_control_trajectory: ControlTrajectory | None = None
         self._last_effective_params: dict[str, EffectiveControlParams] = {}
         self._energy_total_wh: dict[str, float] = {
@@ -1487,6 +1490,7 @@ class HeatingRuntime(
             "last_run_ts": self._last_nmpc_ts,
             "last_nmpc_ts": self._last_nmpc_ts,
             "last_duration_s": self._last_control_duration_s,
+            "last_nmpc_duration_s": self._last_nmpc_duration_s,
             "nmpc_computing": bool(self._nmpc_computing),
             "control_computing": bool(self._control_computing),
             "nmpc_result_ts": self._nmpc_result_ts,
@@ -2617,6 +2621,7 @@ class HeatingRuntime(
         self.state["last_nmpc_attempt_ts"] = self._last_nmpc_attempt_ts
         self.state["last_nmpc_slow_slot"] = self._last_nmpc_slow_slot
         self.state["last_control_duration_s"] = self._last_control_duration_s
+        self.state["last_nmpc_duration_s"] = self._last_nmpc_duration_s
         self.state["energy_total_wh"] = dict(self._energy_total_wh)
         self.state["energy_last_ts"] = self._energy_last_ts
         self.state["config"] = dict(self.options)

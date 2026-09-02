@@ -51,7 +51,14 @@ class DomNode {
     this._listeners = {};
     this._inner = '';
   }
-  appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+  appendChild(child) {
+    if (child.parentNode) {
+      child.parentNode.children = child.parentNode.children.filter((c) => c !== child);
+    }
+    this.children.push(child);
+    child.parentNode = this;
+    return child;
+  }
   remove() {
     if (this.parentNode) {
       this.parentNode.children = this.parentNode.children.filter((c) => c !== this);

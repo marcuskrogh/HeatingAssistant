@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.08.41
+
+- Overview and room KPI cards stay the same at a glance. Click one to move
+  it to the top of that section and open a larger card: the live value and
+  animation on top, and a darker panel below with what the number means and
+  the absolute figures. MPC LOAD still shows a percent; the open card lists
+  last P-cycle time and last NMPC solve time in seconds.
+
 # 2026.08.40
 
 - Room Forecast shows the last NMPC temperature trajectory — the air

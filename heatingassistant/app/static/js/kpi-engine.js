@@ -147,6 +147,29 @@ export function comfortIndexPct(state, rooms) {
   return (100 * inBand) / eligible;
 }
 
+/** In-band counts and out-of-band room names for the comfort detail card. */
+export function houseComfortBreakdown(state, rooms) {
+  const active = rooms.filter((r) => isRoomActive(state, r.slug));
+  let eligible = 0;
+  let inBand = 0;
+  const outNames = [];
+  for (const room of active) {
+    const temp = roomTemperature(state, room);
+    const lower = entityValue(state, room.entities?.constraint_lower);
+    const upper = entityValue(state, room.entities?.constraint_upper);
+    if (!isFiniteNum(temp) || !isFiniteNum(lower) || !isFiniteNum(upper)) {
+      continue;
+    }
+    eligible += 1;
+    if (lower <= temp && temp <= upper) {
+      inBand += 1;
+    } else {
+      outNames.push(room.name || room.slug);
+    }
+  }
+  return { eligible, inBand, outNames };
+}
+
 /**
  * House comfort index [%].
  * Prefers ``system_summary.comfort_index_pct``; falls back to client computation.

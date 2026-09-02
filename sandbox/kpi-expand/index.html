@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sandbox: expandable KPI detail cards</title>
+  <style>
+    html, body { margin: 0; background: #111318; color: #e8eaed; font-family: system-ui, sans-serif; }
+    .page { padding: 20px 24px 32px; max-width: 980px; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+    .lead { color: #9aa0a8; font-size: 13px; margin: 0 0 20px; max-width: 78ch; }
+    ha-kpi-host { display: block; min-height: 280px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Expandable KPI detail cards</h1>
+    <p class="lead" id="lead">
+      Overview SYSTEM STATUS plus CONTROLLER KPIS using production gauges,
+      countdown rings, expand host, and industrial tokens.
+    </p>
+    <ha-kpi-host></ha-kpi-host>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
