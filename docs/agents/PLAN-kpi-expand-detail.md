@@ -173,4 +173,4 @@ Missing values render as `—`. Hidden gauges stay omitted from the grid.
 - Workflow: feature-standard (`sandbox=inject`)
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652 (`cdd42be`)
