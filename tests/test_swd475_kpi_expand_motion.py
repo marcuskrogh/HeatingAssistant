@@ -28,6 +28,7 @@ def test_production_host_flips_follows_and_writes_description_topic() -> None:
         assert "{ motion: false }" in host
         assert "prefers-reduced-motion" in host
         assert "kpi-expand card" in host
+        assert "kpi-expand__lead" not in host
 
 
 def test_production_css_inset_and_row_separators() -> None:
@@ -38,7 +39,7 @@ def test_production_css_inset_and_row_separators() -> None:
         assert "kpi-expand__section-title" in css
         assert "row:not(:last-child)" in css
         assert ".kpi-expand.card" in css
-        assert "kpi-expand.kpi-expand--open > .kpi-expand__lead" in css
+        assert "kpi-expand__lead" not in css
 
 
 def test_overview_nmpc_and_room_regulator_load() -> None:
@@ -69,8 +70,8 @@ def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=148" in index
-        assert "return '148'" in dashboard
+        assert "industrial-dashboard.js?v=149" in index
+        assert "return '149'" in dashboard
 
 
 def test_load_catalog_harness() -> None:
