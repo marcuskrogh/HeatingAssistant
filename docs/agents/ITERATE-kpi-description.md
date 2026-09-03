@@ -34,4 +34,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/653
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653 (`412eb31`)

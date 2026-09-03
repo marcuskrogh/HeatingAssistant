@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-474 | Task | [Tweak] Short KPI description on Overview and room cards | In Review | — | docs/agents/ITERATE-kpi-description.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653 |
+| SWD-474 | Task | [Tweak] Short KPI description on Overview and room cards | Done | — | docs/agents/ITERATE-kpi-description.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653 (`412eb31`) |
 | SWD-469 | Task | [Feature] Expandable KPI detail cards on Overview and room view | Done | — | docs/agents/PLAN-kpi-expand-detail.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652 (`cdd42be`) |
 | SWD-470 | Sub-task | Expand host + CSS for KPI detail cards | Done | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
 | SWD-471 | Sub-task | KPI detail copy catalog + last NMPC duration | Done | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
@@ -197,6 +197,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-03 — `/ship` SWD-474 via PR #653 (`412eb31`): one-sentence KPI description on Overview and room cards; CalVer 2026.09.0; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.0`. Next Done.
 - 2026-09-03 — `/review` SWD-474 CLEAN (focused sequential). COMMENT on PR #653. Next ship merge.
 - 2026-09-03 — `/test`+`/restructure` SWD-474: harness locks collapsed lead text; kpi-expand host campground OK. Next `/review SWD-474`.
 - 2026-09-03 — `/iterate` SWD-474 from SWD-469: always-visible one-sentence KPI description; CalVer 2026.09.0. Next `/test SWD-474`.
