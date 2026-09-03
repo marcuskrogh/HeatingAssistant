@@ -24,6 +24,8 @@ export const HOUSE_POWER_GAUGE_SCALE_FACTOR = 1.2;
 export const COMFORT_DEVIATION_GAUGE_MAX_C = 2.0;
 export const DAILY_ENERGY_GAUGE_MAX_KWH = 100;
 export const MPC_LOAD_GAUGE_MAX_PCT = 100;
+export const NMPC_LOAD_FRACTION = 0.1;
+export const REGULATOR_BUDGET_S = MAX_SOLVE_TIME_S;
 
 /** Severity thresholds per KPI (KPI_SPEC §4–5). Use with severityColor / severityColorInverse. */
 export const KPI_SEVERITY = {
@@ -326,12 +328,33 @@ export function houseHeatingPowerGaugeMax(liveTotalW, ratedCapacityW = null) {
   );
 }
 
-/** MPC solve load as percent of MAX_SOLVE_TIME_S (§4.8). */
+/** MPC / regulator P-cycle load as percent of REGULATOR_BUDGET_S (2 s, §4.8). */
 export function mpcLoadPercent(state) {
   const mpcEntity = systemEntity('mpc_performance');
   const solveS = entityValue(state, mpcEntity);
   if (solveS === null) return 0;
-  return Math.min(100, (solveS / MAX_SOLVE_TIME_S) * 100);
+  return Math.min(100, (solveS / REGULATOR_BUDGET_S) * 100);
+}
+
+/** Same 2 s P-cycle load used by the room Regulator Load card. */
+export function regulatorLoadPercent(state) {
+  return mpcLoadPercent(state);
+}
+
+/** NMPC 100% = NMPC_LOAD_FRACTION of the NMPC period. */
+export function nmpcLoadBudgetS(periodS) {
+  const period = Number(periodS);
+  if (!Number.isFinite(period) || period <= 0) return null;
+  return NMPC_LOAD_FRACTION * period;
+}
+
+/** Last NMPC duration versus 10% of the NMPC period, clamped at 100%. */
+export function nmpcLoadPercent(state) {
+  const entity = systemEntity('mpc_performance');
+  const duration = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
+  const budget = nmpcLoadBudgetS(entityAttr(state, entity, 'nmpc_period_s'));
+  if (!Number.isFinite(duration) || budget == null || budget <= 0) return null;
+  return Math.min(100, (duration / budget) * 100);
 }
 
 /** Normalised house heating power for gauge fill: live / max, 0–1 (§4.3). */

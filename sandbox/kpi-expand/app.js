@@ -1,7 +1,14 @@
 import { createGauge } from '/ha-industrial-panel/js/components/gauge.js';
 import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '/ha-industrial-panel/js/components/countdown.js';
-import { bindKpiExpandSection } from '/ha-industrial-panel/js/components/kpi-expand.js';
-import { mpcLoadDetail, nextControlDetail, nextNmpcDetail, overallHealthDetail } from '/ha-industrial-panel/js/kpi-detail-catalog.js';
+import { bindKpiExpandSection } from './kpi-expand.js';
+import { nextControlDetail, nextNmpcDetail } from '/ha-industrial-panel/js/kpi-detail-catalog.js';
+import {
+  nmpcLoadDetail,
+  nmpcLoadPercent,
+  overallHealthDetail,
+  regulatorLoadDetail,
+  regulatorLoadPercent,
+} from './load-catalog.js';
 
 const NOW_S = Date.now() / 1000;
 
@@ -42,66 +49,123 @@ class HaKpiHost extends HTMLElement {
     css.rel = 'stylesheet';
     css.href = '/ha-industrial-panel/css/industrial.css';
     root.appendChild(css);
+    const overlay = document.createElement('link');
+    overlay.rel = 'stylesheet';
+    overlay.href = './expand.css';
+    root.appendChild(overlay);
 
     const wrap = document.createElement('div');
     wrap.style.background = 'var(--bg-primary)';
     wrap.style.padding = '16px';
     wrap.style.borderRadius = '8px';
 
-    const systemHeader = document.createElement('div');
-    systemHeader.className = 'section-header';
-    systemHeader.textContent = 'SYSTEM STATUS';
-    wrap.appendChild(systemHeader);
+    const overviewLabel = document.createElement('div');
+    overviewLabel.className = 'section-header';
+    overviewLabel.textContent = 'OVERVIEW · SYSTEM STATUS';
+    wrap.appendChild(overviewLabel);
     const systemGrid = document.createElement('div');
     systemGrid.className = 'grid-kpi';
     wrap.appendChild(systemGrid);
 
-    const controllerHeader = document.createElement('div');
-    controllerHeader.className = 'section-header';
-    controllerHeader.textContent = 'CONTROLLER KPIS';
-    wrap.appendChild(controllerHeader);
-    const controllerGrid = document.createElement('div');
-    controllerGrid.className = 'grid-kpi';
-    wrap.appendChild(controllerGrid);
+    const roomLabel = document.createElement('div');
+    roomLabel.className = 'section-header';
+    roomLabel.textContent = 'ROOM VIEW · ROOM KPIS';
+    wrap.appendChild(roomLabel);
+    const roomGrid = document.createElement('div');
+    roomGrid.className = 'grid-kpi';
+    wrap.appendChild(roomGrid);
     root.appendChild(wrap);
+
+    const params = new URLSearchParams(location.search);
+    const mode = params.get('mode') || 'collapsed';
+    const state = fixtureState({ nmpc: mode === 'computing' });
 
     const systemExpand = bindKpiExpandSection(systemGrid);
     const health = createGauge({
       value: 100, min: 0, max: 100, label: 'OVERALL HEALTH', format: () => 'HEALTHY',
     });
     systemExpand.register(health, { key: 'overall-health', detail: overallHealthDetail });
-    const mpc = createGauge({
-      value: 9, min: 0, max: 100, label: 'MPC LOAD', format: (v) => `${v.toFixed(0)}%`,
+    const nmpcLoad = nmpcLoadPercent(state) ?? 0;
+    const nmpcGauge = createGauge({
+      value: nmpcLoad,
+      min: 0,
+      max: 100,
+      label: 'NMPC LOAD',
+      format: (v) => `${v.toFixed(0)}%`,
+      severity: { good: 25, warning: 50, inverse: true },
     });
-    systemExpand.register(mpc, { key: 'mpc-load', detail: mpcLoadDetail });
+    systemExpand.register(nmpcGauge, { key: 'nmpc-load', detail: nmpcLoadDetail });
 
-    const controllerExpand = bindKpiExpandSection(controllerGrid);
+    const roomExpand = bindKpiExpandSection(roomGrid);
+    const regulator = regulatorLoadPercent(state) ?? 0;
+    const regulatorGauge = createGauge({
+      value: regulator,
+      min: 0,
+      max: 100,
+      label: 'REGULATOR LOAD',
+      format: (v) => `${v.toFixed(0)}%`,
+      severity: { good: 25, warning: 50, inverse: true },
+    });
+    roomExpand.register(regulatorGauge, { key: 'regulator-load', detail: regulatorLoadDetail });
+    const range = createGauge({
+      value: 96, min: 0, max: 100, label: 'TIME IN RANGE', format: (v) => `${v.toFixed(0)}%`,
+    });
+    roomExpand.register(range, {
+      key: 'time-in-range',
+      detail: () => ({
+        description: 'Share of the last 24 hours this room stayed inside its comfort band.',
+        sections: [{
+          title: 'Comfort',
+          rows: [
+            { label: 'Time in range', value: '96%' },
+            { label: 'Band', value: '20.0–22.0°C' },
+          ],
+        }],
+      }),
+    });
     const power = createGauge({
       value: 1.2, min: 0, max: 4, label: 'HEATING POWER', format: (v) => `${v.toFixed(1)} kW`,
     });
-    controllerExpand.register(power, {
+    roomExpand.register(power, {
       key: 'heating-power',
       detail: () => ({
-        description: 'Sum of measured heater power across the house.',
-        rows: [
-          { label: 'Live', value: '4.2 kW' },
-          { label: 'Fill', value: '42%' },
-        ],
+        description: 'Measured heater power for this room.',
+        sections: [{
+          title: 'Power',
+          rows: [
+            { label: 'Live', value: '1.2 kW' },
+            { label: 'Gauge max', value: '4.0 kW' },
+          ],
+        }],
       }),
     });
-    const control = createCountdown(fixtureState(), false);
-    controllerExpand.register(control.element, { key: 'next-control', detail: nextControlDetail });
-    const nmpc = createCountdown(fixtureState(), { ...COUNTDOWN_NMPC, small: false });
-    controllerExpand.register(nmpc.element, { key: 'next-nmpc', detail: nextNmpcDetail });
+    const control = createCountdown(state, false);
+    roomExpand.register(control.element, { key: 'next-control', detail: nextControlDetail });
+    const nmpc = createCountdown(state, { ...COUNTDOWN_NMPC, small: false });
+    roomExpand.register(nmpc.element, { key: 'next-nmpc', detail: nextNmpcDetail });
+    for (let i = 1; i <= 4; i += 1) {
+      const filler = createGauge({
+        value: 20 + i * 5,
+        min: 0,
+        max: 100,
+        label: `SPARE ${i}`,
+        format: (v) => `${v.toFixed(0)}%`,
+      });
+      roomExpand.register(filler, {
+        key: `spare-${i}`,
+        detail: () => ({
+          description: 'Filler card so a click below the fold must follow the card to the top.',
+          sections: [{ title: 'Spare', rows: [{ label: 'Index', value: String(i) }] }],
+        }),
+      });
+    }
 
-    const params = new URLSearchParams(location.search);
-    const mode = params.get('mode') || 'collapsed';
-    const state = fixtureState({ nmpc: mode === 'nmpc' });
     systemExpand.paint(state);
-    controllerExpand.paint(state);
+    roomExpand.paint(state);
     setCountdownComputing(nmpc.element, Boolean(state['sensor.heating_assistant_mpc_performance'].attributes.nmpc_computing));
-    if (mode === 'mpc') systemExpand.open('mpc-load');
-    if (mode === 'nmpc') controllerExpand.open('next-nmpc');
+    if (mode === 'nmpc') systemExpand.open('nmpc-load');
+    if (mode === 'regulator') roomExpand.open('regulator-load');
+    if (mode === 'computing') roomExpand.open('next-nmpc');
 
     const lead = document.getElementById('lead');
     if (lead && !lead.dataset.filled) {

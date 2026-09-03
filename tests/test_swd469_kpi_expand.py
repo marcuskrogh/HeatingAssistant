@@ -60,8 +60,9 @@ def test_overview_and_room_register_expand_host() -> None:
         css = _read(static, "css", "industrial.css")
         assert "bindKpiExpandSection" in overview
         assert "bindKpiExpandSection" in room
-        assert "mpcLoadDetail" in overview
+        assert "nmpcLoadDetail" in overview
         assert "timeInRangeDetail" in room
+        assert "regulatorLoadDetail" in room
         assert "kpi-expand--open" in css
         assert "kpi-expand__lead" in css
         assert "kpi-expand__detail" in css
@@ -72,8 +73,8 @@ def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=147" in index
-        assert "return '147'" in dashboard
+        assert "industrial-dashboard.js?v=148" in index
+        assert "return '148'" in dashboard
 
 
 def test_nmpc_worker_publishes_last_nmpc_duration(tmp_path: Path) -> None:

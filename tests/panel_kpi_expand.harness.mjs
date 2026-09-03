@@ -17,24 +17,24 @@ function assert(cond, msg) {
   }
 }
 
-const keys = ['overall-health', 'mpc-load', 'comfort'];
+const keys = ['overall-health', 'nmpc-load', 'comfort'];
 
 {
-  const next = mod.expandStateAfterClick({ keys, openKey: null, clickedKey: 'mpc-load' });
-  assert(next.openKey === 'mpc-load', 'first click must expand mpc-load');
-  assert(next.order[0] === 'mpc-load', 'expanded card must move to the top');
+  const next = mod.expandStateAfterClick({ keys, openKey: null, clickedKey: 'nmpc-load' });
+  assert(next.openKey === 'nmpc-load', 'first click must expand nmpc-load');
+  assert(next.order[0] === 'nmpc-load', 'expanded card must move to the top');
   assert(JSON.stringify(next.order.slice(1)) === JSON.stringify(['overall-health', 'comfort']), 'remaining order is original minus clicked');
 }
 
 {
-  const open = mod.expandStateAfterClick({ keys, openKey: 'mpc-load', clickedKey: 'comfort' });
+  const open = mod.expandStateAfterClick({ keys, openKey: 'nmpc-load', clickedKey: 'comfort' });
   assert(open.openKey === 'comfort', 'second card must become the open card');
   assert(open.order[0] === 'comfort', 'new card must sit at the top');
-  assert(open.order.includes('mpc-load'), 'previous card stays in the section');
+  assert(open.order.includes('nmpc-load'), 'previous card stays in the section');
 }
 
 {
-  const closed = mod.expandStateAfterClick({ keys, openKey: 'mpc-load', clickedKey: 'mpc-load' });
+  const closed = mod.expandStateAfterClick({ keys, openKey: 'nmpc-load', clickedKey: 'nmpc-load' });
   assert(nextOpenNull(closed), 'clicking the open card must collapse');
   assert(JSON.stringify(closed.order) === JSON.stringify(keys), 'collapse restores original order');
 }
@@ -80,6 +80,10 @@ class Node {
     if (other === this) return true;
     return this.children.some((c) => c.contains(other));
   }
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: 120, height: 80 };
+  }
+  scrollIntoView() {}
 }
 
 globalThis.document = {
@@ -91,15 +95,25 @@ globalThis.document = {
   const host = mod.bindKpiExpandSection(grid);
   const card = new Node('div');
   host.register(card, {
-    key: 'mpc-load',
-    detail: () => ({ description: 'Share of the 2 s load budget.', rows: [] }),
+    key: 'nmpc-load',
+    detail: () => ({
+      description: 'Share of the NMPC load budget.',
+      sections: [{ title: 'NMPC', rows: [{ label: 'Load', value: '3%' }] }],
+    }),
   });
   host.paint({});
   const wrap = grid.children[0];
+  assert(wrap.className.includes('card'), 'wrap must be the visible card');
   const lead = wrap.children.find((c) => c.className === 'kpi-expand__lead');
   assert(lead, 'collapsed card must include a lead element');
-  assert(lead.textContent === 'Share of the 2 s load budget.', 'collapsed card must show the KPI description');
+  assert(lead.textContent === 'Share of the NMPC load budget.', 'collapsed card must show the KPI description');
   assert(lead.hidden === false, 'lead must stay visible when a description exists');
+  host.open('nmpc-load');
+  const panel = wrap.children.find((c) => c.className === 'kpi-expand__detail');
+  const inner = panel.children.find((c) => c.className === 'kpi-expand__detail-inner');
+  assert(inner.innerHTML.includes('Description'), 'open card must write a Description topic');
+  assert(inner.innerHTML.includes('NMPC'), 'open card must write section titles');
+  assert(inner.innerHTML.includes('3%'), 'open card must write section rows');
 }
 
 console.log('panel_kpi_expand.harness.mjs: ok');

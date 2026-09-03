@@ -1,0 +1,105 @@
+/* Sandbox overlay: outer KPI frame grows; inset holds description + values. */
+
+.kpi-expand.card {
+  overflow: hidden;
+  scroll-margin-top: 16px;
+}
+
+.kpi-expand .card {
+  background: transparent;
+  border: none;
+  padding: 0;
+  height: auto;
+}
+
+.kpi-expand--open .card::before {
+  display: none;
+}
+
+.kpi-expand.kpi-expand--open > .kpi-expand__lead {
+  display: none;
+}
+
+.kpi-expand__detail {
+  display: none;
+  margin-top: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.kpi-expand--open .kpi-expand__detail {
+  display: block;
+  margin-top: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.kpi-expand__detail-inner {
+  overflow: hidden;
+  min-height: 0;
+  margin-top: 2px;
+  padding: 12px 14px 14px;
+  background: color-mix(in srgb, var(--bg-primary) 78%, #000);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, #8892a0);
+  border-radius: 6px;
+}
+
+.kpi-expand__inset-lead {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.kpi-expand__section-title {
+  margin: 12px 0 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* spacing is handled per heading/topic blocks */
+
+.kpi-expand__rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.kpi-expand__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+}
+
+.kpi-expand__row:not(:last-child) {
+  border-bottom: 1px solid color-mix(in srgb, var(--text-dim) 18%, transparent);
+}
+
+.kpi-expand__leader {
+  display: none;
+}
+
+.kpi-expand__description-topic {
+  margin: 0 0 6px;
+}
+
+.kpi-expand__description-title {
+  margin: 0 0 6px;
+}
+
+.kpi-expand__description-text {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-expand {
+    transition: none;
+  }
+}

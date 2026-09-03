@@ -1,7 +1,7 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
 import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=147';
-import { bindKpiExpandSection } from '../components/kpi-expand.js?v=147';
+import { bindKpiExpandSection } from '../components/kpi-expand.js?v=148';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
 import {
@@ -13,20 +13,20 @@ import {
   houseEffectiveCop,
   houseMeanTrackingError,
   houseModelFit,
-  mpcLoadPercent,
-} from '../kpi-engine.js?v=124';
+  nmpcLoadPercent,
+} from '../kpi-engine.js?v=148';
 import {
   comfortDetail,
   dailyEnergyDetail,
   heatingPowerDetail,
   houseModelFitDetail,
-  mpcLoadDetail,
   nextControlDetail,
   nextNmpcDetail,
+  nmpcLoadDetail,
   overallHealthDetail,
   systemCopDetail,
   trackingErrorDetail,
-} from '../kpi-detail-catalog.js?v=147';
+} from '../kpi-detail-catalog.js?v=148';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue, entityAttr, systemEntity,
@@ -201,20 +201,20 @@ function buildSystemStatusGauges(state) {
     },
   });
 
-  const mpcGauge = createGauge({
-    value: mpcLoadPercent(state) ?? 0,
+  const nmpcGauge = createGauge({
+    value: nmpcLoadPercent(state) ?? 0,
     min: 0,
     max: 100,
-    label: 'MPC LOAD',
+    label: 'NMPC LOAD',
     format: (v) => `${formatNumber(v, 0)}%`,
     severity: KPI_SEVERITY.mpcLoad,
   });
   gauges.push({
-    key: 'mpc-load',
-    detail: mpcLoadDetail,
-    element: mpcGauge,
-    updater: (s) => updateGauge(mpcGauge, {
-      value: mpcLoadPercent(s) ?? 0, min: 0, max: 100,
+    key: 'nmpc-load',
+    detail: nmpcLoadDetail,
+    element: nmpcGauge,
+    updater: (s) => updateGauge(nmpcGauge, {
+      value: nmpcLoadPercent(s) ?? 0, min: 0, max: 100,
       format: (v) => `${formatNumber(v, 0)}%`,
       severity: KPI_SEVERITY.mpcLoad,
     }),
