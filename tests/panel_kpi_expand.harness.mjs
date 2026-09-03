@@ -104,9 +104,11 @@ globalThis.document = {
   host.paint({});
   const wrap = grid.children[0];
   assert(wrap.className.includes('card'), 'wrap must be the visible card');
+  assert(!wrap.className.includes('kpi-expand--open'), 'collapsed wrap must not use the open class');
   const lead = wrap.children.find((c) => c.className === 'kpi-expand__lead');
   assert(!lead, 'collapsed card must not include a description lead');
   host.open('nmpc-load');
+  assert(wrap.classList._classes.has('kpi-expand--open'), 'open wrap must use the open class');
   const panel = wrap.children.find((c) => c.className === 'kpi-expand__detail');
   const inner = panel.children.find((c) => c.className === 'kpi-expand__detail-inner');
   assert(inner.innerHTML.includes('Description'), 'open card must write a Description topic');

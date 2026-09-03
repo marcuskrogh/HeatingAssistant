@@ -35,4 +35,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/655
 
 ## Next
-`/test SWD-476` — Dedicated testing phase, then restructure, then review
+`/restructure SWD-476` — Structure pass (same catalog as implement; small diffs included)
