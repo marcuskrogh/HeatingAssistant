@@ -137,18 +137,29 @@ export function bindKpiExpandSection(grid) {
     const description = payload.description || '';
     item.lead.textContent = description;
     item.lead.hidden = !description;
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const lines = rows
-      .map((row) => {
-        const label = escapeText(row.label || '');
-        const value = escapeText(row.value == null || row.value === '' ? '—' : String(row.value));
-        return `<div class="kpi-expand__row"><dt>${label}</dt><dd>${value}</dd></div>`;
+    const sections = Array.isArray(payload.sections) && payload.sections.length
+      ? payload.sections
+      : [{ title: '', rows: Array.isArray(payload.rows) ? payload.rows : [] }];
+    const body = sections
+      .map((section) => {
+        const heading = section.title
+          ? `<h3 class="kpi-expand__section-title">${escapeText(section.title)}</h3>`
+          : '';
+        const rows = Array.isArray(section.rows) ? section.rows : [];
+        const lines = rows
+          .map((row) => {
+            const label = escapeText(row.label || '');
+            const value = escapeText(row.value == null || row.value === '' ? '—' : String(row.value));
+            return `<div class="kpi-expand__row"><dt>${label}</dt><span class="kpi-expand__leader" aria-hidden="true"></span><dd>${value}</dd></div>`;
+          })
+          .join('');
+        return `${heading}<dl class="kpi-expand__rows">${lines}</dl>`;
       })
       .join('');
     const insetLead = description
       ? `<p class="kpi-expand__inset-lead">${escapeText(description)}</p>`
       : '';
-    item.inner.innerHTML = `${insetLead}<dl class="kpi-expand__rows">${lines}</dl>`;
+    item.inner.innerHTML = `${insetLead}${body}`;
   }
 
   function syncHidden(item) {

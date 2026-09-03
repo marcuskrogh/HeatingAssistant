@@ -80,8 +80,8 @@ def main() -> None:
     try:
         for mode, name in (
             ("collapsed", f"{args.tag}_collapsed.png"),
-            ("mpc", f"{args.tag}_mpc_expanded.png"),
-            ("nmpc", f"{args.tag}_nmpc_expanded.png"),
+            ("nmpc", f"{args.tag}_nmpc_load.png"),
+            ("regulator", f"{args.tag}_regulator_load.png"),
         ):
             dest = INSPECT / name
             _screenshot(f"{origin}/?mode={mode}", dest)

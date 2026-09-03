@@ -1,59 +1,63 @@
-# Sandbox: KPI expand motion and viewport follow
+# Sandbox: KPI expand motion and split load cards
 
 ## Element
-Click-to-expand KPI cards: the open card moves to the top of its section
-while the outer frame grows. Description and value rows sit in a nested
-detail card inside that frame. The viewport follows so the click does
-not leave the card off-screen.
+Click-to-expand KPI cards with split load KPIs:
+- Overview SYSTEM STATUS: NMPC Load (last NMPC solve vs 10% of the NMPC
+  period, clamped at 100%).
+- Room view: Regulator Load (last P-cycle vs 2 s). Expand shows regulator
+  description only, then Regulator and NMPC row groups.
+- Nested inset, subsection titles, faint dotted leaders between labels and
+  values. Outer card still moves to the top of its section and the viewport
+  follows.
 
 ## Kind
 visual
 
 ## Isolation
 - Path: `sandbox/kpi-expand/`
-- Harness: `python3 sandbox/kpi-expand/harness.py --tag 03`
+- Harness: `python3 sandbox/kpi-expand/harness.py --tag 04`
 - Inspectables: `sandbox/kpi-expand/inspect/`
 
 ## Representativeness
 - Relevant areas:
   - **Runtime** — production `createGauge` / `createCountdown` in a shadow
-    root so `:host` tokens apply, as in the Ingress panel. Candidate host is
-    `sandbox/kpi-expand/kpi-expand.js` (FLIP + follow); production host is
-    not edited this turn.
+    root so `:host` tokens apply. Candidate host is
+    `sandbox/kpi-expand/kpi-expand.js`; load copy is
+    `sandbox/kpi-expand/load-catalog.js`.
   - **Data** — `mpc_performance` fixture with P duration 0.18 s, last NMPC
-    24.7 s, computing flags, intervals, and timestamps.
-  - **Neighbours** — dark industrial theme, two `.grid-kpi` sections, live
-    HEATING POWER neighbour plus both countdown rings. Eight SPARE gauges
-    in CONTROLLER KPIS so a click can start below the fold.
-  - **Path** — production gauge/countdown/catalog via `/ha-industrial-panel/`;
-    sandbox overlay `expand.css` for one-card chrome and height grow.
-  - **Baseline** — collapsed still uses the shipped gauge/countdown chrome;
-    screenshot `open(key)` stays instant (no motion) for stills.
+    24.7 s, `nmpc_period_s` 7200 s (NMPC load ≈ 3%; regulator load 9%).
+  - **Neighbours** — Overview SYSTEM STATUS (health + NMPC Load) and a
+    room KPI grid (Regulator Load, time in range, power, countdown rings).
+  - **Path** — production gauge/countdown via `/ha-industrial-panel/`;
+    sandbox overlay `expand.css`.
+  - **Baseline** — collapsed chrome is still the shipped gauge/countdown.
 - How reproduced: HTTP harness maps `/ha-industrial-panel/` to production
-  static files; sandbox hosts the page shell, candidate host, and overlay CSS.
+  static files; sandbox hosts the page shell, candidate host, load catalog,
+  and overlay CSS.
 - Gaps:
-  - **Room view density** — named. Overview two-section layout is the
-    inspect target; room grid would use the same host on promote.
   - **Live 5 s Ingress poll** — named. Fixture is static for stills.
+  - **Working formula** — NMPC 100% = 10% of period, bar clamped at 100%,
+    until the operator changes it.
 
 ## Bar
 omit (visual)
 
 ## Promote map
 - Production targets:
-  - `heatingassistant/app/static/js/components/kpi-expand.js`
-  - `heatingassistant/app/static/css/industrial.css` (outer KPI frame
-    grows; nested inset holds description + value rows)
-  - Overview / room pages only if cache-bust is required
-- Copy notes: copy sandbox `kpi-expand.js` and overlay rules into production;
-  dual-tree sync after implement. Do not ship sandbox `index.html` or SPARE
-  fillers. Keep `open(key)` without motion for screenshot modes.
+  - `heatingassistant/app/static/js/components/kpi-expand.js` (sections + leaders)
+  - `heatingassistant/app/static/js/kpi-detail-catalog.js` / `kpi-engine.js`
+  - `heatingassistant/app/static/js/pages/overview.js` (NMPC Load)
+  - `heatingassistant/app/static/js/pages/room-detail.js` (Regulator Load)
+  - `heatingassistant/app/static/css/industrial.css`
+- Copy notes: do not ship sandbox `index.html` or SPARE fillers.
+  Keep `open(key)` without motion for screenshot modes.
 
 ## Iterations
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
 | 1 | FLIP move + same-card height grow + viewport follow | sandbox/kpi-expand/inspect/02_* | delta: nested detail card |
-| 2 | Description + values in a nested inset inside the outer frame | sandbox/kpi-expand/inspect/03_* | pending operator |
+| 2 | Description + values in a nested inset inside the outer frame | sandbox/kpi-expand/inspect/03_* | delta: split load KPIs |
+| 3 | NMPC vs Regulator Load, subsections, faint leaders | sandbox/kpi-expand/inspect/04_* | pending operator |
 
 ## Role in pipeline
 Post-merge inspect-loop after SWD-474. Promotion input for `/implement SWD-475`.

@@ -5,7 +5,7 @@
   <title>Sandbox: expandable KPI detail cards</title>
   <style>
     html, body { margin: 0; background: #111318; color: #e8eaed; font-family: system-ui, sans-serif; }
-    .page { padding: 20px 24px 32px; max-width: 980px; }
+    .page { padding: 20px 24px 32px; max-width: 1180px; }
     h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
     .lead { color: #9aa0a8; font-size: 13px; margin: 0 0 20px; max-width: 78ch; }
     ha-kpi-host { display: block; min-height: 280px; }
@@ -15,9 +15,10 @@
   <div class="page">
     <h1>Expandable KPI detail cards</h1>
     <p class="lead" id="lead">
-      Overview SYSTEM STATUS plus CONTROLLER KPIS. Click a lower card: the
-      same card moves to the top of its section and grows. Description and
-      values sit in a nested detail card inside that frame. The page follows.
+      Overview SYSTEM STATUS shows NMPC Load (10% of the NMPC period).
+      Room view shows Regulator Load (2 s budget). Expand NMPC for NMPC
+      rows only. Expand Regulator for regulator copy plus both row groups.
+      Faint dotted leaders join labels to values.
     </p>
     <ha-kpi-host></ha-kpi-host>
   </div>
