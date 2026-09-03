@@ -150,7 +150,7 @@ export function bindKpiExpandSection(grid) {
           .map((row) => {
             const label = escapeText(row.label || '');
             const value = escapeText(row.value == null || row.value === '' ? '—' : String(row.value));
-            return `<div class="kpi-expand__row"><dt>${label}</dt><span class="kpi-expand__leader" aria-hidden="true"></span><dd>${value}</dd></div>`;
+            return `<div class="kpi-expand__row"><dt>${label}</dt><dd>${value}</dd></div>`;
           })
           .join('');
         return `${heading}<dl class="kpi-expand__rows">${lines}</dl>`;

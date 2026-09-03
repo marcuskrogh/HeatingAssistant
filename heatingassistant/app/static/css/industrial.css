@@ -495,10 +495,6 @@
   border-bottom: 1px solid color-mix(in srgb, var(--text-dim) 18%, transparent);
 }
 
-.kpi-expand__leader {
-  display: none;
-}
-
 .kpi-expand__description-topic {
   margin: 0 0 6px;
 }

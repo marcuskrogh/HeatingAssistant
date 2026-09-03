@@ -11,7 +11,6 @@ import {
   houseEffectiveCop,
   houseMeanTrackingError,
   houseModelFit,
-  mpcLoadPercent,
   nmpcLoadPercent,
   nmpcLoadBudgetS,
   regulatorLoadPercent,
@@ -35,7 +34,6 @@ import {
   entityValue,
   entityAttr,
   systemEntity,
-  MAX_SOLVE_TIME_S,
 } from './utils.js?v=127';
 import { COUNTDOWN_CONTROL, COUNTDOWN_NMPC, countdownRemaining } from './components/countdown.js?v=147';
 
@@ -107,28 +105,6 @@ function regulatorRows(state) {
     { label: 'Control interval', value: formatSeconds(entityAttr(state, entity, 'dt_s')) },
     { label: 'Last ran', value: formatUnix(entityAttr(state, entity, 'last_control_ran_ts')) },
   ];
-}
-
-export function mpcLoadDetail(state) {
-  const entity = systemEntity('mpc_performance');
-  const pDuration = entityValue(state, entity);
-  const nmpcDuration = entityAttr(state, entity, 'last_nmpc_duration_s');
-  const load = mpcLoadPercent(state);
-  return {
-    description:
-      `Share of the ${formatNumber(MAX_SOLVE_TIME_S, 0)} s load budget used by the last P-cycle duration. `
-      + 'The percent is not NMPC wall-clock time.',
-    rows: [
-      { label: 'Load', value: load == null ? '—' : formatPercent(load) },
-      { label: 'Last P cycle', value: formatSeconds(pDuration) },
-      { label: 'Last NMPC solve', value: formatSeconds(nmpcDuration) },
-      { label: 'NMPC computing', value: yesNo(entityAttr(state, entity, 'nmpc_computing')) },
-      { label: 'P computing', value: yesNo(entityAttr(state, entity, 'control_computing')) },
-      { label: 'Control interval', value: formatSeconds(entityAttr(state, entity, 'dt_s')) },
-      { label: 'NMPC period', value: formatSeconds(entityAttr(state, entity, 'nmpc_period_s')) },
-      { label: 'Last NMPC result', value: formatUnix(entityAttr(state, entity, 'nmpc_result_ts')) },
-    ],
-  };
 }
 
 export function nmpcLoadDetail(state) {
