@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.0
+
+- Overview and room KPI cards include a short sentence saying what each
+  figure is, both at a glance and when the card is open. The open card still
+  lists the absolute values. First September App version.
+
 # 2026.08.41
 
 - Overview and room KPI cards stay the same at a glance. Click one to move

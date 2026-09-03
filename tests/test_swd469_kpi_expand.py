@@ -50,6 +50,7 @@ def test_expand_state_after_click_restores_original_order() -> None:
     expand = _read(_TREES[0], "js", "components", "kpi-expand.js")
     assert "export function expandStateAfterClick" in expand
     assert "export function bindKpiExpandSection" in expand
+    assert "kpi-expand__lead" in expand
 
 
 def test_overview_and_room_register_expand_host() -> None:
@@ -62,16 +63,17 @@ def test_overview_and_room_register_expand_host() -> None:
         assert "mpcLoadDetail" in overview
         assert "timeInRangeDetail" in room
         assert "kpi-expand--open" in css
+        assert "kpi-expand__lead" in css
         assert "kpi-expand__detail" in css
-        assert "var(--bg-primary)" in css
+        assert "description:" in _read(static, "js", "kpi-detail-catalog.js")
 
 
 def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=146" in index
-        assert "return '146'" in dashboard
+        assert "industrial-dashboard.js?v=147" in index
+        assert "return '147'" in dashboard
 
 
 def test_nmpc_worker_publishes_last_nmpc_duration(tmp_path: Path) -> None:

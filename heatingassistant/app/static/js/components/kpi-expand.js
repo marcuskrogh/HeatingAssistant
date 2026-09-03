@@ -33,7 +33,7 @@ export function bindKpiExpandSection(grid) {
       const open = openKey === item.key;
       item.wrap.classList.toggle('kpi-expand--open', open);
       item.wrap.setAttribute('aria-expanded', open ? 'true' : 'false');
-      if (open) paintDetail(item);
+      paintDetail(item);
     }
   }
 
@@ -55,6 +55,8 @@ export function bindKpiExpandSection(grid) {
   function paintDetail(item) {
     const payload = item.detail(latestState) || {};
     const description = payload.description || '';
+    item.lead.textContent = description;
+    item.lead.hidden = !description;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const lines = rows
       .map((row) => {
@@ -63,10 +65,7 @@ export function bindKpiExpandSection(grid) {
         return `<div class="kpi-expand__row"><dt>${label}</dt><dd>${value}</dd></div>`;
       })
       .join('');
-    item.panel.innerHTML = `
-      <p class="kpi-expand__desc">${escapeText(description)}</p>
-      <dl class="kpi-expand__rows">${lines}</dl>
-    `;
+    item.panel.innerHTML = `<dl class="kpi-expand__rows">${lines}</dl>`;
   }
 
   function syncHidden(item) {
@@ -92,10 +91,13 @@ export function bindKpiExpandSection(grid) {
     wrap.tabIndex = 0;
     wrap.setAttribute('aria-expanded', 'false');
     wrap.appendChild(element);
+    const lead = document.createElement('p');
+    lead.className = 'kpi-expand__lead';
+    wrap.appendChild(lead);
     const panel = document.createElement('div');
     panel.className = 'kpi-expand__detail';
     wrap.appendChild(panel);
-    const item = { key, wrap, element, detail, panel };
+    const item = { key, wrap, element, detail, lead, panel };
     items.push(item);
     wrap.addEventListener('click', (event) => onActivate(event, item));
     wrap.addEventListener('keydown', (event) => {

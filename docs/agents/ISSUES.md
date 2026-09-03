@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-474 | Task | [Tweak] Short KPI description on Overview and room cards | In Progress | — | docs/agents/ITERATE-kpi-description.md | `/test SWD-474` |
 | SWD-469 | Task | [Feature] Expandable KPI detail cards on Overview and room view | Done | — | docs/agents/PLAN-kpi-expand-detail.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652 (`cdd42be`) |
 | SWD-470 | Sub-task | Expand host + CSS for KPI detail cards | Done | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
 | SWD-471 | Sub-task | KPI detail copy catalog + last NMPC duration | Done | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
@@ -196,6 +197,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-03 — `/iterate` SWD-474 from SWD-469: always-visible one-sentence KPI description; CalVer 2026.09.0. Next `/test SWD-474`.
 - 2026-09-02 — `/ship` SWD-469 via PR #652 (`cdd42be`): expandable Overview/room KPI cards; last NMPC duration on mpc_performance; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.08.41`. Next Done.
 - 2026-09-02 — `/review` SWD-469 CLEAN (focused sequential). COMMENT on PR #652. last NMPC duration wraps `solve_nmpc_blocking`; overview harness `appendChild` matches DOM move. Next ship merge.
 - 2026-09-02 — `/ship` SWD-469 remaining: architect, sandbox accept, implement expand host + last NMPC duration, tests 4 passed + node harness, CalVer 2026.08.41. Next `/review SWD-469`.
