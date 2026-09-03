@@ -35,4 +35,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/655
 
 ## Next
-`/restructure SWD-476` — Structure pass (same catalog as implement; small diffs included)
+`/review SWD-476` — Lasers then fix then code review
