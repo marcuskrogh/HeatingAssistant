@@ -71,4 +71,4 @@ Supportive isolation — not production source. No sandbox PR.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/654
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/654
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/654 (`00f1cc1`)

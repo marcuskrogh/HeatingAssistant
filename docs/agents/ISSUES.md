@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-475 | Task | [Sandbox] Animate KPI expand to top with viewport follow | In Review | — | docs/agents/SANDBOX-kpi-expand-motion.md | `/ship SWD-475` — merge #654 |
+| SWD-475 | Task | [Sandbox] Animate KPI expand to top with viewport follow | Done | — | docs/agents/SANDBOX-kpi-expand-motion.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/654 (`00f1cc1`) |
 | SWD-474 | Task | [Tweak] Short KPI description on Overview and room cards | Done | — | docs/agents/ITERATE-kpi-description.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653 (`412eb31`) |
 | SWD-469 | Task | [Feature] Expandable KPI detail cards on Overview and room view | Done | — | docs/agents/PLAN-kpi-expand-detail.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652 (`cdd42be`) |
 | SWD-470 | Sub-task | Expand host + CSS for KPI detail cards | Done | SWD-469 | docs/agents/PLAN-kpi-expand-detail.md | — |
@@ -198,6 +198,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-03 — `/ship` SWD-475 via PR #654 (`00f1cc1`): same-card KPI expand motion with viewport follow; Overview NMPC Load vs room Regulator Load; Description topic and row separators; CalVer 2026.09.1; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.1`. Next Done.
 - 2026-09-03 — `/review` SWD-475 CLEAN (focused sequential). COMMENT on PR #654 (self-review cannot APPROVE). Next ship merge.
 - 2026-09-03 — `/restructure` SWD-475: drop unused mixed `mpcLoadDetail`; drop leftover dotted-leader span. Host/catalog/engine split stays. Next `/review SWD-475`.
 - 2026-09-03 — `/test` SWD-475: catalog harness executes NMPC-only vs Regulator+NMPC payloads (3% / 9% fixture). Host harness locks Description topic. CRAP tool is Python-only; JS paint/FLIP are flat maps. Next `/restructure SWD-475`.
