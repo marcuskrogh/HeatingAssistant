@@ -22,7 +22,7 @@ def test_overlay_grows_one_card() -> None:
     assert "overflow: hidden" in css
     assert "kpi-expand__detail-inner" in css
     assert "kpi-expand__inset-lead" in css
-    assert "background: var(--bg-primary)" in css
+    assert "color-mix" in css
 
 
 def test_app_loads_candidate_not_production_host() -> None:
