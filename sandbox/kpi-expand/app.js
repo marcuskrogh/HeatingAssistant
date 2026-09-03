@@ -1,6 +1,6 @@
 import { createGauge } from '/ha-industrial-panel/js/components/gauge.js';
 import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '/ha-industrial-panel/js/components/countdown.js';
-import { bindKpiExpandSection } from '/ha-industrial-panel/js/components/kpi-expand.js';
+import { bindKpiExpandSection } from './kpi-expand.js';
 import { mpcLoadDetail, nextControlDetail, nextNmpcDetail, overallHealthDetail } from '/ha-industrial-panel/js/kpi-detail-catalog.js';
 
 const NOW_S = Date.now() / 1000;
@@ -42,6 +42,10 @@ class HaKpiHost extends HTMLElement {
     css.rel = 'stylesheet';
     css.href = '/ha-industrial-panel/css/industrial.css';
     root.appendChild(css);
+    const overlay = document.createElement('link');
+    overlay.rel = 'stylesheet';
+    overlay.href = './expand.css';
+    root.appendChild(overlay);
 
     const wrap = document.createElement('div');
     wrap.style.background = 'var(--bg-primary)';
@@ -93,6 +97,22 @@ class HaKpiHost extends HTMLElement {
     controllerExpand.register(control.element, { key: 'next-control', detail: nextControlDetail });
     const nmpc = createCountdown(fixtureState(), { ...COUNTDOWN_NMPC, small: false });
     controllerExpand.register(nmpc.element, { key: 'next-nmpc', detail: nextNmpcDetail });
+    for (let i = 1; i <= 8; i += 1) {
+      const filler = createGauge({
+        value: 20 + i * 5,
+        min: 0,
+        max: 100,
+        label: `SPARE ${i}`,
+        format: (v) => `${v.toFixed(0)}%`,
+      });
+      controllerExpand.register(filler, {
+        key: `spare-${i}`,
+        detail: () => ({
+          description: 'Filler card so a click below the fold must follow the card to the top.',
+          rows: [{ label: 'Index', value: String(i) }],
+        }),
+      });
+    }
 
     const params = new URLSearchParams(location.search);
     const mode = params.get('mode') || 'collapsed';
