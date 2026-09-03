@@ -1,8 +1,8 @@
 import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=124';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=146';
-import { bindKpiExpandSection } from '../components/kpi-expand.js?v=146';
+import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=147';
+import { bindKpiExpandSection } from '../components/kpi-expand.js?v=147';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=124';
@@ -25,7 +25,7 @@ import {
   roomPowerDetail,
   solarGainDetail,
   timeInRangeDetail,
-} from '../kpi-detail-catalog.js?v=146';
+} from '../kpi-detail-catalog.js?v=147';
 import { setPanelHash } from '../panel-hash.js?v=124';
 import {
   setRoomComfortOffset,

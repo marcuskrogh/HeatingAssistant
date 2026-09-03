@@ -43,4 +43,63 @@ function nextOpenNull(result) {
   return result.openKey === null;
 }
 
+class ClassList {
+  constructor() { this._classes = new Set(); }
+  toggle(cls, on) {
+    if (on) this._classes.add(cls);
+    else this._classes.delete(cls);
+  }
+}
+
+class Node {
+  constructor(tag) {
+    this.tagName = tag;
+    this.children = [];
+    this.className = '';
+    this.classList = new ClassList();
+    this.style = {};
+    this.dataset = {};
+    this._listeners = {};
+    this.textContent = '';
+    this.hidden = false;
+    this.innerHTML = '';
+  }
+  appendChild(child) {
+    if (child.parentNode) {
+      child.parentNode.children = child.parentNode.children.filter((c) => c !== child);
+    }
+    this.children.push(child);
+    child.parentNode = this;
+    return child;
+  }
+  setAttribute() {}
+  addEventListener(type, fn) {
+    (this._listeners[type] || (this._listeners[type] = [])).push(fn);
+  }
+  contains(other) {
+    if (other === this) return true;
+    return this.children.some((c) => c.contains(other));
+  }
+}
+
+globalThis.document = {
+  createElement(tag) { return new Node(tag); },
+};
+
+{
+  const grid = new Node('div');
+  const host = mod.bindKpiExpandSection(grid);
+  const card = new Node('div');
+  host.register(card, {
+    key: 'mpc-load',
+    detail: () => ({ description: 'Share of the 2 s load budget.', rows: [] }),
+  });
+  host.paint({});
+  const wrap = grid.children[0];
+  const lead = wrap.children.find((c) => c.className === 'kpi-expand__lead');
+  assert(lead, 'collapsed card must include a lead element');
+  assert(lead.textContent === 'Share of the 2 s load budget.', 'collapsed card must show the KPI description');
+  assert(lead.hidden === false, 'lead must stay visible when a description exists');
+}
+
 console.log('panel_kpi_expand.harness.mjs: ok');

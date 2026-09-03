@@ -32,7 +32,7 @@ import {
   systemEntity,
   MAX_SOLVE_TIME_S,
 } from './utils.js?v=127';
-import { COUNTDOWN_CONTROL, COUNTDOWN_NMPC, countdownRemaining } from './components/countdown.js?v=146';
+import { COUNTDOWN_CONTROL, COUNTDOWN_NMPC, countdownRemaining } from './components/countdown.js?v=147';
 
 function dash(value) {
   if (value === null || value === undefined || value === '') return '—';
