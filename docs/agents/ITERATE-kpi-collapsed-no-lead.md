@@ -32,7 +32,7 @@
 - Task: [SWD-476](https://marcusknielsen.atlassian.net/browse/SWD-476)
 - Relates: [SWD-475](https://marcusknielsen.atlassian.net/browse/SWD-475)
 - Branch: `cursor/swd-476-kpi-collapsed-no-lead-e3f0`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/655
 
 ## Next
 `/test SWD-476` — Dedicated testing phase, then restructure, then review
