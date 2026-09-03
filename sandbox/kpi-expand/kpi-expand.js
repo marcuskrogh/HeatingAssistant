@@ -157,7 +157,7 @@ export function bindKpiExpandSection(grid) {
       })
       .join('');
     const insetLead = description
-      ? `<p class="kpi-expand__inset-lead">${escapeText(description)}</p>`
+      ? `<div class="kpi-expand__description-topic"><h3 class="kpi-expand__section-title kpi-expand__description-title">Description</h3><p class="kpi-expand__inset-lead kpi-expand__description-text">${escapeText(description)}</p></div>`
       : '';
     item.inner.innerHTML = `${insetLead}${body}`;
   }

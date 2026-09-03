@@ -14,7 +14,7 @@ def test_candidate_host_flips_and_follows() -> None:
     assert "kpi-expand__detail-inner" in js
     assert "kpi-expand__inset-lead" in js
     assert "kpi-expand__section-title" in js
-    assert "kpi-expand__leader" in js
+    assert "kpi-expand__description-title" in js
     assert "prefers-reduced-motion" in js
     assert "{ motion: false }" in js
 
@@ -24,8 +24,9 @@ def test_overlay_grows_one_card() -> None:
     assert "overflow: hidden" in css
     assert "kpi-expand__detail-inner" in css
     assert "kpi-expand__inset-lead" in css
-    assert "kpi-expand__leader" in css
+    assert "kpi-expand__description-title" in css
     assert "kpi-expand__section-title" in css
+    assert "row:not(:last-child)" in css
     assert "color-mix" in css
 
 

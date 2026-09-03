@@ -6,16 +6,16 @@ Click-to-expand KPI cards with split load KPIs:
   period, clamped at 100%).
 - Room view: Regulator Load (last P-cycle vs 2 s). Expand shows regulator
   description only, then Regulator and NMPC row groups.
-- Nested inset, subsection titles, faint dotted leaders between labels and
-  values. Outer card still moves to the top of its section and the viewport
-  follows.
+- Nested inset, subsection titles, row separators between detail rows, and
+  an explicit “Description” topic inside the expanded card. Outer card
+  still moves to the top of its section and the viewport follows.
 
 ## Kind
 visual
 
 ## Isolation
 - Path: `sandbox/kpi-expand/`
-- Harness: `python3 sandbox/kpi-expand/harness.py --tag 04`
+- Harness: `python3 sandbox/kpi-expand/harness.py --tag 05`
 - Inspectables: `sandbox/kpi-expand/inspect/`
 
 ## Representativeness
@@ -44,7 +44,7 @@ omit (visual)
 
 ## Promote map
 - Production targets:
-  - `heatingassistant/app/static/js/components/kpi-expand.js` (sections + leaders)
+  - `heatingassistant/app/static/js/components/kpi-expand.js` (sections + row separators + Description topic)
   - `heatingassistant/app/static/js/kpi-detail-catalog.js` / `kpi-engine.js`
   - `heatingassistant/app/static/js/pages/overview.js` (NMPC Load)
   - `heatingassistant/app/static/js/pages/room-detail.js` (Regulator Load)
@@ -57,7 +57,7 @@ omit (visual)
 |---|--------|-------------|---------|
 | 1 | FLIP move + same-card height grow + viewport follow | sandbox/kpi-expand/inspect/02_* | delta: nested detail card |
 | 2 | Description + values in a nested inset inside the outer frame | sandbox/kpi-expand/inspect/03_* | delta: split load KPIs |
-| 3 | NMPC vs Regulator Load, subsections, faint leaders | sandbox/kpi-expand/inspect/04_* | pending operator |
+| 3 | NMPC vs Regulator Load, subsections, row separators and Description topic | sandbox/kpi-expand/inspect/05_* | pending operator |
 
 ## Role in pipeline
 Post-merge inspect-loop after SWD-474. Promotion input for `/implement SWD-475`.
