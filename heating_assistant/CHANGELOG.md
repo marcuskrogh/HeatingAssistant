@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.2
+
+- KPI cards at a glance are the original compact gauges again. The
+  description sentence appears only after you open a card.
+
 # 2026.09.1
 
 - Expanding a KPI card moves that same card to the top of the section and

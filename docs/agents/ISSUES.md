@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-476 | Task | [Iterate] Hide KPI description on collapsed cards | In Progress | — | docs/agents/ITERATE-kpi-collapsed-no-lead.md | `/test SWD-476` |
 | SWD-475 | Task | [Sandbox] Animate KPI expand to top with viewport follow | Done | — | docs/agents/SANDBOX-kpi-expand-motion.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/654 (`00f1cc1`) |
 | SWD-474 | Task | [Tweak] Short KPI description on Overview and room cards | Done | — | docs/agents/ITERATE-kpi-description.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653 (`412eb31`) |
 | SWD-469 | Task | [Feature] Expandable KPI detail cards on Overview and room view | Done | — | docs/agents/PLAN-kpi-expand-detail.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/652 (`cdd42be`) |
@@ -198,6 +199,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-03 — `/iterate` SWD-476 from SWD-475: collapsed KPI cards have no description sentence; Description stays in the open inset. Next `/test SWD-476`.
 - 2026-09-03 — `/ship` SWD-475 via PR #654 (`00f1cc1`): same-card KPI expand motion with viewport follow; Overview NMPC Load vs room Regulator Load; Description topic and row separators; CalVer 2026.09.1; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.1`. Next Done.
 - 2026-09-03 — `/review` SWD-475 CLEAN (focused sequential). COMMENT on PR #654 (self-review cannot APPROVE). Next ship merge.
 - 2026-09-03 — `/restructure` SWD-475: drop unused mixed `mpcLoadDetail`; drop leftover dotted-leader span. Host/catalog/engine split stays. Next `/review SWD-475`.

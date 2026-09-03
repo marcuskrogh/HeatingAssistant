@@ -135,8 +135,6 @@ export function bindKpiExpandSection(grid) {
   function paintDetail(item) {
     const payload = item.detail(latestState) || {};
     const description = payload.description || '';
-    item.lead.textContent = description;
-    item.lead.hidden = !description;
     const sections = Array.isArray(payload.sections) && payload.sections.length
       ? payload.sections
       : [{ title: '', rows: Array.isArray(payload.rows) ? payload.rows : [] }];
@@ -185,9 +183,6 @@ export function bindKpiExpandSection(grid) {
     wrap.tabIndex = 0;
     wrap.setAttribute('aria-expanded', 'false');
     wrap.appendChild(element);
-    const lead = document.createElement('p');
-    lead.className = 'kpi-expand__lead';
-    wrap.appendChild(lead);
     const panel = document.createElement('div');
     panel.className = 'kpi-expand__detail';
     panel.setAttribute('aria-hidden', 'true');
@@ -195,7 +190,7 @@ export function bindKpiExpandSection(grid) {
     inner.className = 'kpi-expand__detail-inner';
     panel.appendChild(inner);
     wrap.appendChild(panel);
-    const item = { key, wrap, element, detail, lead, panel, inner };
+    const item = { key, wrap, element, detail, panel, inner };
     items.push(item);
     wrap.addEventListener('click', (event) => onActivate(event, item));
     wrap.addEventListener('keydown', (event) => {

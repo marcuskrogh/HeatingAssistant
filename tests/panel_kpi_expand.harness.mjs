@@ -105,13 +105,12 @@ globalThis.document = {
   const wrap = grid.children[0];
   assert(wrap.className.includes('card'), 'wrap must be the visible card');
   const lead = wrap.children.find((c) => c.className === 'kpi-expand__lead');
-  assert(lead, 'collapsed card must include a lead element');
-  assert(lead.textContent === 'Share of the NMPC load budget.', 'collapsed card must show the KPI description');
-  assert(lead.hidden === false, 'lead must stay visible when a description exists');
+  assert(!lead, 'collapsed card must not include a description lead');
   host.open('nmpc-load');
   const panel = wrap.children.find((c) => c.className === 'kpi-expand__detail');
   const inner = panel.children.find((c) => c.className === 'kpi-expand__detail-inner');
   assert(inner.innerHTML.includes('Description'), 'open card must write a Description topic');
+  assert(inner.innerHTML.includes('Share of the NMPC load budget.'), 'open card must keep the description in the inset');
   assert(inner.innerHTML.includes('NMPC'), 'open card must write section titles');
   assert(inner.innerHTML.includes('3%'), 'open card must write section rows');
 }
