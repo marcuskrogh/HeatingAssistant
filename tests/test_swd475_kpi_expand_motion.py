@@ -1,5 +1,6 @@
 """SWD-475: KPI expand motion, Description topic, and split load cards."""
 
+import subprocess
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,17 @@ def test_panel_entry_cache_bust() -> None:
         dashboard = _read(static, "industrial-dashboard.js")
         assert "industrial-dashboard.js?v=148" in index
         assert "return '148'" in dashboard
+
+
+def test_load_catalog_harness() -> None:
+    result = subprocess.run(
+        ["node", str(_ROOT / "tests" / "panel_kpi_load_catalog.harness.mjs")],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_sandbox_candidate_remains_isolated() -> None:

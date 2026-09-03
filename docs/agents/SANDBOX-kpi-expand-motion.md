@@ -71,4 +71,4 @@ Supportive isolation — not production source. No sandbox PR.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/test SWD-475` — Dedicated testing phase, then restructure, then review
+`/restructure SWD-475` — Structure pass (same catalog as implement; small diffs included)
