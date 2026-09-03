@@ -145,7 +145,10 @@ export function bindKpiExpandSection(grid) {
         return `<div class="kpi-expand__row"><dt>${label}</dt><dd>${value}</dd></div>`;
       })
       .join('');
-    item.inner.innerHTML = `<dl class="kpi-expand__rows">${lines}</dl>`;
+    const insetLead = description
+      ? `<p class="kpi-expand__inset-lead">${escapeText(description)}</p>`
+      : '';
+    item.inner.innerHTML = `${insetLead}<dl class="kpi-expand__rows">${lines}</dl>`;
   }
 
   function syncHidden(item) {

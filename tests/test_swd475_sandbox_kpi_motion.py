@@ -12,6 +12,7 @@ def test_candidate_host_flips_and_follows() -> None:
     assert "getBoundingClientRect" in js
     assert "translate(" in js
     assert "kpi-expand__detail-inner" in js
+    assert "kpi-expand__inset-lead" in js
     assert "prefers-reduced-motion" in js
     assert "{ motion: false }" in js
 
@@ -20,7 +21,8 @@ def test_overlay_grows_one_card() -> None:
     css = (_SANDBOX / "expand.css").read_text(encoding="utf-8")
     assert "overflow: hidden" in css
     assert "kpi-expand__detail-inner" in css
-    assert "background: transparent" in css
+    assert "kpi-expand__inset-lead" in css
+    assert "background: var(--bg-primary)" in css
 
 
 def test_app_loads_candidate_not_production_host() -> None:

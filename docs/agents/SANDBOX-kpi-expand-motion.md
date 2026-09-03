@@ -2,15 +2,16 @@
 
 ## Element
 Click-to-expand KPI cards: the open card moves to the top of its section
-while the same card grows to show the description rows, and the viewport
-follows so the click does not leave the card off-screen.
+while the outer frame grows. Description and value rows sit in a nested
+detail card inside that frame. The viewport follows so the click does
+not leave the card off-screen.
 
 ## Kind
 visual
 
 ## Isolation
 - Path: `sandbox/kpi-expand/`
-- Harness: `python3 sandbox/kpi-expand/harness.py --tag 02`
+- Harness: `python3 sandbox/kpi-expand/harness.py --tag 03`
 - Inspectables: `sandbox/kpi-expand/inspect/`
 
 ## Representativeness
@@ -41,8 +42,8 @@ omit (visual)
 ## Promote map
 - Production targets:
   - `heatingassistant/app/static/js/components/kpi-expand.js`
-  - `heatingassistant/app/static/css/industrial.css` (one-card chrome,
-    overflow clip, detail as in-card rows rather than a second panel)
+  - `heatingassistant/app/static/css/industrial.css` (outer KPI frame
+    grows; nested inset holds description + value rows)
   - Overview / room pages only if cache-bust is required
 - Copy notes: copy sandbox `kpi-expand.js` and overlay rules into production;
   dual-tree sync after implement. Do not ship sandbox `index.html` or SPARE
@@ -51,7 +52,8 @@ omit (visual)
 ## Iterations
 | N | Change | Inspectable | Verdict |
 |---|--------|-------------|---------|
-| 1 | FLIP move + same-card height grow + viewport follow | sandbox/kpi-expand/inspect/02_* | pending operator |
+| 1 | FLIP move + same-card height grow + viewport follow | sandbox/kpi-expand/inspect/02_* | delta: nested detail card |
+| 2 | Description + values in a nested inset inside the outer frame | sandbox/kpi-expand/inspect/03_* | pending operator |
 
 ## Role in pipeline
 Post-merge inspect-loop after SWD-474. Promotion input for `/implement SWD-475`.

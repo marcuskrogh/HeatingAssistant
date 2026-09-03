@@ -198,6 +198,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-03 — `/sandbox` SWD-475 iteration 2: nested inset for description + values inside the outer KPI frame. Next `/sandbox SWD-475` or `/implement SWD-475`.
 - 2026-09-03 — `/sandbox` SWD-475 (post-merge after SWD-474): FLIP move + same-card grow + viewport follow in `sandbox/kpi-expand/`. Artifact `docs/agents/SANDBOX-kpi-expand-motion.md`. No PR. Next `/sandbox SWD-475` or `/implement SWD-475`.
 - 2026-09-03 — `/ship` SWD-474 via PR #653 (`412eb31`): one-sentence KPI description on Overview and room cards; CalVer 2026.09.0; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.0`. Next Done.
 - 2026-09-03 — `/review` SWD-474 CLEAN (focused sequential). COMMENT on PR #653. Next ship merge.

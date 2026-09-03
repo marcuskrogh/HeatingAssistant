@@ -1,4 +1,4 @@
-/* Sandbox overlay: one visual card that moves and grows. Production CSS stays. */
+/* Sandbox overlay: outer KPI frame grows; inset holds description + values. */
 
 .kpi-expand.card {
   overflow: hidden;
@@ -16,6 +16,10 @@
   display: none;
 }
 
+.kpi-expand.kpi-expand--open > .kpi-expand__lead {
+  display: none;
+}
+
 .kpi-expand__detail {
   display: none;
   margin-top: 0;
@@ -26,7 +30,7 @@
 
 .kpi-expand--open .kpi-expand__detail {
   display: block;
-  margin-top: 10px;
+  margin-top: 14px;
   padding: 0;
   background: transparent;
   border: none;
@@ -35,6 +39,20 @@
 .kpi-expand__detail-inner {
   overflow: hidden;
   min-height: 0;
+  padding: 12px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.kpi-expand__inset-lead {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.kpi-expand__inset-lead + .kpi-expand__rows {
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
