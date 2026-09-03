@@ -169,6 +169,12 @@ assert(approx(kpi.houseHeatingPowerGaugeMax(null), 10000), 'invalid live power m
   assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('1.0') }), 50), '1.0 s solve of 2.0 s budget must be 50%');
   assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('5.0') }), 100), 'over-budget solves must cap at 100%');
   assert(kpi.mpcLoadPercent({}) === 0, 'missing mpc_performance must read as 0% load');
+  assert(approx(kpi.regulatorLoadPercent({ [MPC]: ent('0.18') }), 9), '0.18 s P-cycle of 2 s must be 9% regulator load');
+  const nmpcState = { [MPC]: ent('0.18', { last_nmpc_duration_s: 24.7, nmpc_period_s: 7200 }) };
+  assert(approx(kpi.nmpcLoadBudgetS(7200), 720), 'NMPC budget must be 10% of the period');
+  assert(approx(kpi.nmpcLoadPercent(nmpcState), (24.7 / 720) * 100), '24.7 s of 720 s budget must be about 3% NMPC load');
+  assert(approx(kpi.nmpcLoadPercent({ [MPC]: ent('0.18', { last_nmpc_duration_s: 800, nmpc_period_s: 7200 }) }), 100), 'NMPC load must clamp at 100%');
+  assert(kpi.nmpcLoadPercent({}) === null, 'missing NMPC duration must hide NMPC load');
 }
 
 // ---- room comfort deviation --------------------------------------------------------

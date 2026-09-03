@@ -4,6 +4,15 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.1
+
+- Expanding a KPI card moves that same card to the top of the section and
+  grows it open. The page stays on the open card. Overview SYSTEM STATUS
+  shows NMPC Load as last NMPC solve versus 10% of the NMPC period. The
+  room view shows Regulator Load as last P-cycle versus 2 seconds. Open
+  cards put the meaning under a Description heading and separate values
+  with light row dividers.
+
 # 2026.09.0
 
 - Overview and room KPI cards include a short sentence saying what each

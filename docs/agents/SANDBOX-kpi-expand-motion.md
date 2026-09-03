@@ -57,7 +57,7 @@ omit (visual)
 |---|--------|-------------|---------|
 | 1 | FLIP move + same-card height grow + viewport follow | sandbox/kpi-expand/inspect/02_* | delta: nested detail card |
 | 2 | Description + values in a nested inset inside the outer frame | sandbox/kpi-expand/inspect/03_* | delta: split load KPIs |
-| 3 | NMPC vs Regulator Load, subsections, row separators and Description topic | sandbox/kpi-expand/inspect/05_* | pending operator |
+| 3 | NMPC vs Regulator Load, subsections, row separators and Description topic | sandbox/kpi-expand/inspect/05_* | accepted |
 
 ## Role in pipeline
 Post-merge inspect-loop after SWD-474. Promotion input for `/implement SWD-475`.
@@ -71,4 +71,4 @@ Supportive isolation — not production source. No sandbox PR.
 - PR: — (sandbox never opens a PR)
 
 ## Next
-`/sandbox SWD-475` — name a delta, or `/implement SWD-475` to promote
+`/test SWD-475` — Dedicated testing phase, then restructure, then review
