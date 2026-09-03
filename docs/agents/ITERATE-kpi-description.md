@@ -31,6 +31,7 @@
 - Task: [SWD-474](https://marcusknielsen.atlassian.net/browse/SWD-474)
 - Relates: SWD-469
 - Branch: `cursor/swd-474-kpi-description-e3f0`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/653
 
 ## Next
 `/test SWD-474` — Dedicated testing phase, then harden and code review
