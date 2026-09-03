@@ -35,4 +35,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/655
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/655
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/655 (`ed674fc`)
