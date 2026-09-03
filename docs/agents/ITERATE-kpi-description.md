@@ -34,4 +34,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/653
 
 ## Next
-`/review SWD-474` — focused sequential lasers then code review (same PR).
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/653
