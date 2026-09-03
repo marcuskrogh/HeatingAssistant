@@ -68,7 +68,7 @@ Supportive isolation — not production source. No sandbox PR.
 - Relates: [SWD-474](https://marcusknielsen.atlassian.net/browse/SWD-474)
 - Artifact: docs/agents/SANDBOX-kpi-expand-motion.md
 - Branch: `cursor/swd-475-kpi-expand-motion-e3f0`
-- PR: — (sandbox never opens a PR)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/654
 
 ## Next
-`/review SWD-475` — Lasers then fix then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/654
