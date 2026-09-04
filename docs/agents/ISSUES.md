@@ -4,11 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | To Do | — | docs/agents/PLAN-pe-nstep-mle.md | `/model SWD-481` |
-| SWD-482 | Sub-task | Formulate N-step PEM with EKF Jacobians | To Do | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
-| SWD-483 | Sub-task | Production receding N-step MLE estimator | To Do | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
-| SWD-484 | Sub-task | PE time cap and Advanced config page | To Do | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
-| SWD-485 | Sub-task | N-step harness bar, tests, CalVer | To Do | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
+| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | In Progress | — | docs/agents/PLAN-pe-nstep-mle.md | `/implement SWD-481` |
+| SWD-482 | Sub-task | Formulate N-step PEM with EKF Jacobians | Done | SWD-481 | docs/agents/MODEL-pe-nstep-mle.md | — |
+| SWD-483 | Sub-task | Production receding N-step MLE estimator | In Progress | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
+| SWD-484 | Sub-task | PE time cap and Advanced config page | In Progress | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
+| SWD-485 | Sub-task | N-step harness bar, tests, CalVer | In Progress | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
 | SWD-477 | Task | [Bug] Open-loop wall initial temperature uses air seed instead of PE fit | Done | — | docs/agents/PLAN-pe-fitted-tw0.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/656 (`fc124b0`) |
 | SWD-478 | Sub-task | Persist fitted Tw0 on the current parameter set | Done | SWD-477 | docs/agents/PLAN-pe-fitted-tw0.md | — |
 | SWD-479 | Sub-task | Resolve Tw0 from fitted set or window fit | Done | SWD-477 | docs/agents/PLAN-pe-fitted-tw0.md | — |
@@ -208,7 +208,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-04 — `/define` SWD-481: N-step PEM MLE matching NMPC grid; EKF Jacobians; 1 min configurable cap; Advanced page; harness improvement until-bar. PLAN `docs/agents/PLAN-pe-nstep-mle.md`. Next `/model SWD-481`.
+- 2026-09-04 — `/ship` SWD-481 remaining: implement N-step PEM + Advanced cap; MODEL/ARCHITECTURE on branch; until-bar still in implement. Next `/implement SWD-481`.
 - 2026-09-04 — `/ship` SWD-477: merged #656 as `fc124b0`. Task Done. Changelog `# 2026.09.3` already on the delivery PR.
 - 2026-09-04 — `/review` SWD-477 CLEAN (focused sequential). COMMENT on PR #656 (`6d769ae`; GitHub blocks self-APPROVE). Next `/ship SWD-477`.
 - 2026-09-04 — `/restructure` SWD-477: split fitted Tw0 lookup by dataset vs window. Next `/review SWD-477`.

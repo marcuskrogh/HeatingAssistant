@@ -9,6 +9,7 @@ import numpy as np
 from mbc.control import NLPProblem, ScipyNLPBackend
 
 from .constants import _T_WALL_MIN_LAM, _T_WALL_PRIOR_STD
+from .nstep_pem import PeComputeTimeout, _check_deadline
 
 _LOGGER = logging.getLogger("heatingassistant.engine.estimation.kalman_ml")
 
@@ -37,15 +38,32 @@ class RegularizedMseCache:
     def eval(self, theta: np.ndarray) -> None:
         if self._cache[0] is not None and np.array_equal(theta, self._cache[0]):
             return
-        mse, g_mse = self._est._simulation_mse_and_grad(
-            theta,
-            self._layout,
-            self._std_history,
-            nominal_dt=self._est._dt,
-            max_window_steps=self._est._max_window_steps,
-            min_segment_steps=self._est._min_segment_steps,
-            dataset_start_ts=self._dataset_start_timestamps,
-        )
+        deadline = getattr(self._est, "_pe_deadline_mono", None)
+        if deadline is not None:
+            t0 = getattr(self._est, "_pe_t0_mono", None)
+            _check_deadline(
+                deadline,
+                float(getattr(self._est, "_max_compute_s", 60.0)),
+                float(t0 if t0 is not None else 0.0),
+            )
+        if self._est._use_nstep_pem:
+            mse, g_mse = self._est._nstep_pem_and_grad(
+                theta,
+                self._layout,
+                self._std_history,
+                nominal_dt=self._est._dt,
+                dataset_start_ts=self._dataset_start_timestamps,
+            )
+        else:
+            mse, g_mse = self._est._simulation_mse_and_grad(
+                theta,
+                self._layout,
+                self._std_history,
+                nominal_dt=self._est._dt,
+                max_window_steps=self._est._max_window_steps,
+                min_segment_steps=self._est._min_segment_steps,
+                dataset_start_ts=self._dataset_start_timestamps,
+            )
         reg = self._est._compute_regularization_theta(theta, self._layout)
         reg_grad = self._est._compute_regularization_gradient(
             theta, self._layout, self._identifiable_pairs
@@ -144,6 +162,8 @@ def solve_lbfgs(
     )
     try:
         res = backend.solve(problem)
+    except PeComputeTimeout:
+        raise
     except Exception as exc:
         _LOGGER.debug("Optimiser failed: %s", exc)
         return None

@@ -93,4 +93,4 @@
 - Workflow: feature-standard (comparative, until-bar, side_paths=model)
 
 ## Next
-`/model SWD-481` — Persist N-step PEM + EKF Jacobian formulation in MODEL.md (same branch; no extra PR)
+`/test SWD-481` — Spec locks and comparative N-step RMSE bar (after implement until-bar holds)

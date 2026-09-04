@@ -10,12 +10,18 @@ from typing import Any, Dict, List, Optional
 
 from .const import (
     CONF_ESTIMATED_PARAMS,
+    CONF_PE_MAX_COMPUTE_S,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_NMPC_FAST_SUBSTEPS,
+    DEFAULT_NMPC_HORIZON_H,
+    DEFAULT_NMPC_PERIOD,
     DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS,
+    DEFAULT_PE_MAX_COMPUTE_S,
     DEFAULT_UPDATE_INTERVAL,
     ESTIMATION_HISTORY_SIZE,
 )
 from .history.window import select_recent_window
+from .nmpc_timing import timing_from_options
 
 _LOGGER = logging.getLogger(__name__)
 PARAMETER_HISTORY_KEY = "parameter_history"
@@ -763,10 +769,22 @@ async def async_estimate_parameters_ml(
 
     from .parameter_estimator import KalmanMLEstimator
 
+    timing = timing_from_options(
+        options,
+        default_period=DEFAULT_NMPC_PERIOD,
+        default_substeps=DEFAULT_NMPC_FAST_SUBSTEPS,
+        default_horizon_h=DEFAULT_NMPC_HORIZON_H,
+    )
+    cap_s = float(options.get(CONF_PE_MAX_COMPUTE_S, DEFAULT_PE_MAX_COMPUTE_S) or DEFAULT_PE_MAX_COMPUTE_S)
+
     estimator = KalmanMLEstimator(
         rooms=list((getattr(model, "rooms", {}) or {}).values()),
         sources=list(heat_sources),
         dt=dt,
+        n_horizon_steps=timing.n_fast,
+        origin_stride=timing.fast_substeps,
+        max_compute_s=cap_s,
+        use_nstep_pem=True,
     )
 
     def _run_estimate() -> Dict[str, Any]:
