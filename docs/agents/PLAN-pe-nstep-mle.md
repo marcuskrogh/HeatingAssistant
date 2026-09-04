@@ -88,7 +88,7 @@
 - Task: [SWD-481](https://marcusknielsen.atlassian.net/browse/SWD-481)
 - Sub-tasks: [SWD-482](https://marcusknielsen.atlassian.net/browse/SWD-482), [SWD-483](https://marcusknielsen.atlassian.net/browse/SWD-483), [SWD-484](https://marcusknielsen.atlassian.net/browse/SWD-484), [SWD-485](https://marcusknielsen.atlassian.net/browse/SWD-485)
 - Branch: `cursor/swd-481-pe-nstep-mle-dfe4`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/657
 - Classification: feature
 - Workflow: feature-standard (comparative, until-bar, side_paths=model)
 
