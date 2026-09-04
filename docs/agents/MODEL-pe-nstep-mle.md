@@ -81,5 +81,4 @@ Finding docs for implement. Not product UX.
 - PR: — (model never opens a PR)
 
 ## Next
-
-`/architect SWD-481` — Record module shape for N-step PEM + Advanced config
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/657

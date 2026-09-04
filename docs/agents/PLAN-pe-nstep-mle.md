@@ -93,4 +93,4 @@
 - Workflow: feature-standard (comparative, until-bar, side_paths=model)
 
 ## Next
-`/test SWD-481` — Spec locks and comparative N-step RMSE bar (after implement until-bar holds)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/657
