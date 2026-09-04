@@ -281,6 +281,44 @@ def pe_fit_record(
     return record
 
 
+def _lookup_tw0_by_dataset(
+    fit: Mapping[str, Any],
+    ids: Sequence[str],
+    stored_ids: Sequence[str],
+) -> Optional[Dict[str, float]]:
+    if not stored_ids:
+        return None
+    by_dataset = fit.get("t_wall_initial_by_dataset") or {}
+    if len(ids) == 1 and ids[0] in stored_ids:
+        block = by_dataset.get(ids[0]) if isinstance(by_dataset, Mapping) else None
+        mapped = _float_map(block if isinstance(block, Mapping) else None)
+        if mapped:
+            return mapped
+        if len(stored_ids) == 1:
+            return _float_map(fit.get("t_wall_initial")) or None
+        return None
+    if set(ids) == set(stored_ids):
+        return _float_map(fit.get("t_wall_initial")) or None
+    return None
+
+
+def _lookup_tw0_by_window(
+    fit: Mapping[str, Any],
+    window_start: Optional[float],
+    window_end: Optional[float],
+) -> Optional[Dict[str, float]]:
+    if window_start is None or window_end is None:
+        return None
+    try:
+        if abs(float(fit.get("window_start")) - float(window_start)) > 1.0:
+            return None
+        if abs(float(fit.get("window_end")) - float(window_end)) > 1.0:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return _float_map(fit.get("t_wall_initial")) or None
+
+
 def lookup_fitted_t_wall_initial(
     fit: Mapping[str, Any] | None,
     *,
@@ -297,34 +335,9 @@ def lookup_fitted_t_wall_initial(
         return None
     ids = [str(item) for item in (dataset_ids or []) if item]
     stored_ids = [str(item) for item in (fit.get("dataset_ids") or []) if item]
-    by_dataset = fit.get("t_wall_initial_by_dataset") or {}
-    if ids and stored_ids:
-        if len(ids) == 1 and ids[0] in stored_ids:
-            block = by_dataset.get(ids[0]) if isinstance(by_dataset, Mapping) else None
-            mapped = _float_map(block if isinstance(block, Mapping) else None)
-            if mapped:
-                return mapped
-            mapped = _float_map(fit.get("t_wall_initial") if len(stored_ids) == 1 else None)
-            return mapped or None
-        if set(ids) == set(stored_ids):
-            mapped = _float_map(fit.get("t_wall_initial"))
-            return mapped or None
-        return None
     if ids:
-        return None
-    if window_start is None or window_end is None:
-        return None
-    fit_start = fit.get("window_start")
-    fit_end = fit.get("window_end")
-    try:
-        if abs(float(fit_start) - float(window_start)) > 1.0:
-            return None
-        if abs(float(fit_end) - float(window_end)) > 1.0:
-            return None
-    except (TypeError, ValueError):
-        return None
-    mapped = _float_map(fit.get("t_wall_initial"))
-    return mapped or None
+        return _lookup_tw0_by_dataset(fit, ids, stored_ids)
+    return _lookup_tw0_by_window(fit, window_start, window_end)
 
 
 def estimated_params_snapshot(options: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
