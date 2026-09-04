@@ -78,9 +78,9 @@
 - Task: [SWD-477](https://marcusknielsen.atlassian.net/browse/SWD-477)
 - Sub-tasks: [SWD-478](https://marcusknielsen.atlassian.net/browse/SWD-478), [SWD-479](https://marcusknielsen.atlassian.net/browse/SWD-479), [SWD-480](https://marcusknielsen.atlassian.net/browse/SWD-480)
 - Branch: `cursor/swd-477-wall-init-a761`
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/656
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-477` — shape stamp then implement on this branch
+`/test SWD-477` — dedicated test phase on the same branch/PR

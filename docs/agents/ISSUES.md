@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-477 | Task | [Bug] Open-loop wall initial temperature uses air seed instead of PE fit | To Do | — | docs/agents/PLAN-pe-fitted-tw0.md | `/implement SWD-477` |
+| SWD-477 | Task | [Bug] Open-loop wall initial temperature uses air seed instead of PE fit | In Progress | — | docs/agents/PLAN-pe-fitted-tw0.md | `/test SWD-477` |
 | SWD-478 | Sub-task | Persist fitted Tw0 on the current parameter set | To Do | SWD-477 | docs/agents/PLAN-pe-fitted-tw0.md | — |
 | SWD-479 | Sub-task | Resolve Tw0 from fitted set or window fit | To Do | SWD-477 | docs/agents/PLAN-pe-fitted-tw0.md | — |
 | SWD-480 | Sub-task | Tw0 source in UI, tests, CalVer | To Do | SWD-477 | docs/agents/PLAN-pe-fitted-tw0.md | — |
@@ -203,6 +203,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-04 — `/implement` SWD-477: fitted Tw0 persist + simulate resolve. PR https://github.com/marcuskrogh/HeatingAssistant/pull/656. Next `/test SWD-477`.
 - 2026-09-04 — `/define` SWD-477: fitted Tw0 for current parameter set; PLAN-pe-fitted-tw0.md. Next implement.
 - 2026-09-03 — `/ship` SWD-476: merged #655 as `ed674fc`. Task Done. Changelog `# 2026.09.2` already on the delivery PR.
 - 2026-09-03 — `/review` SWD-476 CLEAN (focused sequential). COMMENT on PR #655. Next ship merge.
