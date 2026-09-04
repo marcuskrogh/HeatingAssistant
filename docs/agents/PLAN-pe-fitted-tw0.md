@@ -83,4 +83,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-477` — dedicated test phase on the same branch/PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/656

@@ -15,4 +15,4 @@
 - Branch: `cursor/swd-477-wall-init-a761`
 
 ## Next
-`/implement SWD-477` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/656
