@@ -147,6 +147,186 @@ def _persist_snapshot(
     return snapshot
 
 
+_STRUCTURAL_KEYS = (
+    "thermal_mass",
+    "r_external",
+    "internal_gain",
+    "solar_scale",
+    "c_air_fraction",
+    "r_aw_fraction",
+)
+
+
+def _float_map(values: Mapping[str, Any] | None) -> Dict[str, float]:
+    result: Dict[str, float] = {}
+    for key, value in dict(values or {}).items():
+        try:
+            result[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def structural_param_fingerprint(
+    estimated_params: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    estimated_internal_gains: Mapping[str, Any] | None = None,
+    estimated_solar_scales: Mapping[str, Any] | None = None,
+    estimated_envelope_splits: Mapping[str, Mapping[str, Any]] | None = None,
+) -> Dict[str, Dict[str, float]]:
+    """Round structural θ per room so later Simulate can match this PE fit."""
+
+    fingerprint: Dict[str, Dict[str, float]] = {}
+    for room_name, params in dict(estimated_params or {}).items():
+        entry: Dict[str, float] = {}
+        if isinstance(params, Mapping):
+            for key in ("thermal_mass", "r_external"):
+                if key in params:
+                    entry[key] = round(float(params[key]), 6)
+        if estimated_internal_gains and room_name in estimated_internal_gains:
+            entry["internal_gain"] = round(float(estimated_internal_gains[room_name]), 6)
+        if estimated_solar_scales and room_name in estimated_solar_scales:
+            entry["solar_scale"] = round(float(estimated_solar_scales[room_name]), 6)
+        splits = (estimated_envelope_splits or {}).get(room_name)
+        if isinstance(splits, Mapping):
+            for key in ("c_air_fraction", "r_aw_fraction"):
+                if key in splits:
+                    entry[key] = round(float(splits[key]), 6)
+        fingerprint[str(room_name)] = entry
+    return fingerprint
+
+
+def fingerprints_match(
+    fit_fp: Mapping[str, Mapping[str, Any]] | None,
+    room_params: Mapping[str, Mapping[str, Any]] | None,
+) -> bool:
+    """True when Simulate overrides still match the PE structural fingerprint."""
+
+    if not fit_fp:
+        return False
+    overrides = room_params or {}
+    if not overrides:
+        return True
+    for room_name, room_overrides in overrides.items():
+        expected = fit_fp.get(str(room_name)) or {}
+        if not isinstance(room_overrides, Mapping):
+            continue
+        for key in _STRUCTURAL_KEYS:
+            if key not in room_overrides:
+                continue
+            if key not in expected:
+                return False
+            got = float(room_overrides[key])
+            want = float(expected[key])
+            if abs(got - want) > 1e-4 * max(1.0, abs(want)):
+                return False
+    return True
+
+
+def t_wall_initial_by_dataset(
+    dataset_ids: Sequence[str] | None,
+    estimated_t_wall_initial: Mapping[str, Any] | None,
+    estimated_t_wall_per_dataset: Sequence[Mapping[str, Any]] | None,
+) -> Dict[str, Dict[str, float]]:
+    ids = [str(item) for item in (dataset_ids or []) if item]
+    if not ids:
+        return {}
+    per_ds = list(estimated_t_wall_per_dataset or [])
+    by_dataset: Dict[str, Dict[str, float]] = {}
+    if per_ds and len(per_ds) == len(ids):
+        for dataset_id, block in zip(ids, per_ds):
+            by_dataset[dataset_id] = _float_map(block)
+        return by_dataset
+    shared = _float_map(estimated_t_wall_initial)
+    if shared:
+        for dataset_id in ids:
+            by_dataset[dataset_id] = dict(shared)
+    return by_dataset
+
+
+def pe_fit_record(
+    estimated_params: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    estimated_internal_gains: Mapping[str, Any] | None = None,
+    estimated_solar_scales: Mapping[str, Any] | None = None,
+    estimated_envelope_splits: Mapping[str, Mapping[str, Any]] | None = None,
+    dataset_ids: Sequence[str] | None = None,
+    estimated_t_wall_initial: Mapping[str, Any] | None = None,
+    estimated_t_wall_per_dataset: Sequence[Mapping[str, Any]] | None = None,
+    window_start: Optional[float] = None,
+    window_end: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Session / snapshot payload tying fitted Tw0 to the θ and data that produced it."""
+
+    ids = [str(item) for item in (dataset_ids or []) if item]
+    record: Dict[str, Any] = {
+        "param_fingerprint": structural_param_fingerprint(
+            estimated_params,
+            estimated_internal_gains=estimated_internal_gains,
+            estimated_solar_scales=estimated_solar_scales,
+            estimated_envelope_splits=estimated_envelope_splits,
+        ),
+        "t_wall_initial": _float_map(estimated_t_wall_initial),
+        "t_wall_initial_by_dataset": t_wall_initial_by_dataset(
+            ids,
+            estimated_t_wall_initial,
+            estimated_t_wall_per_dataset,
+        ),
+        "dataset_ids": ids,
+    }
+    if window_start is not None:
+        record["window_start"] = float(window_start)
+    if window_end is not None:
+        record["window_end"] = float(window_end)
+    return record
+
+
+def lookup_fitted_t_wall_initial(
+    fit: Mapping[str, Any] | None,
+    *,
+    dataset_ids: Sequence[str] | None = None,
+    window_start: Optional[float] = None,
+    window_end: Optional[float] = None,
+    room_params: Mapping[str, Mapping[str, Any]] | None = None,
+) -> Optional[Dict[str, float]]:
+    """Return fitted Tw0 when this plot uses the same θ and the same PE data."""
+
+    if not isinstance(fit, Mapping):
+        return None
+    if not fingerprints_match(fit.get("param_fingerprint"), room_params):
+        return None
+    ids = [str(item) for item in (dataset_ids or []) if item]
+    stored_ids = [str(item) for item in (fit.get("dataset_ids") or []) if item]
+    by_dataset = fit.get("t_wall_initial_by_dataset") or {}
+    if ids and stored_ids:
+        if len(ids) == 1 and ids[0] in stored_ids:
+            block = by_dataset.get(ids[0]) if isinstance(by_dataset, Mapping) else None
+            mapped = _float_map(block if isinstance(block, Mapping) else None)
+            if mapped:
+                return mapped
+            mapped = _float_map(fit.get("t_wall_initial") if len(stored_ids) == 1 else None)
+            return mapped or None
+        if set(ids) == set(stored_ids):
+            mapped = _float_map(fit.get("t_wall_initial"))
+            return mapped or None
+        return None
+    if ids:
+        return None
+    if window_start is None or window_end is None:
+        return None
+    fit_start = fit.get("window_start")
+    fit_end = fit.get("window_end")
+    try:
+        if abs(float(fit_start) - float(window_start)) > 1.0:
+            return None
+        if abs(float(fit_end) - float(window_end)) > 1.0:
+            return None
+    except (TypeError, ValueError):
+        return None
+    mapped = _float_map(fit.get("t_wall_initial"))
+    return mapped or None
+
+
 def estimated_params_snapshot(options: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the persisted estimated-parameter snapshot from options."""
 
@@ -378,6 +558,11 @@ def apply_estimated_parameters(
     estimated_solar_scales: Optional[Mapping[str, float]] = None,
     estimated_envelope_splits: Optional[Mapping[str, Mapping[str, float]]] = None,
     log_likelihood: Optional[float] = None,
+    dataset_ids: Optional[Sequence[str]] = None,
+    estimated_t_wall_initial: Optional[Mapping[str, float]] = None,
+    estimated_t_wall_per_dataset: Optional[Sequence[Mapping[str, float]]] = None,
+    window_start: Optional[float] = None,
+    window_end: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Apply ML-estimated parameters and persist them to the options dict."""
 
@@ -424,6 +609,17 @@ def apply_estimated_parameters(
     history = existing_history[:_MAX_PARAMETER_HISTORY]
     prev_rooms = old_active.get("rooms", {}) or existing.get("rooms", {})
 
+    tw_fit = pe_fit_record(
+        estimated_params,
+        estimated_internal_gains=estimated_internal_gains,
+        estimated_solar_scales=estimated_solar_scales,
+        estimated_envelope_splits=estimated_envelope_splits,
+        dataset_ids=dataset_ids,
+        estimated_t_wall_initial=estimated_t_wall_initial,
+        estimated_t_wall_per_dataset=estimated_t_wall_per_dataset,
+        window_start=window_start,
+        window_end=window_end,
+    )
     active: Dict[str, Any] = {
         "rooms": _snapshot_rooms(model, prev_rooms, set(estimated_params), now_iso, "ml"),
         "sources": _source_snapshot(heat_sources),
@@ -431,6 +627,7 @@ def apply_estimated_parameters(
         "estimated_at": now_iso,
         "source": "ml",
         "log_likelihood": log_likelihood,
+        **tw_fit,
     }
     snapshot: Dict[str, Any] = {
         "active": active,
@@ -531,6 +728,9 @@ async def async_estimate_parameters_ml(
     locked_params: Optional[Dict[str, Any]] = None,
     history_override: Optional[List[Dict[str, Any]]] = None,
     dataset_start_timestamps: Optional[List[float]] = None,
+    dataset_ids: Optional[Sequence[str]] = None,
+    window_start: Optional[float] = None,
+    window_end: Optional[float] = None,
     executor: Any | None = None,
 ) -> Dict[str, Any]:
     """Run ML parameter estimation and optionally apply the result."""
@@ -582,6 +782,11 @@ async def async_estimate_parameters_ml(
             estimated_solar_scales=result.get("estimated_solar_scales", {}),
             estimated_envelope_splits=result.get("estimated_envelope_splits", {}),
             log_likelihood=result.get("log_likelihood"),
+            dataset_ids=dataset_ids,
+            estimated_t_wall_initial=result.get("estimated_t_wall_initial"),
+            estimated_t_wall_per_dataset=result.get("estimated_t_wall_per_dataset"),
+            window_start=window_start,
+            window_end=window_end,
         )
 
     estimation_history = list(options.get(ESTIMATION_HISTORY_KEY, []))
@@ -613,7 +818,12 @@ __all__ = [
     "async_estimate_parameters_ml",
     "delete_parameter_history",
     "estimated_params_snapshot",
+    "fingerprints_match",
+    "lookup_fitted_t_wall_initial",
+    "pe_fit_record",
     "restore_estimated_parameters",
+    "structural_param_fingerprint",
+    "t_wall_initial_by_dataset",
     "revert_parameters",
     "store_identified_parameters",
 ]

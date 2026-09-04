@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.3
+
+- Parameter Estimation open-loop and EKF reconstruction start the wall
+  node from the fitted initial temperature of the current parameter set
+  when you load a dataset that was used to estimate those parameters.
+  Otherwise the wall initial temperature is fitted on the plotted window.
+  The wall field says which of those two sources was used.
+
 # 2026.09.2
 
 - KPI cards at a glance are the original compact gauges again. The

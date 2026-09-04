@@ -948,6 +948,29 @@ class HeatingRuntime(
                     )
                     for room_name, room_data in rooms.items()
                 }
+            tw = item.get("t_wall_initial")
+            if isinstance(tw, Mapping):
+                item["t_wall_initial"] = {
+                    self._room_slug(str(room_name)): value
+                    for room_name, value in tw.items()
+                }
+            by_ds = item.get("t_wall_initial_by_dataset")
+            if isinstance(by_ds, Mapping):
+                item["t_wall_initial_by_dataset"] = {
+                    str(dataset_id): {
+                        self._room_slug(str(room_name)): value
+                        for room_name, value in (block.items() if isinstance(block, Mapping) else [])
+                    }
+                    for dataset_id, block in by_ds.items()
+                }
+            fp = item.get("param_fingerprint")
+            if isinstance(fp, Mapping):
+                item["param_fingerprint"] = {
+                    self._room_slug(str(room_name)): (
+                        dict(room_data) if isinstance(room_data, Mapping) else room_data
+                    )
+                    for room_name, room_data in fp.items()
+                }
             ui_history.append(item)
         return ui_history
 

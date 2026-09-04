@@ -240,8 +240,8 @@ def optimal_t_wall_for_window(
     return estimator.estimate_wall_initial_only(
         list(history or []),
         room_params=room_params,
-        prior_mean="air",
-        min_lam=1.0,
+        prior_mean="midpoint",
+        min_lam=0.0,
     )
 
 
