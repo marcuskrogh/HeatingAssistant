@@ -732,9 +732,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
   function renderIdentifiedExtras(slug, st) {
     const sysidAttrs = st[sysidEntityId(slug)]?.attributes || {};
-    if (sysidAttrs.t_wall_initial != null) {
-      applySimulatedTw0(sysidAttrs);
-    }
     if (sysidAttrs.ua_open != null) {
       uaOpenInput.value = formatNumber(sysidAttrs.ua_open, 2);
     } else {
@@ -788,26 +785,27 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       }
     }
     renderIdentifiedExtras(slug, st);
+    if (sysidAttrs.t_wall_initial != null) applySimulatedTw0(sysidAttrs);
   }
 
-  function renderEkfResults(slug, st) {
+  function renderEkfResults(slug, st, { applyTw0 = false } = {}) {
     const attrs = st[sysidEntityId(slug)]?.attributes || {};
     const rmseStr = formatRmseKpi(attrs.rmse);
     updateKpiCard(kpiEkfRmse, { value: rmseStr });
     updateKpiCard(kpiCompareEkfRmse, { value: rmseStr });
     updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' °C' : '—' });
     buildEkfChart(ekfChart, attrs.simulation);
-    applySimulatedTw0(attrs);
+    if (applyTw0) applySimulatedTw0(attrs);
   }
 
-  function renderOlResults(slug, st) {
+  function renderOlResults(slug, st, { applyTw0 = false } = {}) {
     const attrs = st[openLoopEntityId(slug)]?.attributes || {};
     const rmseStr = formatRmseKpi(attrs.open_loop_rmse);
     updateKpiCard(kpiOlRmse, { value: rmseStr });
     updateKpiCard(kpiCompareOlRmse, { value: rmseStr });
     updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
-    applySimulatedTw0(attrs);
+    if (applyTw0) applySimulatedTw0(attrs);
   }
 
   function setTw0Hint(source) {
@@ -830,11 +828,33 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     setTw0Hint(attrs.t_wall_initial_source || 'window_fit');
   }
 
+  function formMatchesParamFingerprint(active) {
+    const fp = active?.param_fingerprint || {};
+    const roomFp = fp[roomSlug] || {};
+    if (!roomFp || typeof roomFp !== 'object' || Object.keys(roomFp).length === 0) {
+      return false;
+    }
+    const current = collectCurrentParams();
+    const keys = [
+      'thermal_mass', 'r_external', 'internal_gain', 'solar_scale',
+      'c_air_fraction', 'r_aw_fraction',
+    ];
+    for (const key of keys) {
+      if (current[key] == null || !Number.isFinite(current[key])) continue;
+      if (!(key in roomFp)) return false;
+      const want = Number(roomFp[key]);
+      const got = current[key];
+      if (Math.abs(got - want) > 1e-4 * Math.max(1.0, Math.abs(want))) return false;
+    }
+    return true;
+  }
+
   function fittedTw0FromActiveHistory(st) {
     const config = st[CONFIG_ENTITY]?.attributes || {};
     const active = Array.isArray(config.parameter_history) ? (config.parameter_history[0] || {}) : {};
     const ids = active.dataset_ids || [];
     if (!selectedDatasetId || !ids.includes(selectedDatasetId)) return null;
+    if (!formMatchesParamFingerprint(active)) return null;
     const byDs = active.t_wall_initial_by_dataset || {};
     const map = byDs[selectedDatasetId] || active.t_wall_initial || {};
     const value = map[roomSlug];
@@ -1221,7 +1241,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       // Let the websocket state event with the fresh results arrive, then plot
       // the temperature fit and the input/disturbance signals over its horizon.
       await new Promise((res) => setTimeout(res, 800));
-      renderEkfResults(roomSlug, latestState);
+      renderEkfResults(roomSlug, latestState, { applyTw0: true });
       await renderEkfAux();
       setStatus(ekfStatusEl, 'Complete.', '');
     } catch (err) {
@@ -1243,7 +1263,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         ...collectSimParams(),
       });
       await new Promise((res) => setTimeout(res, 800));
-      renderOlResults(roomSlug, latestState);
+      renderOlResults(roomSlug, latestState, { applyTw0: true });
       await renderOlAux();
       setStatus(olStatusEl, 'Complete.', '');
     } catch (err) {

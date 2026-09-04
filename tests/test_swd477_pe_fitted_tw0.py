@@ -185,6 +185,11 @@ def test_pe_ui_shows_tw0_source():
     markup = (STATIC_JS / "identification" / "sysid-detail-markup.js").read_text(encoding="utf-8")
     assert "t_wall_initial_source" in detail
     assert "fittedTw0FromActiveHistory" in detail
+    assert "formMatchesParamFingerprint" in detail
+    assert "param_fingerprint" in detail
+    extras = detail.split("function renderIdentifiedExtras", 1)[1].split("function populateModelFromSysid", 1)[0]
+    assert "applySimulatedTw0" not in extras
+    assert "applyTw0" in detail
     assert "param-t-wall-initial-hint" in markup
     assert "current parameter set" in markup
 

@@ -174,6 +174,7 @@ class HeatingRuntime(
         self.sysid_results: dict[str, Any] = {}
         self.open_loop_results: dict[str, Any] = {}
         self._last_identified_heater_scales: dict[str, float] = {}
+        self._last_pe_fit: dict[str, Any] | None = None
         # HA entity catalog published by the thin bridge for Ingress pickers
         # (SWD-271). Not persisted — refreshed over MQTT when the bridge starts.
         self._ha_entity_catalog: list[dict[str, str]] = []
