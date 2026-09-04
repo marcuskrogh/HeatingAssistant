@@ -780,7 +780,7 @@ async def async_estimate_parameters_ml(
     estimator = KalmanMLEstimator(
         rooms=list((getattr(model, "rooms", {}) or {}).values()),
         sources=list(heat_sources),
-        dt=dt,
+        dt=timing.dt_s,
         n_horizon_steps=timing.n_fast,
         origin_stride=timing.fast_substeps,
         max_compute_s=cap_s,

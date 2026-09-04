@@ -288,6 +288,7 @@ def _estimator() -> KalmanMLEstimator:
     return KalmanMLEstimator(
         [_prior_room()], [_heater(PRIOR["power_scale"])],
         dt=DT_S, regularization=0.01, max_window_steps=40,
+        use_nstep_pem=False,
     )
 
 

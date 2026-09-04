@@ -71,7 +71,12 @@ from .sensitivity import (
     _simulation_mse_and_grad,
 )
 from .nlp_eval import RegularizedMseCache, WallInitMseCache, solve_lbfgs
-from .nstep_pem import PeComputeTimeout, nstep_pem_and_grad, timeout_user_message
+from .nstep_pem import (
+    PeComputeTimeout,
+    nstep_path_rmse,
+    nstep_pem_and_grad,
+    timeout_user_message,
+)
 from .theta_layout import _ThetaLayout
 from .warmstart import (
     _initial_state_and_covariance,
@@ -137,14 +142,16 @@ class KalmanMLEstimator:
         current configured values (and toward zero for ``q_int`` /
         unit-scale α).  Set to 0.0 to disable.  The default is deliberately
         very light (0.01) so the data — not the configured prior — drives
-        the estimate.  The identification window is typically short (the
-        configured data horizon, e.g. 6 h ≈ 24 steps at 900 s), so the
-        summed data-misfit term is modest in magnitude; a heavier prior
-        then pins every parameter near its starting value and makes the
-        result look unresponsive to the data even under strong heater
-        excitation.  The prior is kept just large enough to stabilise the
-        directions the data genuinely cannot constrain (unexcited rooms /
-        sources) without out-voting the directions it can.
+        the estimate.
+    max_compute_s : float
+        Wall-clock cap for one ``estimate()`` call [s].  ``0`` disables the
+        cap (library callers and tests).  Production PE passes
+        ``pe_max_compute_s`` (default 60).
+    n_horizon_steps, origin_stride :
+        NMPC fast look-ahead and slow-period stride for receding N-step PEM.
+        When omitted, they fall back to the tiled OE window length.
+    use_nstep_pem : bool
+        Production default True.  False keeps tiled OE (baseline / warm-start).
     """
 
     def __init__(
@@ -158,7 +165,7 @@ class KalmanMLEstimator:
         max_window_steps: int = 48,
         n_horizon_steps: Optional[int] = None,
         origin_stride: Optional[int] = None,
-        max_compute_s: float = 60.0,
+        max_compute_s: float = 0.0,
         use_nstep_pem: bool = True,
     ) -> None:
         self._rooms = rooms
@@ -675,82 +682,18 @@ class KalmanMLEstimator:
             options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-6},
         )
 
-        best_theta = theta_prior.copy()
-        best_f = float("inf")
-        best_converged = False
         timed_out = False
-        best_nstep_rmse = float("inf")
-
         try:
-            starts: List[np.ndarray] = []
-            if self._use_nstep_pem:
-                # Tiled OE warm-start so N-step L-BFGS does not sit in a worse
-                # basin than today's production objective.
-                self._use_nstep_pem = False
-                mse_cache.invalidate()
-                try:
-                    out_oe = solve_lbfgs(
-                        mse_cache.fun,
-                        mse_cache.jac,
-                        theta_prior.copy(),
-                        lb,
-                        ub,
-                        invalidate=mse_cache.invalidate,
-                        backend=scipy_backend,
-                    )
-                finally:
-                    self._use_nstep_pem = True
-                mse_cache.invalidate()
-                if out_oe is not None:
-                    starts.append(out_oe[1])
-                    best_theta = np.asarray(out_oe[1], dtype=float)
-                    best_nstep_rmse = self._nstep_rmse_theta(
-                        best_theta, layout, std_history, dataset_start_timestamps,
-                    )
-                    try:
-                        best_f = float(mse_cache.fun(best_theta))
-                    except PeComputeTimeout:
-                        raise
-                    except Exception:
-                        best_f = float("inf")
-            phys_theta = self._physics_informed_theta(
-                std_history, layout, theta_prior, lb, ub,
+            best_theta, best_f, best_converged = self._multistart_joint_nlp(
+                mse_cache,
+                layout,
+                std_history,
+                dataset_start_timestamps,
+                theta_prior,
+                lb,
+                ub,
+                scipy_backend,
             )
-            if phys_theta is not None:
-                starts.append(phys_theta)
-            starts.append(theta_prior.copy())
-
-            for theta_start in starts:
-                out = solve_lbfgs(
-                    mse_cache.fun,
-                    mse_cache.jac,
-                    theta_start,
-                    lb,
-                    ub,
-                    invalidate=mse_cache.invalidate,
-                    backend=scipy_backend,
-                )
-                if out is None:
-                    continue
-                f_cand, theta_c, converged = out
-                if self._use_nstep_pem:
-                    rmse_c = self._nstep_rmse_theta(
-                        theta_c, layout, std_history, dataset_start_timestamps,
-                    )
-                    better_rmse = (
-                        np.isfinite(rmse_c) and rmse_c < best_nstep_rmse
-                    )
-                    if better_rmse or (
-                        not np.isfinite(best_nstep_rmse) and f_cand < best_f
-                    ):
-                        best_nstep_rmse = float(rmse_c)
-                        best_f = f_cand
-                        best_theta = theta_c
-                        best_converged = converged
-                elif f_cand < best_f:
-                    best_f = f_cand
-                    best_theta = theta_c
-                    best_converged = converged
         except PeComputeTimeout as exc:
             timed_out = True
             _LOGGER.info("PE compute timeout after %.1f s (cap %.1f s)", exc.elapsed_s, exc.cap_s)
@@ -1174,6 +1117,89 @@ class KalmanMLEstimator:
     ) -> np.ndarray:
         return _dFdtheta_const(self, q, layout, model, ntheta, nx)
 
+    def _multistart_joint_nlp(
+        self,
+        mse_cache: RegularizedMseCache,
+        layout: "_ThetaLayout",
+        std_history: List[Dict[str, Any]],
+        dataset_start_timestamps: Optional[List[float]],
+        theta_prior: np.ndarray,
+        lb: np.ndarray,
+        ub: np.ndarray,
+        scipy_backend: ScipyNLPBackend,
+    ) -> Tuple[np.ndarray, float, bool]:
+        """L-BFGS from OE (when PEM), physics, and prior; keep best N-step RMSE."""
+        best_theta = theta_prior.copy()
+        best_f = float("inf")
+        best_converged = False
+        best_nstep_rmse = float("inf")
+        starts: List[np.ndarray] = []
+        if self._use_nstep_pem:
+            self._use_nstep_pem = False
+            mse_cache.invalidate()
+            try:
+                out_oe = solve_lbfgs(
+                    mse_cache.fun,
+                    mse_cache.jac,
+                    theta_prior.copy(),
+                    lb,
+                    ub,
+                    invalidate=mse_cache.invalidate,
+                    backend=scipy_backend,
+                )
+            finally:
+                self._use_nstep_pem = True
+            mse_cache.invalidate()
+            if out_oe is not None:
+                starts.append(out_oe[1])
+                best_theta = np.asarray(out_oe[1], dtype=float)
+                best_nstep_rmse = self._nstep_rmse_theta(
+                    best_theta, layout, std_history, dataset_start_timestamps,
+                )
+                try:
+                    best_f = float(mse_cache.fun(best_theta))
+                except PeComputeTimeout:
+                    raise
+                except Exception:
+                    best_f = float("inf")
+        phys_theta = self._physics_informed_theta(
+            std_history, layout, theta_prior, lb, ub,
+        )
+        if phys_theta is not None:
+            starts.append(phys_theta)
+        starts.append(theta_prior.copy())
+
+        for theta_start in starts:
+            out = solve_lbfgs(
+                mse_cache.fun,
+                mse_cache.jac,
+                theta_start,
+                lb,
+                ub,
+                invalidate=mse_cache.invalidate,
+                backend=scipy_backend,
+            )
+            if out is None:
+                continue
+            f_cand, theta_c, converged = out
+            if self._use_nstep_pem:
+                rmse_c = self._nstep_rmse_theta(
+                    theta_c, layout, std_history, dataset_start_timestamps,
+                )
+                better_rmse = np.isfinite(rmse_c) and rmse_c < best_nstep_rmse
+                if better_rmse or (
+                    not np.isfinite(best_nstep_rmse) and f_cand < best_f
+                ):
+                    best_nstep_rmse = float(rmse_c)
+                    best_f = f_cand
+                    best_theta = theta_c
+                    best_converged = converged
+            elif f_cand < best_f:
+                best_f = f_cand
+                best_theta = theta_c
+                best_converged = converged
+        return best_theta, best_f, best_converged
+
     def _nstep_rmse_theta(
         self,
         theta: np.ndarray,
@@ -1181,7 +1207,6 @@ class KalmanMLEstimator:
         std_history: List[Dict[str, Any]],
         dataset_start_ts: Optional[List[float]],
     ) -> float:
-        from .nstep_pem import nstep_path_rmse
         return nstep_path_rmse(
             self, theta, layout, std_history, self._dt,
             n_horizon=self._n_horizon_steps,
@@ -1203,7 +1228,6 @@ class KalmanMLEstimator:
             starts = getattr(self, "_last_dataset_start_ts", None)
         if not std_history:
             return float("nan")
-        from .nstep_pem import nstep_path_rmse
         return nstep_path_rmse(
             self, theta, layout, std_history, self._dt,
             n_horizon=self._n_horizon_steps,

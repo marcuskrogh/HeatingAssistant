@@ -4,6 +4,14 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.4
+
+- Parameter estimation now scores how well the model predicts indoor air over
+  the same look-ahead the controller uses, instead of a long tiled open-loop
+  window. If a run exceeds the time limit (default one minute), the previous
+  parameters stay in place. Raise that limit under Configuration → Advanced,
+  or use a shorter dataset.
+
 # 2026.09.3
 
 - Parameter Estimation open-loop and EKF reconstruction start the wall

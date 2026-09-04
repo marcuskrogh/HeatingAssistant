@@ -146,7 +146,7 @@ def test_production_pe_grid_follows_nmpc_timing():
     room = make_single_room()
     sources = make_electric_heaters([room])
     est = make_kalman_ml_estimator(
-        [room], sources, dt=timing.dt,
+        [room], sources, dt=timing.dt_s,
         n_horizon_steps=timing.n_fast,
         origin_stride=timing.fast_substeps,
         use_nstep_pem=True,

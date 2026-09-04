@@ -1094,7 +1094,13 @@ class HeatingRuntime(
                         const.CONF_PARAMETER_ESTIMATION_HISTORY_DAYS,
                         const.DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS,
                     )
-                )
+                ),
+                const.CONF_PE_MAX_COMPUTE_S: float(
+                    self.options.get(
+                        const.CONF_PE_MAX_COMPUTE_S,
+                        const.DEFAULT_PE_MAX_COMPUTE_S,
+                    )
+                ),
             },
             "enums": {
                 "floor_types": list(const.FLOOR_TYPE_DEFAULTS.keys()),
