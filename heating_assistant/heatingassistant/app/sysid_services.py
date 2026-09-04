@@ -34,6 +34,8 @@ from heatingassistant.engine.parameter_lifecycle import (
     async_estimate_parameters_ml,
     delete_parameter_history,
     estimated_params_snapshot,
+    lookup_fitted_t_wall_initial,
+    pe_fit_record,
     restore_estimated_parameters,
     store_identified_parameters,
 )
@@ -44,7 +46,6 @@ from heatingassistant.engine.simulation.sysid_helpers import (
     effective_heater_scales,
     extract_sim_room_params,
     merge_per_room_into_sysid_results,
-    open_loop_t_wall_initial_dict,
     optimal_t_wall_for_window,
     patched_heat_sources,
 )
@@ -200,6 +201,48 @@ def _locked_t_wall_from_request(
     return result
 
 
+def _simulation_dataset_ids(values: Mapping[str, Any]) -> list[str] | None:
+    ids = _dataset_id_list(values.get("dataset_ids"))
+    if ids:
+        return ids
+    dataset_id = values.get("dataset_id")
+    if dataset_id:
+        return [str(dataset_id)]
+    return None
+
+
+def _fitted_t_wall_for_simulation(
+    runtime: Any,
+    values: Mapping[str, Any],
+    room_params: Mapping[str, Mapping[str, Any]],
+) -> dict[str, float]:
+    dataset_ids = _simulation_dataset_ids(values)
+    window_start = values.get("window_start")
+    window_end = values.get("window_end")
+    kwargs = {
+        "dataset_ids": dataset_ids,
+        "window_start": float(window_start) if window_start is not None else None,
+        "window_end": float(window_end) if window_end is not None else None,
+        "room_params": room_params,
+    }
+    for fit in (
+        getattr(runtime, "_last_pe_fit", None),
+        _active_from_options(runtime),
+    ):
+        found = lookup_fitted_t_wall_initial(fit, **kwargs)
+        if found:
+            return found
+    return {}
+
+
+def _active_from_options(runtime: Any) -> dict[str, Any]:
+    snapshot = estimated_params_snapshot(getattr(runtime, "options", {}) or {}) or {}
+    active = snapshot.get("active")
+    if isinstance(active, Mapping):
+        return dict(active)
+    return dict(snapshot) if snapshot else {}
+
+
 def _resolve_simulation_t_wall(
     history: list[dict[str, Any]],
     runtime: Any,
@@ -208,10 +251,15 @@ def _resolve_simulation_t_wall(
     dt: float,
     room_params: dict[str, dict[str, float]],
     values: Mapping[str, Any],
-) -> dict[str, float]:
+) -> tuple[dict[str, float], str]:
     locked = _locked_t_wall_from_request(values, room_params, room_names)
     if locked:
-        return locked
+        _write_t_wall_into_room_params(room_params, locked)
+        return locked, "locked"
+    fitted = _fitted_t_wall_for_simulation(runtime, values, room_params)
+    if fitted:
+        _write_t_wall_into_room_params(room_params, fitted)
+        return fitted, "parameter_set"
     try:
         estimated = optimal_t_wall_for_window(
             history,
@@ -225,14 +273,48 @@ def _resolve_simulation_t_wall(
         estimated = {}
     result = {str(name): float(val) for name, val in dict(estimated or {}).items()}
     if not result:
-        result = open_loop_t_wall_initial_dict(
-            room_params,
-            room_names,
-            getattr(runtime, "sysid_results", None),
-        )
-    for name, value in result.items():
-        room_params.setdefault(str(name), {})["t_wall_initial"] = float(value)
+        result = _midpoint_t_wall(history, room_names)
+    _write_t_wall_into_room_params(room_params, result)
+    return result, "window_fit"
+
+
+def _midpoint_t_wall(
+    history: Sequence[Mapping[str, Any]],
+    room_names: Sequence[str],
+) -> dict[str, float]:
+    """Air/outdoor midpoint when wall-only optimisation cannot return a value."""
+
+    if not history:
+        return {}
+    first = history[0]
+    y_vals = first.get("y") or []
+    try:
+        t_out = float(first.get("d_outdoor"))
+    except (TypeError, ValueError):
+        t_out = None
+    if t_out is not None and t_out != t_out:
+        t_out = None
+    result: dict[str, float] = {}
+    for i, name in enumerate(room_names):
+        if i >= len(y_vals):
+            continue
+        try:
+            t_air = float(y_vals[i])
+        except (TypeError, ValueError):
+            continue
+        if t_out is not None:
+            result[str(name)] = round(0.5 * (t_air + t_out), 2)
+        else:
+            result[str(name)] = round(t_air, 2)
     return result
+
+
+def _write_t_wall_into_room_params(
+    room_params: dict[str, dict[str, float]],
+    t_wall: Mapping[str, float],
+) -> None:
+    for name, value in t_wall.items():
+        room_params.setdefault(str(name), {})["t_wall_initial"] = float(value)
 
 
 def _attach_aux_and_tw0(
@@ -240,6 +322,7 @@ def _attach_aux_and_tw0(
     history: list[dict[str, Any]],
     heat_sources: Sequence[Any],
     t_wall: Mapping[str, float],
+    source: str = "window_fit",
 ) -> None:
     for room_name, room_data in per_room.items():
         if not isinstance(room_data, dict):
@@ -248,6 +331,7 @@ def _attach_aux_and_tw0(
         room_data.update(aux)
         if room_name in t_wall:
             room_data["t_wall_initial"] = float(t_wall[room_name])
+            room_data["t_wall_initial_source"] = source
 
 
 def _persist_runtime_config(runtime: Any) -> None:
@@ -310,6 +394,7 @@ def _merge_ml_result(runtime: Any, result: Mapping[str, Any], horizon_hours: flo
                 existing["r_aw_fraction"] = splits["r_aw_fraction"]
         if room_name in t_wall_initial:
             existing["t_wall_initial"] = t_wall_initial[room_name]
+            existing["t_wall_initial_source"] = "parameter_set"
         room_connections = {
             key: value
             for key, value in dict(inter_room_r).items()
@@ -456,9 +541,23 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
         locked_params=values.get("locked_params"),
         history_override=history,
         dataset_start_timestamps=boundaries,
+        dataset_ids=dataset_ids,
+        window_start=values.get("window_start"),
+        window_end=values.get("window_end"),
     )
     if result.get("success"):
         _merge_ml_result(runtime, result, horizon)
+        runtime._last_pe_fit = pe_fit_record(
+            result.get("estimated_params"),
+            estimated_internal_gains=result.get("estimated_internal_gains"),
+            estimated_solar_scales=result.get("estimated_solar_scales"),
+            estimated_envelope_splits=result.get("estimated_envelope_splits"),
+            dataset_ids=dataset_ids,
+            estimated_t_wall_initial=result.get("estimated_t_wall_initial"),
+            estimated_t_wall_per_dataset=result.get("estimated_t_wall_per_dataset"),
+            window_start=values.get("window_start"),
+            window_end=values.get("window_end"),
+        )
         if apply_params:
             _persist_runtime_config(runtime)
     else:
@@ -495,7 +594,7 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
 
     sigma_w = float(values.get("sigma_w", runtime.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W)))
     sigma_v = float(values.get("sigma_v", runtime.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V)))
-    t_wall_initial = _resolve_simulation_t_wall(
+    t_wall_initial, tw0_source = _resolve_simulation_t_wall(
         history,
         runtime,
         sim_heat_sources,
@@ -520,7 +619,7 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
     )
     if "error" not in result:
         per_room = dict(result.get("per_room", {}) or {})
-        _attach_aux_and_tw0(per_room, history, sim_heat_sources, t_wall_initial)
+        _attach_aux_and_tw0(per_room, history, sim_heat_sources, t_wall_initial, tw0_source)
         for room_data in per_room.values():
             if isinstance(room_data, dict):
                 room_data["horizon_steps"] = result.get("horizon_steps", horizon_steps)
@@ -589,7 +688,7 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
                 augment_offsets=False,
             )
 
-    t_wall_initial = _resolve_simulation_t_wall(
+    t_wall_initial, tw0_source = _resolve_simulation_t_wall(
         history,
         runtime,
         base_heat_sources,
@@ -611,7 +710,7 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     )
     if "error" not in result:
         per_room = dict(result.get("per_room", {}) or {})
-        _attach_aux_and_tw0(per_room, history, base_heat_sources, t_wall_initial)
+        _attach_aux_and_tw0(per_room, history, base_heat_sources, t_wall_initial, tw0_source)
         rmse_by_horizon = await compute_open_loop_rmse_by_horizon(
             history,
             system,
@@ -719,12 +818,18 @@ async def handle_get_pe_inputs(runtime: Any, data: Mapping[str, Any]) -> dict[st
         values, getattr(runtime, "_last_identified_heater_scales", {})
     )
     sources = patched_heat_sources(_heat_sources(runtime), heater_scales)
-    return identification_aux_series(
+    series = identification_aux_series(
         history,
         sources,
         room_name,
         iso_time=_iso_time,
     )
+    room_params = extract_sim_room_params(values, _room_names(runtime))
+    fitted = _fitted_t_wall_for_simulation(runtime, values, room_params)
+    if room_name in fitted:
+        series["t_wall_initial"] = float(fitted[room_name])
+        series["t_wall_initial_source"] = "parameter_set"
+    return series
 
 
 def _room_has_contact(runtime: Any, room_name: str) -> bool:

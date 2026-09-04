@@ -88,7 +88,7 @@ export function paramsCardHtml(defaults) {
           </div>
           <input class="form-input form-input--readonly" type="text" id="param-t-wall-initial"
             readonly value="&mdash;" tabindex="-1">
-          <span class="form-hint">&deg;C &mdash; identified envelope temperature at window start (populated after parameter estimation; lock to hold fixed)</span>
+          <span class="form-hint" id="param-t-wall-initial-hint">&deg;C &mdash; hidden envelope temperature at the start of this window. After parameter estimation this is the fitted initial state for the current parameter set; otherwise it is fitted on this window when you simulate.</span>
         </div>
         <div class="form-group">
           <div class="form-group__header">

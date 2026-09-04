@@ -123,7 +123,7 @@ def test_resolve_simulation_t_wall_honors_lock():
     runtime = SimpleNamespace(control_engine=SimpleNamespace(model=HouseModel([room])))
     hist = _history()
     room_params = {"living_room": {"t_wall_initial": 19.5}}
-    val = _resolve_simulation_t_wall(
+    val, source = _resolve_simulation_t_wall(
         hist,
         runtime,
         [_heater()],
@@ -132,6 +132,7 @@ def test_resolve_simulation_t_wall_honors_lock():
         room_params,
         {"t_wall_locked": True},
     )
+    assert source == "locked"
     assert val == {"living_room": pytest.approx(19.5)}
     assert room_params["living_room"]["t_wall_initial"] == pytest.approx(19.5)
 
@@ -149,7 +150,7 @@ def test_resolve_simulation_t_wall_optimizes_when_unlocked(monkeypatch):
         "heatingassistant.app.sysid_services.optimal_t_wall_for_window",
         _fake_opt,
     )
-    val = _resolve_simulation_t_wall(
+    val, source = _resolve_simulation_t_wall(
         hist,
         runtime,
         [_heater()],
@@ -158,6 +159,7 @@ def test_resolve_simulation_t_wall_optimizes_when_unlocked(monkeypatch):
         room_params,
         {"t_wall_locked": False},
     )
+    assert source == "window_fit"
     assert val == {"living_room": pytest.approx(22.4)}
     assert room_params["living_room"]["t_wall_initial"] == pytest.approx(22.4)
 
