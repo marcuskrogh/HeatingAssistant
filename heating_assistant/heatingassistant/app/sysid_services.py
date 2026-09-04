@@ -272,9 +272,41 @@ def _resolve_simulation_t_wall(
         _LOGGER.warning("Diagnostic wall-initial optimisation failed: %s", exc)
         estimated = {}
     result = {str(name): float(val) for name, val in dict(estimated or {}).items()}
-    source = "window_fit" if result else "window_fit"
+    if not result:
+        result = _midpoint_t_wall(history, room_names)
     _write_t_wall_into_room_params(room_params, result)
-    return result, source
+    return result, "window_fit"
+
+
+def _midpoint_t_wall(
+    history: Sequence[Mapping[str, Any]],
+    room_names: Sequence[str],
+) -> dict[str, float]:
+    """Air/outdoor midpoint when wall-only optimisation cannot return a value."""
+
+    if not history:
+        return {}
+    first = history[0]
+    y_vals = first.get("y") or []
+    try:
+        t_out = float(first.get("d_outdoor"))
+    except (TypeError, ValueError):
+        t_out = None
+    if t_out is not None and t_out != t_out:
+        t_out = None
+    result: dict[str, float] = {}
+    for i, name in enumerate(room_names):
+        if i >= len(y_vals):
+            continue
+        try:
+            t_air = float(y_vals[i])
+        except (TypeError, ValueError):
+            continue
+        if t_out is not None:
+            result[str(name)] = round(0.5 * (t_air + t_out), 2)
+        else:
+            result[str(name)] = round(t_air, 2)
+    return result
 
 
 def _write_t_wall_into_room_params(

@@ -187,3 +187,136 @@ def test_pe_ui_shows_tw0_source():
     assert "fittedTw0FromActiveHistory" in detail
     assert "param-t-wall-initial-hint" in markup
     assert "current parameter set" in markup
+
+
+def test_restore_from_applied_snapshot_without_last_pe_fit(monkeypatch):
+    """Loading a stored dataset used to estimate the current θ restores snapshot Tw0."""
+    room = Room("living_room", 2.0e5, 0.04)
+    model = HouseModel([room])
+    options: dict = {}
+    apply_estimated_parameters(
+        model,
+        [_heater()],
+        options,
+        {"living_room": {"thermal_mass": 3.1e5, "r_external": 0.06}},
+        dataset_ids=["ds-heat"],
+        estimated_t_wall_initial={"living_room": 15.2},
+    )
+    runtime = SimpleNamespace(
+        options=options,
+        _last_pe_fit=None,
+        control_engine=SimpleNamespace(model=HouseModel([Room("living_room", 3.1e5, 0.06)])),
+    )
+
+    def _boom(*_a, **_k):
+        raise AssertionError("window fit must not run when the applied snapshot matches")
+
+    monkeypatch.setattr(
+        "heatingassistant.app.sysid_services.optimal_t_wall_for_window",
+        _boom,
+    )
+    val, source = _resolve_simulation_t_wall(
+        _history(),
+        runtime,
+        [_heater()],
+        ["living_room"],
+        900.0,
+        {"living_room": {"thermal_mass": 3.1e5, "r_external": 0.06}},
+        {"dataset_id": "ds-heat"},
+    )
+    assert source == "parameter_set"
+    assert val["living_room"] == pytest.approx(15.2)
+
+
+def test_window_pe_fit_reused_when_timestamps_match(monkeypatch):
+    room = Room("living_room", 3.0e5, 0.05)
+    fit = pe_fit_record(
+        {"living_room": {"thermal_mass": 3.0e5, "r_external": 0.05}},
+        estimated_t_wall_initial={"living_room": 11.0},
+        window_start=100.0,
+        window_end=200.0,
+    )
+    runtime = SimpleNamespace(
+        options={},
+        _last_pe_fit=fit,
+        control_engine=SimpleNamespace(model=HouseModel([room])),
+    )
+    monkeypatch.setattr(
+        "heatingassistant.app.sysid_services.optimal_t_wall_for_window",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("window opt must not run for matching PE window")
+        ),
+    )
+    val, source = _resolve_simulation_t_wall(
+        _history(),
+        runtime,
+        [_heater()],
+        ["living_room"],
+        900.0,
+        {"living_room": {"thermal_mass": 3.0e5, "r_external": 0.05}},
+        {"window_start": 100.0, "window_end": 200.0},
+    )
+    assert source == "parameter_set"
+    assert val["living_room"] == pytest.approx(11.0)
+
+
+def test_loading_one_dataset_from_joint_pe_uses_that_block(monkeypatch):
+    """Joint PE stores one Tw0 per dataset; loading one of those datasets restores it."""
+    room = Room("living_room", 3.0e5, 0.05)
+    runtime = SimpleNamespace(
+        options={},
+        _last_pe_fit=pe_fit_record(
+            {"living_room": {"thermal_mass": 3.0e5, "r_external": 0.05}},
+            dataset_ids=["ds1", "ds2"],
+            estimated_t_wall_initial={"living_room": 9.0},
+            estimated_t_wall_per_dataset=[
+                {"living_room": 15.0},
+                {"living_room": 17.5},
+            ],
+        ),
+        control_engine=SimpleNamespace(model=HouseModel([room])),
+    )
+
+    def _boom(*_a, **_k):
+        raise AssertionError("window fit must not run for a dataset used in the PE")
+
+    monkeypatch.setattr(
+        "heatingassistant.app.sysid_services.optimal_t_wall_for_window",
+        _boom,
+    )
+    val, source = _resolve_simulation_t_wall(
+        _history(),
+        runtime,
+        [_heater()],
+        ["living_room"],
+        900.0,
+        {},
+        {"dataset_id": "ds1"},
+    )
+    assert source == "parameter_set"
+    assert val["living_room"] == pytest.approx(15.0)
+
+
+def test_empty_window_opt_falls_back_to_midpoint_not_air(monkeypatch):
+    room = Room("living_room", 3.0e5, 0.05)
+    runtime = SimpleNamespace(
+        options={},
+        _last_pe_fit=None,
+        control_engine=SimpleNamespace(model=HouseModel([room])),
+    )
+    monkeypatch.setattr(
+        "heatingassistant.app.sysid_services.optimal_t_wall_for_window",
+        lambda *_a, **_k: {},
+    )
+    val, source = _resolve_simulation_t_wall(
+        _history(),
+        runtime,
+        [_heater()],
+        ["living_room"],
+        900.0,
+        {},
+        {"dataset_id": "unrelated"},
+    )
+    assert source == "window_fit"
+    assert val["living_room"] == pytest.approx(14.5)
+    assert val["living_room"] != pytest.approx(21.0)
