@@ -662,6 +662,9 @@ CONF_PARAMETER_ESTIMATION_HISTORY_DAYS = "parameter_estimation_history_days"
 #: Default number of days the integration-managed JSONL parameter-estimation history
 #: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
 DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS = 90
+#: Wall-clock cap for one PE NLP [s]. Configurable under Configuration → Advanced.
+CONF_PE_MAX_COMPUTE_S = "pe_max_compute_s"
+DEFAULT_PE_MAX_COMPUTE_S = 60.0
 #: Exponential-moving-average time constant [s] for smoothing the live cloud
 #: cover used by the solar model.  Clouds change gradually, so the instantaneous
 #: weather-entity reading is low-pass filtered to keep the solar attenuation

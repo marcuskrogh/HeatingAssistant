@@ -34,6 +34,19 @@ const ICONS = {
     <path d="M22 28 v18 c0 5.5 12.5 10 28 10 s28 -4.5 28 -10 V28" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
     <path d="M22 46 v18 c0 5.5 12.5 10 28 10 s28 -4.5 28 -10 V46" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
   </svg>`,
+  advanced: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="50" r="18" fill="none" stroke="${TEAL}" stroke-width="6"/>
+    <g stroke="${TEAL}" stroke-width="5" stroke-linecap="round">
+      <line x1="50" y1="18" x2="50" y2="8"/>
+      <line x1="50" y1="92" x2="50" y2="82"/>
+      <line x1="18" y1="50" x2="8" y2="50"/>
+      <line x1="92" y1="50" x2="82" y2="50"/>
+      <line x1="27" y1="27" x2="20" y2="20"/>
+      <line x1="73" y1="73" x2="80" y2="80"/>
+      <line x1="73" y1="27" x2="80" y2="20"/>
+      <line x1="27" y1="73" x2="20" y2="80"/>
+    </g>
+  </svg>`,
 };
 
 export { ICONS };

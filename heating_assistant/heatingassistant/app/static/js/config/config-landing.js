@@ -1,6 +1,6 @@
-import { setPanelHash } from '../panel-hash.js?v=124';
-import { ICONS } from './config-icons.js?v=124';
-import { el } from './config-ui.js?v=124';
+import { setPanelHash } from '../panel-hash.js?v=134';
+import { ICONS } from './config-icons.js?v=134';
+import { el } from './config-ui.js?v=134';
 
 // Landing page — cards linking to each configuration area
 // ---------------------------------------------------------------------------
@@ -35,6 +35,12 @@ const LANDING_CARDS = [
     icon: ICONS.params,
     title: 'System Parameters',
     desc: 'Data retention, history depth and other system-level settings that control how the integration stores and manages data.',
+  },
+  {
+    hash: '#config/advanced',
+    icon: ICONS.advanced,
+    title: 'Advanced',
+    desc: 'Deeper tuning knobs. Parameter estimation maximum compute time lives here.',
   },
 ];
 

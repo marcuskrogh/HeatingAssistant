@@ -244,7 +244,9 @@ class TestKalmanMLEstimator:
         prior_room = _make_single_room(thermal_mass=6_000_000.0, r_external=0.04)
         prior_sources = _make_sources([prior_room])
         prior_sources[0].power_scale = 1.0
-        estimator = KalmanMLEstimator([prior_room], prior_sources, dt=60.0)
+        estimator = KalmanMLEstimator(
+            [prior_room], prior_sources, dt=60.0, use_nstep_pem=False,
+        )
         result = estimator.estimate(history)
         assert result["success"] is True
 

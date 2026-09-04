@@ -1,7 +1,7 @@
 {
   "domain": "heating_assistant",
   "name": "Heating Assistant",
-  "version": "2026.09.3",
+  "version": "2026.09.4",
   "documentation": "https://github.com/marcuskrogh/HeatingAssistant",
   "issue_tracker": "https://github.com/marcuskrogh/HeatingAssistant/issues",
   "requirements": [],
