@@ -15,4 +15,4 @@
 - Branch: `cursor/swd-477-wall-init-a761`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/656
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/656 (`fc124b0`)
