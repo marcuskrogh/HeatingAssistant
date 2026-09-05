@@ -34,6 +34,7 @@ from ..const import (
     DEFAULT_U_REF_GATE,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
+    SOLAR_GAIN_SMOOTHING_TAU_S,
 )
 from ..heat_sources import HeatSource
 from ..nmpc_ocp import (
@@ -56,7 +57,11 @@ from ..nmpc_timing import (
     timing_from_dt_horizon,
 )
 from ..solar_forecast import select_cloud_for_step, select_ghi_for_step
-from ..solar_model import room_solar_gains, room_solar_gains_from_exposure
+from ..solar_model import (
+    room_solar_gains,
+    room_solar_gains_from_exposure,
+    smooth_solar_gain_schedule,
+)
 from ..thermal_model import HouseModel
 from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
@@ -362,6 +367,8 @@ class HeatingMPCController:
         self._linearised_predictions: List[Dict[str, float]] = []
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
+        self._solar_gain_filt: Dict[str, float] = {}
+        self._solar_gain_tau_s: float = float(SOLAR_GAIN_SMOOTHING_TAU_S)
         self._wind_forecast: List[float] = []
         self._heating_schedule: List[Dict[str, float]] = []
         self._price_forecast: List[float] = []
@@ -1062,6 +1069,7 @@ class HeatingMPCController:
             cloud_cover_now=cloud_cover_now,
             ghi_forecast=ghi_forecast,
             ghi_now=ghi_now,
+            persist=True,
         )
         if solar_gains is not None:
             solar_seq[0] = dict(solar_gains)
@@ -1360,6 +1368,7 @@ class HeatingMPCController:
             cloud_cover_now=cloud_cover_now,
             ghi_forecast=ghi_forecast,
             ghi_now=ghi_now,
+            persist=True,
         )
         if solar_gains is None:
             # Same k=0 cloud/GHI path as the plotted history/NOW sample.
@@ -1610,6 +1619,7 @@ class HeatingMPCController:
         cloud_cover_now: Optional[float] = None,
         ghi_forecast: Optional[List[Optional[float]]] = None,
         ghi_now: Optional[float] = None,
+        persist: bool = False,
     ) -> List[Dict[str, float]]:
         """Solar gain forecast using the geometric solar model.
 
@@ -1629,7 +1639,14 @@ class HeatingMPCController:
         Kasten-Czeplak cloud factor, else clear sky.  GHI steps outside the
         forecast's coverage fall back to the cloud/clear path; cloud cover beyond
         its forecast holds the last value (persistence).
+
+        After intensity, each room's watts pass a first-order EMA so cloud
+        and GHI steps do not jump in one sample.  Isolated calls
+        (``persist=False``) seed k = 0 from the instantaneous value and do
+        not update live filter state.  Live ``compute`` / ``solve_nmpc``
+        persist k = 0 so the next cycle continues from NOW.
         """
+        rooms = list(self._system._room_list)
         schedules = []
         for k in range(self._horizon + 1):  # N+1 entries: k = 0 ... N
             t = now + timedelta(seconds=self._dt * k)
@@ -1643,9 +1660,19 @@ class HeatingMPCController:
                 cc = select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)
             schedules.append({
                 name: self._room_gain(name, t, cc, g)
-                for name in self._system._room_list
+                for name in rooms
             })
-        return schedules
+        prev = self._solar_gain_filt if persist else None
+        filtered, k0 = smooth_solar_gain_schedule(
+            schedules,
+            prev,
+            self._dt,
+            self._solar_gain_tau_s,
+            rooms,
+        )
+        if persist:
+            self._solar_gain_filt = dict(k0)
+        return filtered
 
     def _current_solar(
         self,

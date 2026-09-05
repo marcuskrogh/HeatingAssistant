@@ -1980,10 +1980,20 @@ class TestSolarGhiThreading:
         leaked = ctrl._room_gain(
             "living_room", t2, cloud_cover=1.0, ghi=500.0,
         )
+        from heatingassistant.engine.const import SOLAR_GAIN_SMOOTHING_TAU_S
+        from heatingassistant.engine.solar_model import smooth_solar_gain_step
+
+        inst0 = ctrl._room_gain("living_room", now, cloud_cover=1.0, ghi=500.0)
+        inst1 = ctrl._room_gain(
+            "living_room", now + timedelta(seconds=900.0), cloud_cover=1.0, ghi=500.0,
+        )
+        v = smooth_solar_gain_step(None, inst0, 900.0, SOLAR_GAIN_SMOOTHING_TAU_S)
+        v = smooth_solar_gain_step(v, inst1, 900.0, SOLAR_GAIN_SMOOTHING_TAU_S)
+        v = smooth_solar_gain_step(v, analytical, 900.0, SOLAR_GAIN_SMOOTHING_TAU_S)
         assert g0 > 0.0 and g1 >= 0.0
         assert abs(g0 - g1) > 1e-9
-        assert g2 == pytest.approx(analytical, rel=1e-12)
-        assert g2 != pytest.approx(leaked, rel=1e-9)
+        assert g2 == pytest.approx(v)
+        assert analytical != pytest.approx(leaked, rel=1e-9)
 
 
 class TestPriceAwareAbsoluteEnergyPricing:

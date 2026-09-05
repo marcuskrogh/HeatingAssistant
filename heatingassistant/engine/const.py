@@ -670,6 +670,10 @@ DEFAULT_PE_MAX_COMPUTE_S = 60.0
 #: weather-entity reading is low-pass filtered to keep the solar attenuation
 #: continuous instead of jumping between cycles.
 CLOUD_SMOOTHING_TAU_S = 1800.0
+#: First-order EMA time constant [s] on modelled solar gain [W] after
+#: geometry and cloud/GHI intensity.  Weather and irradiance forecasts step
+#: hourly; this keeps history/NOW/horizon from jumping in one control cycle.
+SOLAR_GAIN_SMOOTHING_TAU_S = 1800.0
 #: Throttle [s] for persisting smoothed runtime weather state (cloud cover) so
 #: it survives a restart and the first post-restart cycle does not spike.
 RUNTIME_STATE_SAVE_DELAY_S = 60.0

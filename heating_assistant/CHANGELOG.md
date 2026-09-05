@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.5
+
+- Solar gain no longer jumps in one sample when cloud cover or a solar
+  irradiance forecast steps. The watt trace after the usual sky model is
+  low-pass filtered over about half an hour, so history, NOW, and the
+  forecast change gradually.
+
 # 2026.09.4
 
 - Parameter estimation now scores how well the model predicts indoor air over
