@@ -4,9 +4,9 @@
   z-index: 20;
   background: rgba(0, 0, 0, 0.62);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding: 7vh 16px 16px;
+  padding: 24px 16px;
 }
 
 .pe-progress {
@@ -18,40 +18,20 @@
   overflow: hidden;
 }
 
-.pe-progress__head {
-  padding: 14px 18px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.pe-progress__kicker {
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin: 0 0 4px;
-}
-
-.pe-progress__title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
-
 .pe-progress__clock {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 22px 18px 8px;
+  padding: 28px 18px 10px;
 }
 
 .pe-progress__remaining {
   font-family: var(--font-mono);
-  font-size: 56px;
+  font-size: 80px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-primary);
-  line-height: 1;
+  line-height: 0.95;
   font-variant-numeric: tabular-nums;
 }
 
@@ -64,17 +44,23 @@
 }
 
 .pe-progress__clock-label {
-  margin-top: 8px;
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pe-progress__clock-cap {
+  margin-top: 4px;
+  font-size: 12px;
   color: var(--text-dim);
 }
 
 .pe-progress__bar {
-  width: min(420px, 86%);
-  height: 6px;
-  margin: 14px 0 0;
+  width: min(460px, 88%);
+  height: 8px;
+  margin: 16px 0 0;
   background: var(--bg-elevated);
   border-radius: 99px;
   overflow: hidden;
@@ -87,11 +73,35 @@
   transition: width 200ms linear;
 }
 
+.pe-progress__bar-fill--done {
+  background: var(--alarm);
+}
+
+.pe-progress__head {
+  padding: 4px 18px 8px;
+  text-align: center;
+}
+
+.pe-progress__kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+
+.pe-progress__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
 .pe-progress__metrics {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 12px;
-  padding: 16px 18px 4px;
+  padding: 10px 18px 4px;
 }
 
 .pe-progress__metric-label {
@@ -104,7 +114,7 @@
 .pe-progress__metric-value {
   margin-top: 4px;
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 16px;
   color: var(--text-primary);
 }
 
@@ -122,7 +132,7 @@
 
 .pe-progress__plot {
   width: 100%;
-  height: 168px;
+  height: 200px;
   display: block;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -132,7 +142,7 @@
 .pe-progress__legend {
   display: flex;
   gap: 16px;
-  padding: 6px 18px 16px;
+  padding: 6px 18px 18px;
   font-size: 11px;
   color: var(--text-secondary);
 }
@@ -152,16 +162,18 @@
   border-top: 2px dashed var(--warning);
 }
 
-.pe-progress__foot {
-  padding: 0 18px 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.45;
+.pe-progress__timeout {
+  margin: 0;
+  padding: 12px 18px 16px;
+  font-size: 13px;
+  color: var(--alarm);
+  border-top: 1px solid var(--border);
+  line-height: 1.4;
 }
 
 .sysid-stub {
   padding: 16px 20px 24px;
-  min-height: 520px;
+  min-height: 640px;
   background: var(--bg-primary);
   position: relative;
 }

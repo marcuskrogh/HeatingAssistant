@@ -44,7 +44,7 @@ export function snapshot({ elapsedS, nowS = Date.now() / 1000 }) {
     ftol: FTOL,
     f_hist: hist,
     message: elapsed >= CAP_S
-      ? 'Parameter estimation stopped after 5 minutes (the configured maximum compute time).'
+      ? 'Stopped after 5 minutes (the configured maximum). Parameters were not applied.'
       : null,
   };
 }
@@ -53,4 +53,5 @@ export const CAPTURE = {
   start: 8,
   mid: 133,
   late: 282,
+  timeout: 300,
 };

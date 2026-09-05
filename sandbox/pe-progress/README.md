@@ -7,4 +7,4 @@ python3 sandbox/pe-progress/harness.py --tag 01
 python3 sandbox/pe-progress/harness.py --serve-only
 ```
 
-Query: `?mode=start|mid|late` (frozen stills) or `?live=1` (animated replay).
+Query: `?mode=start|mid|late|timeout` (frozen stills) or `?live=1` (animated replay).

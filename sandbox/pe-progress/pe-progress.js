@@ -12,15 +12,25 @@ function fmtJ(v) {
   return v.toExponential(2);
 }
 
-function fmtRel(v) {
-  if (!Number.isFinite(v)) return '—';
-  return v.toExponential(2);
+function phaseLabel(phase, timedOut) {
+  if (timedOut) return 'Time limit reached';
+  if (phase === 'tiled_oe') return 'Getting a starting guess';
+  if (phase === 'nstep_pem') return 'Fitting the model';
+  return phase || 'Fitting';
 }
 
-function phaseLabel(phase) {
-  if (phase === 'tiled_oe') return 'Tiled OE warm-start';
-  if (phase === 'nstep_pem') return 'N-step PEM';
-  return phase || 'Optimising';
+function niceTicks(maxV, count = 5) {
+  if (!(maxV > 0)) return [0];
+  const raw = maxV / count;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const norm = raw / mag;
+  let step = mag;
+  if (norm > 5) step = 10 * mag;
+  else if (norm > 2) step = 5 * mag;
+  else if (norm > 1) step = 2 * mag;
+  const ticks = [];
+  for (let v = 0; v <= maxV + step * 0.01; v += step) ticks.push(v);
+  return ticks;
 }
 
 function drawPlot(canvas, snap) {
@@ -38,62 +48,50 @@ function drawPlot(canvas, snap) {
 
   const hist = snap.f_hist || [];
   if (hist.length < 1) return;
-  const padL = 52;
+  const padL = 44;
   const padR = 16;
-  const padT = 12;
+  const padT = 14;
   const padB = 28;
-  const xs = hist.map((_, i) => i);
-  const ys = hist.map((p) => Math.max(1e-16, p.rel_step));
-  const ftol = Math.max(1e-16, Number(snap.ftol) || 1e-12);
-  const yMin = Math.min(ftol / 30, ...ys) * 0.7;
-  const yMax = Math.max(ftol * 8, ...ys) * 1.15;
+  const ys = hist.map((p) => Math.max(0, p.f));
+  const yMax = Math.max(1, ...ys) * 1.08;
   const xMin = 0;
-  const xMax = Math.max(8, xs[xs.length - 1]);
+  const xMax = Math.max(8, hist.length - 1);
 
   const xOf = (x) => padL + ((x - xMin) / (xMax - xMin)) * (w - padL - padR);
-  const yOf = (y) => {
-    const a = Math.log10(yMin);
-    const b = Math.log10(yMax);
-    const t = (Math.log10(y) - a) / (b - a);
-    return padT + (1 - t) * (h - padT - padB);
-  };
+  const yOf = (y) => padT + (1 - y / yMax) * (h - padT - padB);
 
   ctx.strokeStyle = grid;
   ctx.lineWidth = 1;
-  const decades = [];
-  const d0 = Math.floor(Math.log10(yMin));
-  const d1 = Math.ceil(Math.log10(yMax));
-  for (let d = d0; d <= d1; d += 1) decades.push(10 ** d);
   ctx.font = '10px ui-monospace, monospace';
   ctx.fillStyle = dim;
-  decades.forEach((v) => {
-    if (v < yMin || v > yMax) return;
+  niceTicks(yMax).forEach((v) => {
+    if (v > yMax) return;
     const y = yOf(v);
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(w - padR, y);
     ctx.stroke();
-    ctx.fillText(v.toExponential(0), 6, y + 3);
+    ctx.fillText(v >= 10 ? v.toFixed(0) : v.toFixed(1), 8, y + 3);
   });
 
   ctx.setLineDash([5, 4]);
   ctx.strokeStyle = warn;
   ctx.lineWidth = 1.5;
-  const yTol = yOf(ftol);
+  const yZero = yOf(0);
   ctx.beginPath();
-  ctx.moveTo(padL, yTol);
-  ctx.lineTo(w - padR, yTol);
+  ctx.moveTo(padL, yZero);
+  ctx.lineTo(w - padR, yZero);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = warn;
-  ctx.fillText(`ftol ${ftol.toExponential(0)}`, w - padR - 78, yTol - 6);
+  ctx.fillText('0', 14, yZero - 6);
 
   ctx.strokeStyle = jCol;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.25;
   ctx.beginPath();
   hist.forEach((p, i) => {
     const x = xOf(i);
-    const y = yOf(Math.max(yMin, p.rel_step));
+    const y = yOf(Math.max(0, p.f));
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -108,31 +106,33 @@ export function renderPeProgress(overlay, snap) {
   const cap = Number(snap.cap_s) || 1;
   const elapsed = Number(snap.elapsed_s) || 0;
   const usedPct = Math.min(100, (elapsed / cap) * 100);
+  const timedOut = remain <= 0 || snap.status === 'error';
   let clockClass = 'pe-progress__remaining';
-  if (remain <= 30) clockClass += ' pe-progress__remaining--last';
+  if (timedOut || remain <= 30) clockClass += ' pe-progress__remaining--last';
   else if (remain <= 60) clockClass += ' pe-progress__remaining--warn';
 
   overlay.innerHTML = `
     <div class="pe-progress" role="dialog" aria-live="polite" aria-label="Parameter estimation progress">
-      <div class="pe-progress__head">
-        <div class="pe-progress__kicker">Parameter estimation</div>
-        <p class="pe-progress__title">${phaseLabel(snap.phase)}</p>
-      </div>
       <div class="pe-progress__clock">
         <div class="${clockClass}">${fmtClock(remain)}</div>
-        <div class="pe-progress__clock-label">Time remaining of ${fmtClock(cap)} cap</div>
+        <div class="pe-progress__clock-label">Time remaining</div>
+        <div class="pe-progress__clock-cap">of ${fmtClock(cap)} maximum</div>
         <div class="pe-progress__bar" aria-hidden="true">
-          <div class="pe-progress__bar-fill" style="width:${usedPct}%"></div>
+          <div class="pe-progress__bar-fill${timedOut ? ' pe-progress__bar-fill--done' : ''}" style="width:${usedPct}%"></div>
         </div>
+      </div>
+      <div class="pe-progress__head">
+        <div class="pe-progress__kicker">Parameter estimation</div>
+        <p class="pe-progress__title">${phaseLabel(snap.phase, timedOut)}</p>
       </div>
       <div class="pe-progress__metrics">
         <div>
-          <div class="pe-progress__metric-label">Objective J</div>
+          <div class="pe-progress__metric-label">Fit error</div>
           <div class="pe-progress__metric-value">${fmtJ(snap.f)}</div>
         </div>
         <div>
-          <div class="pe-progress__metric-label">Relative step</div>
-          <div class="pe-progress__metric-value">${fmtRel(snap.rel_step)}</div>
+          <div class="pe-progress__metric-label">Elapsed</div>
+          <div class="pe-progress__metric-value">${fmtClock(elapsed)}</div>
         </div>
         <div>
           <div class="pe-progress__metric-label">Evaluations</div>
@@ -140,18 +140,14 @@ export function renderPeProgress(overlay, snap) {
         </div>
       </div>
       <div class="pe-progress__plot-wrap">
-        <div class="pe-progress__plot-label">L-BFGS relative step vs ftol</div>
-        <canvas class="pe-progress__plot" width="680" height="168"></canvas>
+        <div class="pe-progress__plot-label">Fit error (toward zero)</div>
+        <canvas class="pe-progress__plot" width="680" height="200"></canvas>
       </div>
       <div class="pe-progress__legend">
-        <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>relative change in J</span>
-        <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>ftol (stop if below)</span>
+        <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>fit error</span>
+        <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>target (zero)</span>
       </div>
-      <p class="pe-progress__foot">
-        J is the regularised N-step path error (plus MAP). The optimiser stops when
-        the relative change in J stays below ftol, or when this timer hits zero —
-        then parameters are not applied.
-      </p>
+      ${timedOut ? `<p class="pe-progress__timeout">${snap.message || 'Stopped at the time limit. Parameters were not applied.'}</p>` : ''}
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');

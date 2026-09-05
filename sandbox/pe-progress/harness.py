@@ -46,7 +46,7 @@ def _serve() -> tuple[socketserver.TCPServer, str]:
     return httpd, f"http://{host}:{port}"
 
 
-def _screenshot(url: str, dest: Path, width: int = 1100, height: int = 900) -> None:
+def _screenshot(url: str, dest: Path, width: int = 1100, height: int = 980) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         CHROME,
@@ -82,6 +82,7 @@ def main() -> None:
             ("start", f"{args.tag}_start.png"),
             ("mid", f"{args.tag}_mid.png"),
             ("late", f"{args.tag}_late.png"),
+            ("timeout", f"{args.tag}_timeout.png"),
         ):
             dest = INSPECT / name
             _screenshot(f"{origin}/?mode={mode}", dest)
