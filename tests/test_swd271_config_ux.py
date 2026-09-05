@@ -249,6 +249,9 @@ def test_environment_ui_recommends_price_and_weather_collapses_outdoor() -> None
     outdoor_idx = source.index("'outdoor_temp_entity'")
     assert price_idx < weather_idx < outdoor_idx
     assert "advancedSubsection" in source
+    assert "Solar model" in source
+    assert "solar_gain_smoothing_tau_s" in source
+    assert "solar_gain_smoothing_tau_min" in source
 
 
 def test_entity_picker_prefers_searchable_catalog_copy() -> None:

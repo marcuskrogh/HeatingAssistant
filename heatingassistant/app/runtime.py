@@ -40,6 +40,7 @@ from heatingassistant.engine.electricity_price import (
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
+from heatingassistant.engine.solar_model import coerce_solar_gain_smoothing_tau_s
 from heatingassistant.engine.parameter_lifecycle import (
     PARAMETER_HISTORY_KEY,
     estimated_params_snapshot,
@@ -1082,6 +1083,14 @@ class HeatingRuntime(
             const.CONF_PRICE_ENTITY: self.options.get(const.CONF_PRICE_ENTITY, ""),
             const.CONF_LATITUDE: self.options.get(const.CONF_LATITUDE, 0.0),
             const.CONF_LONGITUDE: self.options.get(const.CONF_LONGITUDE, 0.0),
+            const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S: (
+                coerce_solar_gain_smoothing_tau_s(
+                    self.options.get(
+                        const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
+                        const.SOLAR_GAIN_SMOOTHING_TAU_S,
+                    )
+                )
+            ),
         }
         return {
             "rooms": [dict(room) for room in self._rooms()],

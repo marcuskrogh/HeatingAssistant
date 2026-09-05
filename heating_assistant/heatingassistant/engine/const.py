@@ -103,6 +103,10 @@ DEFAULT_SOLAR_SCALE = 1.0
 #: ≈ 0.8.  A site-level scalar is sufficient — per-window albedo is far
 #: below the noise floor of the rest of the solar pipeline.
 CONF_GROUND_ALBEDO = "ground_albedo"
+#: Site-wide first-order EMA time constant [s] on modelled solar gain [W].
+#: ``0`` disables smoothing (identity).  Default matches
+#: :data:`SOLAR_GAIN_SMOOTHING_TAU_S`.  Exposed on Environment as minutes.
+CONF_SOLAR_GAIN_SMOOTHING_TAU_S = "solar_gain_smoothing_tau_s"
 DEFAULT_GROUND_ALBEDO = 0.2
 
 #: Fraction of a room's window solar gain deposited on the wall/mass node
@@ -670,6 +674,10 @@ DEFAULT_PE_MAX_COMPUTE_S = 60.0
 #: weather-entity reading is low-pass filtered to keep the solar attenuation
 #: continuous instead of jumping between cycles.
 CLOUD_SMOOTHING_TAU_S = 1800.0
+#: First-order EMA time constant [s] on modelled solar gain [W] after
+#: geometry and cloud/GHI intensity.  Weather and irradiance forecasts step
+#: hourly; this keeps history/NOW/horizon from jumping in one control cycle.
+SOLAR_GAIN_SMOOTHING_TAU_S = 1800.0
 #: Throttle [s] for persisting smoothed runtime weather state (cloud cover) so
 #: it survives a restart and the first post-restart cycle does not spike.
 RUNTIME_STATE_SAVE_DELAY_S = 60.0

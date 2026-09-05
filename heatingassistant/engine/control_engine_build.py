@@ -8,6 +8,7 @@ from typing import Any
 
 from . import const
 from .nmpc_timing import timing_from_dt_horizon
+from .solar_model import coerce_solar_gain_smoothing_tau_s
 
 _LOGGER = logging.getLogger("heatingassistant.engine.control_loop")
 
@@ -117,6 +118,12 @@ class BuildMixin:
             ),
             u_ref_gate=float(
                 config.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
+            ),
+            solar_gain_smoothing_tau_s=coerce_solar_gain_smoothing_tau_s(
+                config.get(
+                    const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
+                    const.SOLAR_GAIN_SMOOTHING_TAU_S,
+                )
             ),
         )
         return build_mpc_controller(build_config)

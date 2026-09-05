@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-487 | Task | [Tweak] Low-pass filter solar gain so cloud cover and forecast jumps are smooth | Done | — | docs/agents/PLAN-solar-gain-lpf.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/658 |
+| SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
+| SWD-489 | Sub-task | Tests, THEORY, CalVer, changelog, App sync | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | In Review | — | docs/agents/PLAN-pe-nstep-mle.md | `/ship SWD-481` |
 | SWD-482 | Sub-task | Formulate N-step PEM with EKF Jacobians | Done | SWD-481 | docs/agents/MODEL-pe-nstep-mle.md | — |
 | SWD-483 | Sub-task | Production receding N-step MLE estimator | Done | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
@@ -208,6 +211,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-05 — `/review` SWD-487 CLEAN (focused sequential). Fast suite 1152 passed, 88 skipped, 18 deselected. PR https://github.com/marcuskrogh/HeatingAssistant/pull/658. Next `/ship SWD-487`.
+- 2026-09-05 — `/test`+`/harden` SWD-487: EMA spec locks + SWD-462/432; panel cache-bust fallback 150. No extract. Next `/review SWD-487`.
 - 2026-09-04 — `/ship` SWD-481 remaining: N-step PEM + Advanced cap + CalVer 2026.09.4; review CLEAN (focused sequential) on PR #657. Next merge.
 - 2026-09-04 — `/ship` SWD-477: merged #656 as `fc124b0`. Task Done. Changelog `# 2026.09.3` already on the delivery PR.
 - 2026-09-04 — `/review` SWD-477 CLEAN (focused sequential). COMMENT on PR #656 (`6d769ae`; GitHub blocks self-APPROVE). Next `/ship SWD-477`.

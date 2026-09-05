@@ -26,5 +26,5 @@ def test_app_keeps_hassio_api_and_version_lock() -> None:
     assert config["hassio_api"] is True
     assert config["homeassistant_api"] is True
     assert config["services"] == ["mqtt:need"]
-    assert config["version"] == "2026.09.4"
+    assert config["version"] == "2026.09.5"
     assert "with-contenv" in APP_RUN.read_text(encoding="utf-8")
