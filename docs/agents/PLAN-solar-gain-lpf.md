@@ -90,9 +90,9 @@
 - Sub-tasks: SWD-488, SWD-489
 - Relates: SWD-462
 - Branch: cursor/swd-487-solar-gain-lpf-51da
-- PR:
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/658
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/architect SWD-487` — Shape stamp on the same branch
+`/ship SWD-487` — Merge PR #658 after review CLEAN
