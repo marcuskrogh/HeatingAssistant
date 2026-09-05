@@ -209,6 +209,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-05 — `/sandbox` SWD-486 iteration 3: N-step eval time vs window (6 h–5 d) on production PEM. Next operator verdict.
 - 2026-09-05 — `/sandbox` SWD-486 iteration 2: J-toward-zero plot, larger countdown, no ftol jargon. Next operator verdict.
 - 2026-09-05 — `/sandbox` SWD-486 (post-merge after SWD-481): live PE popup isolation `sandbox/pe-progress/`. Next operator verdict.
 - 2026-09-04 — `/ship` SWD-481 remaining: N-step PEM + Advanced cap + CalVer 2026.09.4; review CLEAN (focused sequential) on PR #657. Next merge.
