@@ -4,7 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | In Review | — | docs/agents/PLAN-pe-nstep-mle.md | `/ship SWD-481` |
+| SWD-486 | Task | [Sandbox] Live PE optimisation progress popup | To Do | — | docs/agents/SANDBOX-pe-progress.md | `/sandbox SWD-486` |
+| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | Done | — | docs/agents/PLAN-pe-nstep-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/657 (`21df120`) |
 | SWD-482 | Sub-task | Formulate N-step PEM with EKF Jacobians | Done | SWD-481 | docs/agents/MODEL-pe-nstep-mle.md | — |
 | SWD-483 | Sub-task | Production receding N-step MLE estimator | Done | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
 | SWD-484 | Sub-task | PE time cap and Advanced config page | Done | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
@@ -208,6 +209,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-05 — `/sandbox` SWD-486 (post-merge after SWD-481): live PE popup isolation `sandbox/pe-progress/`. Next operator verdict.
 - 2026-09-04 — `/ship` SWD-481 remaining: N-step PEM + Advanced cap + CalVer 2026.09.4; review CLEAN (focused sequential) on PR #657. Next merge.
 - 2026-09-04 — `/ship` SWD-477: merged #656 as `fc124b0`. Task Done. Changelog `# 2026.09.3` already on the delivery PR.
 - 2026-09-04 — `/review` SWD-477 CLEAN (focused sequential). COMMENT on PR #656 (`6d769ae`; GitHub blocks self-APPROVE). Next `/ship SWD-477`.

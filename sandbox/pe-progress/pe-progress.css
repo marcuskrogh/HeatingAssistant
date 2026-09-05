@@ -1,0 +1,199 @@
+.pe-progress-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 7vh 16px 16px;
+}
+
+.pe-progress {
+  width: min(720px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.pe-progress__head {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pe-progress__kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+
+.pe-progress__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.pe-progress__clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 22px 18px 8px;
+}
+
+.pe-progress__remaining {
+  font-family: var(--font-mono);
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-progress__remaining--warn {
+  color: var(--warning);
+}
+
+.pe-progress__remaining--last {
+  color: var(--alarm);
+}
+
+.pe-progress__clock-label {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.pe-progress__bar {
+  width: min(420px, 86%);
+  height: 6px;
+  margin: 14px 0 0;
+  background: var(--bg-elevated);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.pe-progress__bar-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 200ms linear;
+}
+
+.pe-progress__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 16px 18px 4px;
+}
+
+.pe-progress__metric-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.pe-progress__metric-value {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.pe-progress__plot-wrap {
+  padding: 8px 18px 6px;
+}
+
+.pe-progress__plot-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.pe-progress__plot {
+  width: 100%;
+  height: 168px;
+  display: block;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pe-progress__legend {
+  display: flex;
+  gap: 16px;
+  padding: 6px 18px 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pe-progress__swatch {
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.pe-progress__swatch--j { background: var(--chart-temp); }
+.pe-progress__swatch--tol {
+  background: var(--warning);
+  height: 0;
+  border-top: 2px dashed var(--warning);
+}
+
+.pe-progress__foot {
+  padding: 0 18px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.sysid-stub {
+  padding: 16px 20px 24px;
+  min-height: 520px;
+  background: var(--bg-primary);
+  position: relative;
+}
+
+.nav-back {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  margin-bottom: 16px;
+}
+
+.section-header {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.card-stub {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  min-height: 220px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.tuning-actions__status--running {
+  color: var(--accent);
+  margin-top: 10px;
+  font-size: 13px;
+}
