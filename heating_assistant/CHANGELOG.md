@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.6
+
+- Solar-gain smoothing now continues after an App restart. The lag no
+  longer reseeds to a sudden sky jump on the first sample.
+
 # 2026.09.5
 
 - Solar gain no longer jumps in one sample when cloud cover or a solar
