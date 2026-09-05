@@ -53,7 +53,7 @@ class PeProgressHost extends HTMLElement {
         elapsed += 1;
         paint(elapsed);
         if (elapsed >= 300) window.clearInterval(timer);
-      }, 50);
+      }, 90);
     });
   }
 }
