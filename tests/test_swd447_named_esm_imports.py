@@ -97,6 +97,6 @@ def test_dashboard_and_history_cache_bust_is_144() -> None:
     index = (static / "index.html").read_text(encoding="utf-8")
     dashboard = (static / "industrial-dashboard.js").read_text(encoding="utf-8")
     room = (STATIC_JS / "pages" / "room-detail.js").read_text(encoding="utf-8")
-    assert "industrial-dashboard.js?v=150" in index
-    assert "return '150'" in dashboard
+    assert "industrial-dashboard.js?v=151" in index
+    assert "return '151'" in dashboard
     assert "room-detail-history.js?v=144" in room

@@ -10,8 +10,11 @@
 
 ## Scope / Decisions / Constraints
 **In**
-- Discrete EMA `α = 1 − exp(−Δt / τ)` with `τ = 1800 s` (same order as
-  existing unused cloud-cover smoother), `Δt` = controller `dt`.
+- Discrete EMA `α = 1 − exp(−Δt / τ)` with default `τ = 1800 s` (same
+  order as the unused cloud-cover smoother), `Δt` = controller `dt`.
+  τ is site-wide (`solar_gain_smoothing_tau_s`) and editable under
+  Environment → Solar model (UI minutes; stored seconds). `τ ≤ 0` is
+  identity.
 - Seed on the first sample (no startup lag). Clamp watts to `≥ 0`.
 - Walk the k = 0…N schedule causally; persist only k = 0 between `compute`
   / `solve_nmpc` cycles so the next NOW continues the live filter.
@@ -25,8 +28,8 @@
 - Filtering cloud cover instead of watts (already exists unused; does not
   catch GHI jumps).
 - Extra thermal RC state for solar (wall node already stores heat).
-- User-facing τ knob / Configuration field.
 - Changing Kasten–Czeplak, window geometry, or SHGC.
+- Per-room τ (one site-wide constant).
 
 **Decisions**
 - Class is a **tweak**: intentional small behaviour delta; not a defect.
@@ -76,13 +79,14 @@
    (not `ghi_now` leak); the published watt is the EMA of that chain.
 4. `τ = 0` is identity with the instantaneous schedule.
 5. Fast suite passes. CalVer 2026.09.5; App package synced.
+6. Environment Solar model field round-trips minutes → `solar_gain_smoothing_tau_s`.
 
 ## Work packages
 1. Low-pass solar gain on the forecast/history path (SWD-488)
 2. Tests, THEORY, CalVer, changelog, App sync (SWD-489)
 
 ## Open items
-- None (τ fixed at 1800 s; no UI).
+- None.
 
 ## Tracker
 - Provider: jira

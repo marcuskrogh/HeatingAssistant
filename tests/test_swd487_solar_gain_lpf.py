@@ -7,14 +7,20 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from heatingassistant.engine.const import SOLAR_GAIN_SMOOTHING_TAU_S
+from heatingassistant.app.runtime import HeatingRuntime
+from heatingassistant.engine.const import (
+    CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
+    SOLAR_GAIN_SMOOTHING_TAU_S,
+)
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater
 from heatingassistant.engine.solar_model import (
+    coerce_solar_gain_smoothing_tau_s,
     smooth_solar_gain_schedule,
     smooth_solar_gain_step,
 )
 from heatingassistant.engine.thermal_model import HouseModel, Room, Window
+from heatingassistant.mqtt.bridge import InMemoryMqttBus
 
 
 pytestmark = pytest.mark.unit
@@ -24,7 +30,9 @@ DT = 900.0
 TAU = SOLAR_GAIN_SMOOTHING_TAU_S
 
 
-def _windowed_controller() -> HeatingMPCController:
+def _windowed_controller(
+    tau_s: float | None = None,
+) -> HeatingMPCController:
     living = Room(
         name="living_room",
         thermal_mass=5_000_000.0,
@@ -35,7 +43,10 @@ def _windowed_controller() -> HeatingMPCController:
     )
     model = HouseModel([living])
     sources = [ElectricHeater("lr", "living_room", max_power=4000.0)]
-    return HeatingMPCController(model, sources, horizon=3, dt=DT)
+    kwargs = {}
+    if tau_s is not None:
+        kwargs["solar_gain_smoothing_tau_s"] = tau_s
+    return HeatingMPCController(model, sources, horizon=3, dt=DT, **kwargs)
 
 
 def test_ema_seeds_then_lags_a_jump() -> None:
@@ -116,6 +127,68 @@ def test_ghi_none_observation_is_cloud_clear_then_ema() -> None:
     v = smooth_solar_gain_step(v, g2_obs, DT, TAU)
     assert schedules[2]["living_room"] == pytest.approx(v)
     assert g2_obs != pytest.approx(leaked, rel=1e-9)
+
+
+def test_coerce_solar_gain_smoothing_tau_s() -> None:
+    assert coerce_solar_gain_smoothing_tau_s(None) == SOLAR_GAIN_SMOOTHING_TAU_S
+    assert coerce_solar_gain_smoothing_tau_s("not-a-number") == SOLAR_GAIN_SMOOTHING_TAU_S
+    assert coerce_solar_gain_smoothing_tau_s(float("nan")) == SOLAR_GAIN_SMOOTHING_TAU_S
+    assert coerce_solar_gain_smoothing_tau_s(-12.0) == 0.0
+    assert coerce_solar_gain_smoothing_tau_s(600) == pytest.approx(600.0)
+
+
+def test_controller_uses_configured_tau() -> None:
+    default = _windowed_controller()
+    assert default._solar_gain_tau_s == pytest.approx(SOLAR_GAIN_SMOOTHING_TAU_S)
+    custom = _windowed_controller(tau_s=3600.0)
+    assert custom._solar_gain_tau_s == pytest.approx(3600.0)
+
+    seeded = custom._forecast_solar(NOW, persist=True)
+    overcast_inst = custom._room_gain("living_room", NOW, cloud_cover=1.0, ghi=None)
+    lagged = custom._forecast_solar(
+        NOW,
+        cloud_forecast=[1.0, 1.0, 1.0, 1.0],
+        cloud_cover_now=1.0,
+        persist=True,
+    )
+    expected = smooth_solar_gain_step(
+        seeded[0]["living_room"], overcast_inst, DT, 3600.0,
+    )
+    assert lagged[0]["living_room"] == pytest.approx(expected)
+
+    default_seed = default._forecast_solar(NOW, persist=True)
+    default_over = default._forecast_solar(
+        NOW,
+        cloud_forecast=[1.0, 1.0, 1.0, 1.0],
+        cloud_cover_now=1.0,
+        persist=True,
+    )
+    # Longer τ stays closer to the previous (clear) watt.
+    assert abs(lagged[0]["living_room"] - seeded[0]["living_room"]) < abs(
+        default_over[0]["living_room"] - default_seed[0]["living_room"]
+    )
+
+
+def test_model_config_exposes_solar_gain_smoothing_tau(tmp_path) -> None:
+    default_rt = HeatingRuntime(
+        tmp_path / "default",
+        bus=InMemoryMqttBus(),
+        options={"instance_id": "t"},
+    )
+    assert default_rt.model_config()["system"][
+        CONF_SOLAR_GAIN_SMOOTHING_TAU_S
+    ] == pytest.approx(SOLAR_GAIN_SMOOTHING_TAU_S)
+    custom_rt = HeatingRuntime(
+        tmp_path / "custom",
+        bus=InMemoryMqttBus(),
+        options={
+            "instance_id": "t",
+            CONF_SOLAR_GAIN_SMOOTHING_TAU_S: 600.0,
+        },
+    )
+    assert custom_rt.model_config()["system"][
+        CONF_SOLAR_GAIN_SMOOTHING_TAU_S
+    ] == pytest.approx(600.0)
 
 
 def test_tau_zero_matches_instantaneous_horizon() -> None:

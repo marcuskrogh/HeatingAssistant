@@ -85,6 +85,11 @@ function renderSystem(container, connection, hass) {
     // Solar GHI option removed from the Environment UI (SWD-271).
     delete working.solar_radiation_entity;
 
+    const tauS = Number(working.solar_gain_smoothing_tau_s);
+    working.solar_gain_smoothing_tau_min = Number.isFinite(tauS) && tauS >= 0
+      ? tauS / 60.0
+      : 30;
+
     body.innerHTML = '';
     const actions = actionsBar('Apply Changes');
     body.appendChild(actions);
@@ -111,18 +116,37 @@ function renderSystem(container, connection, hass) {
     ));
     body.appendChild(envCard);
 
+    const solarCard = sectionCard(
+      'Solar model',
+      'Turns weather and irradiance into watts through windows. A first-order '
+      + 'lag rounds hourly cloud and forecast jumps so solar gain does not step '
+      + 'in one control cycle.',
+    );
+    solarCard.appendChild(paramGrid(
+      numberField(working, 'solar_gain_smoothing_tau_min', 'Solar-gain smoothing', {
+        step: 1, unit: 'min', min: 0,
+        hint: 'Time constant of the low-pass on modelled solar watts. Default 30 min. Set 0 to disable.',
+      }),
+    ));
+    body.appendChild(solarCard);
+
     const statusEl = actions.querySelector('[data-role="status"]');
     actions.querySelector('[data-role="save"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
       setStatus(statusEl, 'Applying…', 'running');
       try {
+        const minutes = Number(working.solar_gain_smoothing_tau_min);
+        const tauSeconds = Number.isFinite(minutes) && minutes >= 0
+          ? minutes * 60.0
+          : 1800;
         const data = {
           outdoor_temp_entity: working.outdoor_temp_entity || '',
           weather_entity: working.weather_entity || '',
           // Always clear — option removed from the UI (SWD-271).
           solar_radiation_entity: '',
           price_entity: working.price_entity || '',
+          solar_gain_smoothing_tau_s: tauSeconds,
         };
         await updateSystemConfig(hass, data);
         setStatus(statusEl, 'Applied.', 'success');

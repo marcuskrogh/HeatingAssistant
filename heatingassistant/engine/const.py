@@ -103,6 +103,10 @@ DEFAULT_SOLAR_SCALE = 1.0
 #: ≈ 0.8.  A site-level scalar is sufficient — per-window albedo is far
 #: below the noise floor of the rest of the solar pipeline.
 CONF_GROUND_ALBEDO = "ground_albedo"
+#: Site-wide first-order EMA time constant [s] on modelled solar gain [W].
+#: ``0`` disables smoothing (identity).  Default matches
+#: :data:`SOLAR_GAIN_SMOOTHING_TAU_S`.  Exposed on Environment as minutes.
+CONF_SOLAR_GAIN_SMOOTHING_TAU_S = "solar_gain_smoothing_tau_s"
 DEFAULT_GROUND_ALBEDO = 0.2
 
 #: Fraction of a room's window solar gain deposited on the wall/mass node

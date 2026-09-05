@@ -34,7 +34,6 @@ from ..const import (
     DEFAULT_U_REF_GATE,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
-    SOLAR_GAIN_SMOOTHING_TAU_S,
 )
 from ..heat_sources import HeatSource
 from ..nmpc_ocp import (
@@ -58,6 +57,7 @@ from ..nmpc_timing import (
 )
 from ..solar_forecast import select_cloud_for_step, select_ghi_for_step
 from ..solar_model import (
+    coerce_solar_gain_smoothing_tau_s,
     room_solar_gains,
     room_solar_gains_from_exposure,
     smooth_solar_gain_schedule,
@@ -192,6 +192,7 @@ class HeatingMPCController:
         nmpc_horizon_h: Optional[float] = None,
         p_deadband: float = DEFAULT_P_DEADBAND,
         u_ref_gate: float = DEFAULT_U_REF_GATE,
+        solar_gain_smoothing_tau_s: Optional[float] = None,
     ) -> None:
         self._sources = heat_sources
         if (
@@ -368,7 +369,9 @@ class HeatingMPCController:
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
         self._solar_gain_filt: Dict[str, float] = {}
-        self._solar_gain_tau_s: float = float(SOLAR_GAIN_SMOOTHING_TAU_S)
+        self._solar_gain_tau_s: float = coerce_solar_gain_smoothing_tau_s(
+            solar_gain_smoothing_tau_s
+        )
         self._wind_forecast: List[float] = []
         self._heating_schedule: List[Dict[str, float]] = []
         self._price_forecast: List[float] = []

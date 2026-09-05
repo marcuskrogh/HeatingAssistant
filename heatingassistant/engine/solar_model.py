@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .const import SOLAR_GAIN_SMOOTHING_TAU_S
 from .thermal_model import Window
 
 
@@ -602,6 +603,19 @@ def room_solar_gains_from_exposure(
         dni, dhi, altitude, azimuth_deg, tilt, facing, albedo=albedo,
     )
     return aperture * poa
+
+
+def coerce_solar_gain_smoothing_tau_s(value: Any) -> float:
+    """Return a finite τ ≥ 0 seconds; invalid input uses the 1800 s default."""
+    if value is None or value == "":
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    try:
+        tau = float(value)
+    except (TypeError, ValueError):
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    if not math.isfinite(tau):
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    return max(0.0, tau)
 
 
 def smooth_solar_gain_step(
