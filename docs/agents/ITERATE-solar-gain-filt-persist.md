@@ -34,4 +34,4 @@
 - Relates: SWD-487
 
 ## Next
-`/ship SWD-490` — User asked to ship this iterate
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659
