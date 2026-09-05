@@ -99,4 +99,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/ship SWD-487` — Merge PR #658 after review CLEAN
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/658

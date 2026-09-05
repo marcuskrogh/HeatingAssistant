@@ -25,4 +25,4 @@
 - Branch: cursor/swd-487-solar-gain-lpf-51da
 
 ## Next
-`/implement SWD-487` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/658
