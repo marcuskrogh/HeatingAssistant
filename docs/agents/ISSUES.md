@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-487 | Task | [Tweak] Low-pass filter solar gain so cloud cover and forecast jumps are smooth | Done | — | docs/agents/PLAN-solar-gain-lpf.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/658 |
+| SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | In Progress | — | docs/agents/ITERATE-solar-gain-filt-persist.md | `/ship SWD-490` |
 | SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-489 | Sub-task | Tests, THEORY, CalVer, changelog, App sync | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | In Review | — | docs/agents/PLAN-pe-nstep-mle.md | `/ship SWD-481` |

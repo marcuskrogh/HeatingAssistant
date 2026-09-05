@@ -678,6 +678,10 @@ CLOUD_SMOOTHING_TAU_S = 1800.0
 #: geometry and cloud/GHI intensity.  Weather and irradiance forecasts step
 #: hourly; this keeps history/NOW/horizon from jumping in one control cycle.
 SOLAR_GAIN_SMOOTHING_TAU_S = 1800.0
+#: Runtime-state keys for the live solar-gain EMA (k = 0 watts per room) so an
+#: App restart continues the lag instead of reseeding to instantaneous sky.
+STATE_SOLAR_GAIN_FILT = "solar_gain_filt"
+STATE_SOLAR_FORECAST = "solar_forecast"
 #: Throttle [s] for persisting smoothed runtime weather state (cloud cover) so
 #: it survives a restart and the first post-restart cycle does not spike.
 RUNTIME_STATE_SAVE_DELAY_S = 60.0
