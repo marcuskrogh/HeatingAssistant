@@ -187,12 +187,16 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // scroll container; an overlay inside the Identification page would live at
   // the top of that long page, off screen from the Estimate button.
   const overlayRoot = container.getRootNode();
-  overlayRoot.appendChild(peOverlay);
+  const overlayHost = overlayRoot instanceof ShadowRoot
+    ? overlayRoot
+    : document.body;
+  overlayHost.appendChild(peOverlay);
   let peOverlayJob = null;
   let peOverlayTimer = null;
 
   function peShell() {
-    return overlayRoot.querySelector ? overlayRoot.querySelector('.shell') : null;
+    if (!(overlayRoot instanceof ShadowRoot)) return null;
+    return overlayRoot.querySelector('.shell');
   }
 
   function lockPeBackground(on) {

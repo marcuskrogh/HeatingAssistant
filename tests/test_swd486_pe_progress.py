@@ -110,7 +110,8 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
     assert "pe-progress-overlay" in css
     assert "position: fixed" in css
     assert "overflow-y: auto" in css
-    assert "overlayRoot.appendChild" in detail
+    assert "overlayHost.appendChild" in detail
+    assert "instanceof ShadowRoot" in detail
     assert "getRootNode" in detail
     assert "ftol" not in progress
     assert "L-BFGS" not in progress
