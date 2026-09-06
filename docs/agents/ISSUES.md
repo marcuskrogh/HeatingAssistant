@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | In Progress | — | docs/agents/PLAN-schedule-periods-not-displayed.md | `/test SWD-491` |
+| SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | In Review | — | docs/agents/PLAN-schedule-periods-not-displayed.md | `/review SWD-491` |
 | SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | Done | — | docs/agents/ITERATE-solar-gain-filt-persist.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659 |
@@ -214,6 +214,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/restructure` SWD-491: no extract. Helper already sits next to period-editor locals; `[hidden]` is the campground CSS fix. Next `/review SWD-491`.
+- 2026-09-06 — `/test` SWD-491: DOM spec lock renders one Evening card, expands editor, hides empty inactive; source lock still requires ensureWhenState. CRAP runner skips JS. Next `/restructure SWD-491`.
 - 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/660. Next `/test SWD-491`.
 - 2026-09-06 — `/define`+`/architect` SWD-491: periods counted but not rendered (`ensureWhenState` dropped). Next `/implement SWD-491`.
 - 2026-09-05 — `/review` SWD-487 CLEAN (focused sequential). Fast suite 1152 passed, 88 skipped, 18 deselected. PR https://github.com/marcuskrogh/HeatingAssistant/pull/658. Next `/ship SWD-487`.

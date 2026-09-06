@@ -61,4 +61,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-491` — Spec locks green on harness; dedicated test phase next
+`/review SWD-491` — Lasers then fix then code review
