@@ -1,0 +1,53 @@
+{
+  "dt_s": 900.0,
+  "n_horizon": 144,
+  "origin_stride": 8,
+  "window_h": 24,
+  "n_steps": 96,
+  "true_C": 8000000.0,
+  "true_R": 0.025,
+  "prior_C": 12000000.0,
+  "prior_R": 0.04,
+  "cap_s": 0.0,
+  "eta_tol": 2.0,
+  "single_mle_significantly_worse": false,
+  "verdict": "accept: single MLE matches fit bar with fewer evaluations \u2014 promote dropping extra starts",
+  "note": "Single N-step MLE from the configured prior, one L-BFGS. Production path is untouched; the candidate monkeypatches `_multistart_joint_nlp` in this process only.",
+  "host": "cursor-sandbox",
+  "methods": [
+    {
+      "name": "production_multistart",
+      "success": true,
+      "timed_out": false,
+      "elapsed_s": 63.997115939000196,
+      "nfev": 432,
+      "eta": 0.09877531048532924,
+      "rmse_c": 0.04938765524266462,
+      "nstep_rmse": 1.2217831150025762,
+      "C": 3929704.0,
+      "R": 0.050161,
+      "C_rel_err": 0.508787,
+      "R_rel_err": 1.0064399999999998,
+      "alpha": 0.4939,
+      "message": "Joint optimisation converged.  Heater scale estimated for 1 source(s) (1 with clear duty-cycle excitation; the rest stay near unit scale).  Solar scale not identifiable \u2014 no room saw enough solar variation during the window.  Envelope split estimated for 1 room(s).",
+      "n_hist": 432
+    },
+    {
+      "name": "single_mle",
+      "success": true,
+      "timed_out": false,
+      "elapsed_s": 15.890438470999925,
+      "nfev": 99,
+      "eta": 0.09877531048532924,
+      "rmse_c": 0.04938765524266462,
+      "nstep_rmse": 1.2217831150025762,
+      "C": 3929704.0,
+      "R": 0.050161,
+      "C_rel_err": 0.508787,
+      "R_rel_err": 1.0064399999999998,
+      "alpha": 0.4939,
+      "message": "Joint optimisation converged.  Heater scale estimated for 1 source(s) (1 with clear duty-cycle excitation; the rest stay near unit scale).  Solar scale not identifiable \u2014 no room saw enough solar variation during the window.  Envelope split estimated for 1 room(s).",
+      "n_hist": 99
+    }
+  ]
+}
