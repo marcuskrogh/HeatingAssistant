@@ -21,8 +21,10 @@ def test_countdown_computing_spin_group_and_host_class() -> None:
         js = _read(static, "js", "components", "countdown.js")
         css = _read(static, "css", "industrial.css")
         assert "export function countdownIsComputing" in js
+        assert "function wrapOverlayCapS" in js
         assert "countdown__spin" in js
-        assert "closest('.kpi-expand')" in js
+        assert "typeof container.closest === 'function'" in js
+        assert "closest('.kpi-expand')" in js or "closest(\".kpi-expand\")" in js
         assert ".countdown__spin" in css
         assert ".kpi-expand.countdown--computing" in css
         assert "countdown-computing-spin" in css

@@ -51,9 +51,11 @@ export function updateCountdown(countdown, state) {
 export function setCountdownComputing(container, computing) {
   if (!container) return;
   const on = !!computing;
-  container.classList.toggle('countdown--computing', on);
-  const host = container.closest('.kpi-expand');
-  if (host) host.classList.toggle('countdown--computing', on);
+  container.classList?.toggle('countdown--computing', on);
+  const host = typeof container.closest === 'function'
+    ? container.closest('.kpi-expand')
+    : null;
+  if (host?.classList) host.classList.toggle('countdown--computing', on);
 }
 
 /**
@@ -81,10 +83,7 @@ export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
   if (Number.isFinite(resultTs) && resultTs >= slotStart - 0.05) return false;
 
   const lastNmpcDuration = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
-  const cap = resolved.dtAttr === 'nmpc_period_s'
-    ? Math.min(600, Math.max(90, (Number.isFinite(lastNmpcDuration) ? lastNmpcDuration : 30) * 4))
-    : 2.5;
-  return intoSlot < cap;
+  return intoSlot < wrapOverlayCapS(resolved, lastNmpcDuration);
 }
 
 export function countdownRemaining(state, options = false) {
@@ -100,6 +99,13 @@ export function countdownRemaining(state, options = false) {
 function isSystemStopped(state) {
   const enabled = entityAttr(state, systemEntity('system_summary'), 'system_enabled');
   return enabled === false;
+}
+
+/** Seconds to keep wrap overlay before a skipped worker is treated as idle. */
+function wrapOverlayCapS(resolved, lastNmpcDuration) {
+  if (resolved.dtAttr !== 'nmpc_period_s') return 2.5;
+  const last = Number.isFinite(lastNmpcDuration) ? lastNmpcDuration : 30;
+  return Math.min(600, Math.max(90, last * 4));
 }
 
 function resolveSpec(options) {
