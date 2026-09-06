@@ -5,7 +5,7 @@ import {
   CHART_TICK_SIZE,
   readTheme,
   sizePlotCanvas,
-} from '../components/chart-theme.js?v=155';
+} from '../components/chart-theme.js?v=156';
 
 function fmtClock(seconds) {
   const s = Math.max(0, Math.ceil(seconds));

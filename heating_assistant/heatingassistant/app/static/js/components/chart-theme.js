@@ -54,12 +54,14 @@ export function labelFont(family = CHART_FONT_SANS, size = CHART_TICK_SIZE) {
 }
 
 /** Size a 2d canvas to its wrapper in CSS pixels, then scale by DPR so a
- *  lineWidth of 2 stays 2 CSS pixels (CSS `width:100%` on a 680px bitmap
- *  shrinks strokes). */
+ *  lineWidth of 2 stays 2 CSS pixels (CSS `width:100%` on a default 300×150
+ *  bitmap shrinks strokes). Always measure the wrapper, not the canvas. */
 export function sizePlotCanvas(canvas) {
   const wrap = canvas.parentElement;
-  const cssW = Math.max(1, Math.round((wrap && wrap.clientWidth) || canvas.clientWidth || 0));
-  const cssH = Math.max(1, Math.round((wrap && wrap.clientHeight) || canvas.clientHeight || 0));
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  const cssW = Math.max(0, Math.round((wrap && wrap.clientWidth) || 0));
+  const cssH = Math.max(0, Math.round((wrap && wrap.clientHeight) || 0));
   if (cssW < 8 || cssH < 8) {
     const ctx = canvas.getContext('2d');
     return { ctx, cssW: Math.max(cssW, 1), cssH: Math.max(cssH, 1), dpr: 1, skipped: true };
@@ -69,5 +71,7 @@ export function sizePlotCanvas(canvas) {
   canvas.height = Math.round(cssH * dpr);
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
   return { ctx, cssW, cssH, dpr, skipped: false };
 }

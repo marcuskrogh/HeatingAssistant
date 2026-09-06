@@ -84,7 +84,7 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     ).read_text(encoding="utf-8")
     ident = (CSS_ROOT / "pages" / "identification.css").read_text(encoding="utf-8")
     theme = (STATIC / "js" / "components" / "chart-theme.js").read_text(encoding="utf-8")
-    assert "from '../components/chart-theme.js?v=155'" in progress
+    assert "from '../components/chart-theme.js?v=156'" in progress
     assert "sizePlotCanvas(canvas)" in progress
     assert "CHART_LINE_WIDTH" in progress
     assert "CHART_DASH_PATTERN" in progress
@@ -95,7 +95,7 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     assert "align-items: flex-start" in ident
     assert "CHART_TICK_SIZE = 10" in theme
     assert "CHART_LINE_WIDTH = 2" in theme
-    assert "skipped: true" in theme
+    assert "Always measure the wrapper" in theme
     assert "export function sizePlotCanvas" in theme
     assert "CHART_HEIGHT_PRIMARY = 240" in theme
     assert "CHART_HEIGHT_SECONDARY = 200" in theme
@@ -108,7 +108,7 @@ def test_room_chart_js_defaults_are_unchanged_from_the_guide() -> None:
         encoding="utf-8"
     )
     room = (STATIC / "js" / "charts" / "room-charts.js").read_text(encoding="utf-8")
-    assert "from './chart-theme.js?v=155'" in chart
+    assert "from './chart-theme.js?v=156'" in chart
     assert "elements: {\n    line: { borderWidth:" not in chart
     assert "CHART_LINE_WIDTH" not in chart
     assert 'font: { size: 10, family: "system-ui, sans-serif" }' in chart
@@ -139,5 +139,5 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
     assert '__version__ = "2026.09.10"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=155" in index
-    assert "return '155'" in dashboard
+    assert "industrial-dashboard.js?v=156" in index
+    assert "return '156'" in dashboard

@@ -1,4 +1,4 @@
-import { CHART_HEIGHT_SECONDARY } from './chart-theme.js?v=155';
+import { CHART_HEIGHT_SECONDARY } from './chart-theme.js?v=156';
 
 /** Dataset labels used only for shaded regions — hidden from legend and tooltip. */
 export const SHADING_DATASET_LABELS = new Set([
