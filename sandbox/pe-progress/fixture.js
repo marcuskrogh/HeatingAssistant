@@ -1,21 +1,26 @@
-/** Replay a 5-minute PE job with production-like J jumps: tiled-OE
- *  warm-start (small MSE), then N-step PEM (same recorder, larger J)
- *  plus L-BFGS line-search spikes. Plot is log-scaled against ftol. */
+/** Replay a 5-minute PE job in the normalised RMS proxy η = RMSE / σ_R.
+ *  Line-search spikes stay visible; the reasonable-fit line at η=2 is
+ *  reachable (1 °C RMS at the production R_var = 0.25). */
 
-export const FTOL = 1e-12;
+import { ETA_NOISE, ETA_TOL, R_VAR, etaFromJ, rmseCFromEta } from './proxy.js';
+
 export const CAP_S = 300;
+export { ETA_TOL, R_VAR };
 
-function jAt(evalIndex) {
+const N_OBS_OE = 460;
+const N_OBS_NSTEP = 7398;
+
+function etaAt(evalIndex) {
   if (evalIndex < 14) {
-    return 38.0 * Math.exp(-evalIndex / 5.0) + 4.2;
+    return 5.8 * Math.exp(-evalIndex / 5.2) + 2.15;
   }
-  if (evalIndex === 14) return 81240.0;
-  if (evalIndex === 15) return 6.1;
-  if (evalIndex === 16) return 5.4;
+  if (evalIndex === 14) return 18.4;
+  if (evalIndex === 15) return 2.05;
+  if (evalIndex === 16) return 1.92;
   const k = evalIndex - 16;
-  const base = 5.2 * Math.exp(-k / 22) + 3.85;
-  if (k === 19) return 54608.05;
-  if (k === 8 || k === 27) return base * 1400;
+  const base = 1.85 * Math.exp(-k / 20) + 1.12;
+  if (k === 19) return 12.6;
+  if (k === 8 || k === 27) return Math.min(16, base * 6.5);
   return base;
 }
 
@@ -23,15 +28,23 @@ function phaseAt(evalIndex) {
   return evalIndex < 14 ? 'tiled_oe' : 'nstep_pem';
 }
 
+function nObsAt(evalIndex) {
+  return phaseAt(evalIndex) === 'tiled_oe' ? N_OBS_OE : N_OBS_NSTEP;
+}
+
 export function buildHistory(upto) {
   const hist = [];
-  let prev = null;
   for (let i = 0; i <= upto; i += 1) {
-    const f = jAt(i);
-    const scale = Math.max(Math.abs(f), Math.abs(prev ?? f), 1);
-    const rel = prev == null ? 1 : Math.abs(f - prev) / scale;
-    hist.push({ nfev: i + 1, f, rel_step: rel, phase: phaseAt(i) });
-    prev = f;
+    const eta = etaAt(i);
+    const nObs = nObsAt(i);
+    const f = eta * eta * nObs;
+    hist.push({
+      nfev: i + 1,
+      f,
+      eta,
+      n_obs: nObs,
+      phase: phaseAt(i),
+    });
   }
   return hist;
 }
@@ -41,6 +54,8 @@ export function snapshot({ elapsedS, nowS = Date.now() / 1000 }) {
   const evalIndex = Math.min(90, Math.floor(elapsed / 3.2));
   const hist = buildHistory(evalIndex);
   const last = hist[hist.length - 1];
+  const eta = last.eta ?? etaFromJ(last.f, last.n_obs);
+  const rmse = rmseCFromEta(eta);
   return {
     status: elapsed >= CAP_S ? 'error' : 'running',
     started_at: nowS - elapsed,
@@ -50,8 +65,12 @@ export function snapshot({ elapsedS, nowS = Date.now() / 1000 }) {
     phase: last.phase,
     nfev: last.nfev,
     f: last.f,
-    rel_step: last.rel_step,
-    ftol: FTOL,
+    eta,
+    n_obs: last.n_obs,
+    r_var: R_VAR,
+    eta_tol: ETA_TOL,
+    eta_noise: ETA_NOISE,
+    rmse_c: rmse,
     f_hist: hist,
     message: elapsed >= CAP_S
       ? 'Stopped after 5 minutes (the configured maximum). Parameters were not applied.'

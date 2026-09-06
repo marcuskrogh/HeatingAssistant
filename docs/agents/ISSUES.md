@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-497 | Task | [Sandbox] PE popup KPIs, log plot, and Jacobian check | To Do | — | docs/agents/SANDBOX-pe-progress.md | `/sandbox SWD-497` — operator verdict on log-plot popup |
+| SWD-497 | Task | [Sandbox] PE popup KPIs, log plot, and Jacobian check | To Do | — | docs/agents/SANDBOX-pe-progress.md | `/sandbox SWD-497` — operator verdict on η plot |
 | SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |
 | SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
@@ -216,6 +216,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/sandbox` SWD-497 iteration 5: normalised RMS η vs η_tol=2 (1 °C). Next operator verdict.
 - 2026-09-06 — `/sandbox` SWD-497 (post-merge after SWD-486): log-scale popup KPIs + Jacobian FD check. Next operator verdict.
 - 2026-09-06 — `/ship` SWD-491: review CLEAN (focused sequential, COMMENT). Next merge #660.
 - 2026-09-06 — `/review` SWD-491 CLEAN (focused sequential). COMMENT on PR #660. Next `/ship SWD-491`.

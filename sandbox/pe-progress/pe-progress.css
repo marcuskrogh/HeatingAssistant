@@ -67,6 +67,16 @@
   line-height: 1.15;
 }
 
+.pe-progress__metric-value--ok {
+  color: var(--accent);
+}
+
+.pe-progress__metric-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .pe-progress__plot-wrap {
   padding: 8px 18px 6px;
 }
