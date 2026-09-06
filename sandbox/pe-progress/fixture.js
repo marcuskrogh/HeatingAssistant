@@ -1,26 +1,50 @@
-/** Replay a 5-minute PE job: tiled-OE warm-start, then N-step PEM that
- *  never reaches SciPy ftol (the 5-day / 5-minute case). */
+/** Replay a 5-minute PE job in the normalised RMS proxy η = RMSE / σ_R.
+ *  Line-search spikes stay visible; the reasonable-fit line at η=2 is
+ *  reachable (1 °C RMS at the production R_var = 0.25). */
 
-export const FTOL = 1e-12;
+import { ETA_NOISE, ETA_TOL, R_VAR, etaFromJ, rmseCFromEta } from './proxy.js';
+
 export const CAP_S = 300;
+export { ETA_TOL, R_VAR };
 
-function jAt(evalIndex) {
-  if (evalIndex < 18) {
-    return 42.0 * Math.exp(-evalIndex / 7.5) + 6.8;
+const N_OBS_OE = 460;
+const N_OBS_NSTEP = 7398;
+
+function etaAt(evalIndex) {
+  if (evalIndex < 14) {
+    return 5.8 * Math.exp(-evalIndex / 5.2) + 2.15;
   }
-  const k = evalIndex - 18;
-  return 9.4 * Math.exp(-k / 28) + 4.15 + 0.12 * Math.sin(k / 5);
+  if (evalIndex === 14) return 18.4;
+  if (evalIndex === 15) return 2.05;
+  if (evalIndex === 16) return 1.92;
+  const k = evalIndex - 16;
+  const base = 1.85 * Math.exp(-k / 20) + 1.12;
+  if (k === 19) return 12.6;
+  if (k === 8 || k === 27) return Math.min(16, base * 6.5);
+  return base;
+}
+
+function phaseAt(evalIndex) {
+  return evalIndex < 14 ? 'tiled_oe' : 'nstep_pem';
+}
+
+function nObsAt(evalIndex) {
+  return phaseAt(evalIndex) === 'tiled_oe' ? N_OBS_OE : N_OBS_NSTEP;
 }
 
 export function buildHistory(upto) {
   const hist = [];
-  let prev = null;
   for (let i = 0; i <= upto; i += 1) {
-    const f = jAt(i);
-    const scale = Math.max(Math.abs(f), Math.abs(prev ?? f), 1);
-    const rel = prev == null ? 1 : Math.abs(f - prev) / scale;
-    hist.push({ nfev: i + 1, f, rel_step: rel });
-    prev = f;
+    const eta = etaAt(i);
+    const nObs = nObsAt(i);
+    const f = eta * eta * nObs;
+    hist.push({
+      nfev: i + 1,
+      f,
+      eta,
+      n_obs: nObs,
+      phase: phaseAt(i),
+    });
   }
   return hist;
 }
@@ -30,18 +54,23 @@ export function snapshot({ elapsedS, nowS = Date.now() / 1000 }) {
   const evalIndex = Math.min(90, Math.floor(elapsed / 3.2));
   const hist = buildHistory(evalIndex);
   const last = hist[hist.length - 1];
-  const phase = evalIndex < 18 ? 'tiled_oe' : 'nstep_pem';
+  const eta = last.eta ?? etaFromJ(last.f, last.n_obs);
+  const rmse = rmseCFromEta(eta);
   return {
     status: elapsed >= CAP_S ? 'error' : 'running',
     started_at: nowS - elapsed,
     cap_s: CAP_S,
     elapsed_s: elapsed,
     remaining_s: Math.max(0, CAP_S - elapsed),
-    phase,
+    phase: last.phase,
     nfev: last.nfev,
     f: last.f,
-    rel_step: last.rel_step,
-    ftol: FTOL,
+    eta,
+    n_obs: last.n_obs,
+    r_var: R_VAR,
+    eta_tol: ETA_TOL,
+    eta_noise: ETA_NOISE,
+    rmse_c: rmse,
     f_hist: hist,
     message: elapsed >= CAP_S
       ? 'Stopped after 5 minutes (the configured maximum). Parameters were not applied.'

@@ -163,3 +163,8 @@ _N_RESTARTS = 3
 
 #: Standard deviation of the random log-space perturbation between restarts.
 _RESTART_PERT = 0.5
+
+#: Normalised RMS tolerance: η = RMSE / σ_R = sqrt(J / n_obs).
+#: η ≤ 2 ⇔ RMS ≤ 1 °C at the default EKF R_var = 0.25.
+PE_ETA_TOL = 2.0
+PE_ETA_NOISE = 1.0
