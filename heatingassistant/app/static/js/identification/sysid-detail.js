@@ -1,4 +1,5 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=124';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=157';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=124';
 import { createCollapsible } from '../components/collapsible.js?v=124';
 import { formatNumber, modelFitLabel } from '../utils.js?v=124';
@@ -22,7 +23,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=154';
+import { renderPeProgress } from './pe-progress.js?v=157';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -104,13 +105,13 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   ekfKpiGrid.appendChild(kpiEkfMae);
 
   const ekfChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="temp"]'), {
-    title: 'ONE-STEP EKF RECONSTRUCTION', yLabel: '°C', height: 260,
+    title: 'ONE-STEP EKF RECONSTRUCTION', yLabel: '°C', height: CHART_HEIGHT_PRIMARY,
   });
   const ekfInputsChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="inputs"]'), {
-    title: 'HEATING INPUT', yLabel: 'W', height: 180,
+    title: 'HEATING INPUT', yLabel: 'W', height: CHART_HEIGHT_SECONDARY,
   });
   const ekfDisturbChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="disturb"]'), {
-    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: 180,
+    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: CHART_HEIGHT_SECONDARY,
   });
 
   // ---- Multi-step open-loop simulation section ----
@@ -128,13 +129,13 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   olKpiGrid.appendChild(kpiOlMae);
 
   const olChart = new TimeSeriesChart(olSection.querySelector('[data-chart="temp"]'), {
-    title: 'MULTI-STEP OPEN-LOOP SIMULATION', yLabel: '°C', height: 260,
+    title: 'MULTI-STEP OPEN-LOOP SIMULATION', yLabel: '°C', height: CHART_HEIGHT_PRIMARY,
   });
   const olInputsChart = new TimeSeriesChart(olSection.querySelector('[data-chart="inputs"]'), {
-    title: 'HEATING INPUT', yLabel: 'W', height: 180,
+    title: 'HEATING INPUT', yLabel: 'W', height: CHART_HEIGHT_SECONDARY,
   });
   const olDisturbChart = new TimeSeriesChart(olSection.querySelector('[data-chart="disturb"]'), {
-    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: 180,
+    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: CHART_HEIGHT_SECONDARY,
   });
 
   // -----------------------------------------------------------------------

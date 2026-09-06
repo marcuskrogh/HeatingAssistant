@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Heating Assistant UI scale preview</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; background: #111; }
+    ha-scale-preview { display: block; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <ha-scale-preview></ha-scale-preview>
+  <script type="module">
+    import { renderPeProgress } from '/heatingassistant/app/static/js/identification/pe-progress.js?v=157';
+    import { sizePlotCanvas, CHART_LINE_WIDTH, CHART_DASH_PATTERN, CHART_DASH_WIDTH } from '/heatingassistant/app/static/js/components/chart-theme.js?v=157';
+
+    class HaScalePreview extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        const css = (href) => {
+          const l = document.createElement('link');
+          l.rel = 'stylesheet';
+          l.href = href;
+          return l;
+        };
+        root.appendChild(css('/heatingassistant/app/static/css/industrial.css'));
+        root.appendChild(css('/heatingassistant/app/static/css/pages/identification.css'));
+        const extra = document.createElement('style');
+        extra.textContent = `
+          .sysid-detail-host { min-height: 0 !important; }
+          .pe-progress-overlay {
+            position: relative;
+            inset: auto;
+            background: transparent;
+            display: block;
+            padding: 0;
+          }
+          .room-guide-canvas { width: 100%; height: 100%; display: block; }
+        `;
+        root.appendChild(extra);
+        const wrap = document.createElement('div');
+        wrap.className = 'shell';
+        wrap.innerHTML = `
+          <nav class="panel-nav panel-nav--live">
+            <div class="panel-nav__brand">
+              <span class="panel-nav__name">HEATING ASSISTANT</span>
+            </div>
+            <button type="button" class="panel-nav__toggle">Menu</button>
+            <div class="panel-nav__links panel-nav__links--open">
+              <a class="panel-nav__link panel-nav__link--active" href="#">OVERVIEW</a>
+              <a class="panel-nav__link" href="#">SCHEDULES</a>
+              <a class="panel-nav__link" href="#">TUNING</a>
+              <a class="panel-nav__link" href="#">PARAMETER ESTIMATION</a>
+              <a class="panel-nav__link" href="#">SYSTEM STATUS</a>
+              <a class="panel-nav__link" href="#">CONFIGURATION</a>
+            </div>
+          </nav>
+          <div class="content">
+            <div class="section-header">SYSTEM STATUS</div>
+            <h2 class="room-header__title">Living room</h2>
+            <div class="tuning-section__title">Controller Preview</div>
+            <div class="chart-container card">
+              <div class="chart-container__title">Temperature</div>
+              <div class="chart-container__canvas room-guide" style="height:var(--chart-height-primary);position:relative">
+                <canvas class="room-guide-canvas"></canvas>
+              </div>
+            </div>
+            <div class="sysid-detail-host" style="margin-top:24px;position:relative">
+              <div class="pe-progress-overlay" id="pe-host"></div>
+            </div>
+          </div>
+        `;
+        root.appendChild(wrap);
+
+        const roomCanvas = root.querySelector('.room-guide-canvas');
+        const roomFrame = root.querySelector('.room-guide');
+        roomCanvas.style.width = '100%';
+        roomCanvas.style.height = '100%';
+        const paintRoom = () => {
+          const sized = sizePlotCanvas(roomCanvas);
+          if (sized.skipped) {
+            requestAnimationFrame(paintRoom);
+            return;
+          }
+          const { ctx, cssW: w, cssH: h } = sized;
+          ctx.fillStyle = '#1a1d23';
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = 'rgba(54, 59, 68, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, h * 0.5);
+          ctx.lineTo(w, h * 0.5);
+          ctx.stroke();
+          ctx.setLineDash(CHART_DASH_PATTERN);
+          ctx.lineWidth = CHART_DASH_WIDTH;
+          ctx.strokeStyle = '#f5a623';
+          ctx.beginPath();
+          ctx.moveTo(0, h * 0.35);
+          ctx.lineTo(w, h * 0.35);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#4fc3f7';
+          ctx.lineWidth = CHART_LINE_WIDTH;
+          ctx.beginPath();
+          const pts = [0.62, 0.58, 0.38, 0.35, 0.45, 0.28, 0.32, 0.22, 0.25];
+          pts.forEach((y, i) => {
+            const x = (i / (pts.length - 1)) * w;
+            const py = y * h;
+            if (i === 0) ctx.moveTo(x, py);
+            else ctx.lineTo(x, py);
+          });
+          ctx.stroke();
+        };
+        const waitCss = Promise.all(
+          [...root.querySelectorAll('link')].map(
+            (l) => new Promise((resolve) => {
+              l.addEventListener('load', resolve, { once: true });
+              l.addEventListener('error', resolve, { once: true });
+            }),
+          ),
+        );
+        waitCss.then(() => {
+          requestAnimationFrame(paintRoom);
+          renderPeProgress(root.querySelector('#pe-host'), {
+            phase: 'tiled_oe',
+            f: 0.53,
+            nfev: 34,
+            cap_s: 1800,
+            elapsed_s: 24,
+            started_at: Date.now() / 1000 - 24,
+            f_hist: hist,
+          });
+        });
+        const hist = [];
+        for (let i = 0; i < 34; i++) hist.push({ f: Math.max(0.05, 2.4 * Math.exp(-i / 10) + 0.08 * Math.sin(i)) });
+      }
+    }
+    customElements.define('ha-scale-preview', HaScalePreview);
+  </script>
+</body>
+</html>

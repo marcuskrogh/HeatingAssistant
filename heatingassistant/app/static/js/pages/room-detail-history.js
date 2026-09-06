@@ -6,7 +6,7 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   sensorHistoriesToMinMaxSpan,
-} from '../components/time-series-chart.js?v=124';
+} from '../components/time-series-chart.js?v=157';
 import { entityValue, systemEntity } from '../utils.js?v=127';
 import {
   buildTemperatureChart,

@@ -3,7 +3,8 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=124';
+} from '../components/time-series-chart.js?v=157';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import {
   buildTemperatureChart,
   buildPowerChart,
@@ -259,21 +260,21 @@ function renderTuningIndex(container, rooms, connection, hass) {
     temp: new TimeSeriesChart(previewChartsEl.querySelector('[data-chart="temp"]'), {
       title: 'TEMPERATURE',
       yLabel: '\u00b0C',
-      height: 240,
+      height: CHART_HEIGHT_PRIMARY,
     }),
     power: new TimeSeriesChart(previewChartsEl.querySelector('[data-chart="power"]'), {
       title: 'HEATING POWER & PRICE',
       yLabel: 'kW',
       y2: true,
       y2Label: 'Price',
-      height: 200,
+      height: CHART_HEIGHT_SECONDARY,
     }),
     disturb: new TimeSeriesChart(previewChartsEl.querySelector('[data-chart="disturb"]'), {
       title: 'DISTURBANCES',
       yLabel: '\u00b0C',
       y2: true,
       y2Label: 'kW',
-      height: 200,
+      height: CHART_HEIGHT_SECONDARY,
     }),
   };
 

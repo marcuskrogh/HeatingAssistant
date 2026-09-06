@@ -6,6 +6,9 @@ must be the exact calendar version on its own line.
 
 # 2026.09.10
 
+- Ingress type and shared chrome now follow one scale across pages and
+  popups. Room-view plots stay the visual guide; other plots, including the
+  parameter-estimation progress canvas, match those line widths and ticks.
 - While automatic parameter estimation runs, a popup stays on screen (including
   on a phone) with RMS error against a 1 °C tolerance and a log plot of
   normalised fit quality. Time left sits in a thin footer. If the popup is

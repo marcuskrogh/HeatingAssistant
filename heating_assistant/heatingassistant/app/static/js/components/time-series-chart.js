@@ -1,3 +1,5 @@
+import { CHART_HEIGHT_SECONDARY } from './chart-theme.js?v=157';
+
 /** Dataset labels used only for shaded regions — hidden from legend and tooltip. */
 export const SHADING_DATASET_LABELS = new Set([
   'Constraint Upper',
@@ -132,7 +134,7 @@ export class TimeSeriesChart {
     this._container.innerHTML = `
       <div class="chart-container card">
         <div class="chart-container__title">${this._config.title}</div>
-        <div style="position: relative; height: ${this._config.height || 200}px; width: 100%; overflow: hidden;">
+        <div style="position: relative; height: ${this._config.height || CHART_HEIGHT_SECONDARY}px; width: 100%; overflow: hidden;">
           <canvas class="chart-container__canvas"></canvas>
         </div>
       </div>

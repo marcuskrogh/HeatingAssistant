@@ -1,4 +1,12 @@
 import { ETA_NOISE, ETA_TOL, pointEta, rmseCFromEta } from './pe-eta.js?v=154';
+import {
+  CHART_DASH_PATTERN,
+  CHART_DASH_WIDTH,
+  CHART_LINE_WIDTH,
+  CHART_TICK_SIZE,
+  readTheme,
+  sizePlotCanvas,
+} from '../components/chart-theme.js?v=157';
 
 function fmtClock(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
@@ -65,21 +73,15 @@ export function liveClock(snap, nowS = Date.now() / 1000) {
 }
 
 function drawPlot(canvas, snap) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
-  const cs = getComputedStyle(canvas);
-  const bg = cs.getPropertyValue('--bg-primary').trim() || '#1a1d23';
-  const grid = cs.getPropertyValue('--border').trim() || '#363b44';
-  const jCol = cs.getPropertyValue('--chart-temp').trim() || '#4fc3f7';
-  const warn = cs.getPropertyValue('--warning').trim() || '#f5a623';
-  const ok = cs.getPropertyValue('--accent').trim() || '#2ec4b6';
-  const dim = cs.getPropertyValue('--text-dim').trim() || '#6b7280';
-  ctx.fillStyle = bg;
+  const sized = sizePlotCanvas(canvas);
+  if (sized.skipped) return false;
+  const { ctx, cssW: w, cssH: h } = sized;
+  const theme = readTheme(canvas);
+  ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
 
   const hist = snap.f_hist || [];
-  if (hist.length < 1) return;
+  if (hist.length < 1) return true;
   const padL = 44;
   const padR = 18;
   const padT = 14;
@@ -106,10 +108,10 @@ function drawPlot(canvas, snap) {
   ctx.fillStyle = 'rgba(46, 196, 182, 0.10)';
   ctx.fillRect(padL, yGood, w - padL - padR, Math.max(0, yBottom - yGood));
 
-  ctx.strokeStyle = grid;
+  ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
-  ctx.font = '10px ui-monospace, monospace';
-  ctx.fillStyle = dim;
+  ctx.font = `${CHART_TICK_SIZE}px ${theme.fontMono}`;
+  ctx.fillStyle = theme.tick;
   logTicks(yFloor, yMax).forEach((v) => {
     if (v < yFloor * 0.999 || v > yMax * 1.001) return;
     if (Math.abs(Math.log10(v) - Math.log10(etaTol)) < 0.22) return;
@@ -121,30 +123,30 @@ function drawPlot(canvas, snap) {
     ctx.fillText(fmtTick(v), 8, y + 3);
   });
 
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = ok;
-  ctx.lineWidth = 1;
+  ctx.setLineDash(CHART_DASH_PATTERN);
+  ctx.strokeStyle = theme.accent;
+  ctx.lineWidth = CHART_DASH_WIDTH;
   const yOne = yOf(etaNoise);
   ctx.beginPath();
   ctx.moveTo(padL, yOne);
   ctx.lineTo(w - padR, yOne);
   ctx.stroke();
 
-  ctx.setLineDash([6, 4]);
-  ctx.strokeStyle = warn;
-  ctx.lineWidth = 1.7;
+  ctx.setLineDash(CHART_DASH_PATTERN);
+  ctx.strokeStyle = theme.warn;
+  ctx.lineWidth = CHART_DASH_WIDTH;
   ctx.beginPath();
   ctx.moveTo(padL, yGood);
   ctx.lineTo(w - padR, yGood);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = warn;
+  ctx.fillStyle = theme.warn;
   ctx.textAlign = 'right';
   ctx.fillText('tol', w - 4, yGood - 4);
   ctx.textAlign = 'left';
 
-  ctx.strokeStyle = jCol;
-  ctx.lineWidth = 2.25;
+  ctx.strokeStyle = theme.series;
+  ctx.lineWidth = CHART_LINE_WIDTH;
   ctx.beginPath();
   hist.forEach((p, i) => {
     const x = xOf(i);
@@ -154,8 +156,10 @@ function drawPlot(canvas, snap) {
   });
   ctx.stroke();
 
-  ctx.fillStyle = dim;
+  ctx.fillStyle = theme.tick;
+  ctx.font = `${CHART_TICK_SIZE}px ${theme.fontSans}`;
   ctx.fillText('evaluation', w / 2 - 28, h - 8);
+  return true;
 }
 
 export function renderPeProgress(overlay, snap) {
@@ -200,7 +204,9 @@ export function renderPeProgress(overlay, snap) {
       </div>
       <div class="pe-progress__plot-wrap">
         <div class="pe-progress__plot-label">Normalised RMS (1 = sensor noise)</div>
-        <canvas class="pe-progress__plot" width="680" height="240"></canvas>
+        <div class="pe-progress__plot-frame">
+          <canvas class="pe-progress__plot"></canvas>
+        </div>
       </div>
       <div class="pe-progress__legend">
         <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>normalised RMS</span>
@@ -219,5 +225,8 @@ export function renderPeProgress(overlay, snap) {
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');
-  drawPlot(canvas, snap);
+  const paint = () => {
+    if (!drawPlot(canvas, snap)) requestAnimationFrame(paint);
+  };
+  paint();
 }
