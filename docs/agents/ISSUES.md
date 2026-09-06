@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |
+| SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
+| SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-486 | Task | [Sandbox] Live PE optimisation progress popup | Done | — | docs/agents/SANDBOX-pe-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/661 (`c8068a3`) |
 | SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | Done | — | docs/agents/ITERATE-solar-gain-filt-persist.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659 |
 | SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
@@ -212,6 +215,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/ship` SWD-491: review CLEAN (focused sequential, COMMENT). Next merge #660.
+- 2026-09-06 — `/review` SWD-491 CLEAN (focused sequential). COMMENT on PR #660. Next `/ship SWD-491`.
+- 2026-09-06 — `/restructure` SWD-491: no extract. Helper already sits next to period-editor locals; `[hidden]` is the campground CSS fix. Next `/review SWD-491`.
+- 2026-09-06 — `/test` SWD-491: DOM spec lock renders one Evening card, expands editor, hides empty inactive; source lock still requires ensureWhenState. CRAP runner skips JS. Next `/restructure SWD-491`.
+- 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/660. Next `/test SWD-491`.
+- 2026-09-06 — `/define`+`/architect` SWD-491: periods counted but not rendered (`ensureWhenState` dropped). Next `/implement SWD-491`.
 - 2026-09-06 — `/ship` SWD-486: merged #661 as `c8068a3`. Task Done. Changelog `# 2026.09.7`.
 - 2026-09-06 — `/ship` SWD-486 review CLEAN (focused sequential, COMMENT) on PR #661. Next closeout merge (CalVer 2026.09.7 after main 2026.09.6).
 - 2026-09-06 — `/ship` SWD-486 remaining: implement promote of PE progress popup. Next test → restructure → review → closeout.

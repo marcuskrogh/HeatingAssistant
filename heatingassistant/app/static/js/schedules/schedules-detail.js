@@ -176,6 +176,13 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     };
   }
 
+  function ensureWhenState(period) {
+    const normalized = normalizePeriodForEditor(period);
+    period._whenByType = normalized._whenByType;
+    period.schedule_type = normalized.schedule_type;
+    return period._whenByType;
+  }
+
   function renderToggle(schedData) {
     const enabled = schedData?.enabled ?? true;
     toggleBtn.textContent = enabled ? 'ENABLED' : 'DISABLED';
