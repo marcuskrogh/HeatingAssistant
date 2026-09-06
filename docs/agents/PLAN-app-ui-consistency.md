@@ -109,4 +109,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/test SWD-498` — Spec-lock tests plus desktop and 390px overlay/nav inspection
+`/test SWD-498` — Spec-lock tests passed; remaining is review of desktop/390px artifacts
