@@ -54,13 +54,15 @@ export function liveClock(snap, nowS = Date.now() / 1000) {
 }
 
 function drawPlot(canvas, snap) {
-  const { ctx, cssW: w, cssH: h } = sizePlotCanvas(canvas);
+  const sized = sizePlotCanvas(canvas);
+  if (sized.skipped) return false;
+  const { ctx, cssW: w, cssH: h } = sized;
   const theme = readTheme(canvas);
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
 
   const hist = snap.f_hist || [];
-  if (hist.length < 1) return;
+  if (hist.length < 1) return true;
   const padL = 44;
   const padR = 16;
   const padT = 14;
@@ -113,6 +115,7 @@ function drawPlot(canvas, snap) {
   ctx.fillStyle = theme.tick;
   ctx.font = `${CHART_TICK_SIZE}px ${theme.fontSans}`;
   ctx.fillText('evaluation', w / 2 - 28, h - 8);
+  return true;
 }
 
 export function renderPeProgress(overlay, snap) {
@@ -168,7 +171,8 @@ export function renderPeProgress(overlay, snap) {
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');
-  const paint = () => drawPlot(canvas, snap);
+  const paint = () => {
+    if (!drawPlot(canvas, snap)) requestAnimationFrame(paint);
+  };
   paint();
-  requestAnimationFrame(paint);
 }

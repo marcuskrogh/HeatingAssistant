@@ -95,6 +95,7 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     assert "align-items: flex-start" in ident
     assert "CHART_TICK_SIZE = 10" in theme
     assert "CHART_LINE_WIDTH = 2" in theme
+    assert "skipped: true" in theme
     assert "export function sizePlotCanvas" in theme
     assert "CHART_HEIGHT_PRIMARY = 240" in theme
     assert "CHART_HEIGHT_SECONDARY = 200" in theme

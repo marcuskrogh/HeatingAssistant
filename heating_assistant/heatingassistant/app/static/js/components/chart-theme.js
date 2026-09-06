@@ -58,14 +58,16 @@ export function labelFont(family = CHART_FONT_SANS, size = CHART_TICK_SIZE) {
  *  shrinks strokes). */
 export function sizePlotCanvas(canvas) {
   const wrap = canvas.parentElement;
-  const cssW = Math.max(1, Math.round((wrap && wrap.clientWidth) || canvas.clientWidth || 680));
-  const cssH = Math.max(1, Math.round((wrap && wrap.clientHeight) || canvas.clientHeight || CHART_HEIGHT_SECONDARY));
+  const cssW = Math.max(1, Math.round((wrap && wrap.clientWidth) || canvas.clientWidth || 0));
+  const cssH = Math.max(1, Math.round((wrap && wrap.clientHeight) || canvas.clientHeight || 0));
+  if (cssW < 8 || cssH < 8) {
+    const ctx = canvas.getContext('2d');
+    return { ctx, cssW: Math.max(cssW, 1), cssH: Math.max(cssH, 1), dpr: 1, skipped: true };
+  }
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
-  canvas.style.width = `${cssW}px`;
-  canvas.style.height = `${cssH}px`;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { ctx, cssW, cssH, dpr };
+  return { ctx, cssW, cssH, dpr, skipped: false };
 }

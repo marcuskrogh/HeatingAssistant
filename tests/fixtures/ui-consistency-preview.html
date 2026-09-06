@@ -12,8 +12,8 @@
 <body>
   <ha-scale-preview></ha-scale-preview>
   <script type="module">
-    import { renderPeProgress } from '/heatingassistant/app/static/js/identification/pe-progress.js?v=155';
-    import { sizePlotCanvas, CHART_LINE_WIDTH, CHART_DASH_PATTERN, CHART_DASH_WIDTH } from '/heatingassistant/app/static/js/components/chart-theme.js?v=155';
+    import { renderPeProgress } from '/heatingassistant/app/static/js/identification/pe-progress.js?v=156';
+    import { sizePlotCanvas, CHART_LINE_WIDTH, CHART_DASH_PATTERN, CHART_DASH_WIDTH } from '/heatingassistant/app/static/js/components/chart-theme.js?v=156';
 
     class HaScalePreview extends HTMLElement {
       constructor() {
@@ -27,7 +27,19 @@
         };
         root.appendChild(css('/heatingassistant/app/static/css/industrial.css'));
         root.appendChild(css('/heatingassistant/app/static/css/pages/identification.css'));
-        root.appendChild(css('/heatingassistant/app/static/css/pages/tuning.css'));
+        const extra = document.createElement('style');
+        extra.textContent = `
+          .sysid-detail-host { min-height: 0 !important; }
+          .pe-progress-overlay {
+            position: relative;
+            inset: auto;
+            background: transparent;
+            display: block;
+            padding: 0;
+          }
+          .room-guide-canvas { width: 100%; height: 100%; display: block; }
+        `;
+        root.appendChild(extra);
         const wrap = document.createElement('div');
         wrap.className = 'shell';
         wrap.innerHTML = `
@@ -55,7 +67,7 @@
                 <canvas class="room-guide-canvas"></canvas>
               </div>
             </div>
-            <div class="sysid-detail-host" style="min-height:720px;margin-top:24px;position:relative">
+            <div class="sysid-detail-host" style="margin-top:24px;position:relative">
               <div class="pe-progress-overlay" id="pe-host"></div>
             </div>
           </div>
@@ -67,7 +79,12 @@
         roomCanvas.style.width = '100%';
         roomCanvas.style.height = '100%';
         const paintRoom = () => {
-          const { ctx, cssW: w, cssH: h } = sizePlotCanvas(roomCanvas);
+          const sized = sizePlotCanvas(roomCanvas);
+          if (sized.skipped) {
+            requestAnimationFrame(paintRoom);
+            return;
+          }
+          const { ctx, cssW: w, cssH: h } = sized;
           ctx.fillStyle = '#1a1d23';
           ctx.fillRect(0, 0, w, h);
           ctx.strokeStyle = 'rgba(54, 59, 68, 0.5)';
@@ -96,19 +113,28 @@
           });
           ctx.stroke();
         };
-        requestAnimationFrame(paintRoom);
-
+        const waitCss = Promise.all(
+          [...root.querySelectorAll('link')].map(
+            (l) => new Promise((resolve) => {
+              l.addEventListener('load', resolve, { once: true });
+              l.addEventListener('error', resolve, { once: true });
+            }),
+          ),
+        );
+        waitCss.then(() => {
+          requestAnimationFrame(paintRoom);
+          renderPeProgress(root.querySelector('#pe-host'), {
+            phase: 'tiled_oe',
+            f: 0.53,
+            nfev: 34,
+            cap_s: 1800,
+            elapsed_s: 24,
+            started_at: Date.now() / 1000 - 24,
+            f_hist: hist,
+          });
+        });
         const hist = [];
         for (let i = 0; i < 34; i++) hist.push({ f: Math.max(0.05, 2.4 * Math.exp(-i / 10) + 0.08 * Math.sin(i)) });
-        renderPeProgress(root.querySelector('#pe-host'), {
-          phase: 'tiled_oe',
-          f: 0.53,
-          nfev: 34,
-          cap_s: 1800,
-          elapsed_s: 24,
-          started_at: Date.now() / 1000 - 24,
-          f_hist: hist,
-        });
       }
     }
     customElements.define('ha-scale-preview', HaScalePreview);
