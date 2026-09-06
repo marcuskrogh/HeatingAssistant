@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-494 | Task | [Bug] Next Compute timers do not show computing while NMPC/P is solving | In Review | — | docs/agents/PLAN-next-compute-timers-computing.md | `/ship SWD-494` — Closeout merge after CI green; PR https://github.com/marcuskrogh/HeatingAssistant/pull/662 |
-| SWD-495 | Sub-task | Show computing overlay on wrap without waiting for Ingress poll | In Progress | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
-| SWD-496 | Sub-task | Tests, CalVer, changelog, App sync for compute timers | In Progress | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
+| SWD-494 | Task | [Bug] Next Compute timers do not show computing while NMPC/P is solving | Done | — | docs/agents/PLAN-next-compute-timers-computing.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/662 (`caab25b`) |
+| SWD-495 | Sub-task | Show computing overlay on wrap without waiting for Ingress poll | Done | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
+| SWD-496 | Sub-task | Tests, CalVer, changelog, App sync for compute timers | Done | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
 | SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |
 | SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
@@ -218,6 +218,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/ship` SWD-494: merged #662 as `caab25b`. Task Done. Changelog `# 2026.09.9`.
 - 2026-09-06 — `/review` SWD-494 CLEAN (focused sequential, skip Integration). COMMENT on PR #662. Next closeout merge after CI.
 - 2026-09-06 — `/test`+`/restructure` SWD-494: spec locks for wrap+15s+closest guard; CRAP runner skips JS; no live HA panel (harness is the working surface). Extracted `wrapOverlayCapS`. Next `/review SWD-494`.
 - 2026-09-06 — `/define`+`/architect`+`/implement` SWD-494: wrap-aware computing overlay on NEXT CONTROL / NEXT NMPC; CalVer 2026.09.9. Next `/test SWD-494`.

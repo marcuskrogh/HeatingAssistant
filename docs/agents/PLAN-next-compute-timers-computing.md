@@ -95,4 +95,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-494` — Closeout merge after CI green
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/662 (`caab25b`)
