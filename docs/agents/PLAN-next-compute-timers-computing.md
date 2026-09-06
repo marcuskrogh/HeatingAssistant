@@ -95,4 +95,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-494` — Shape stamp for countdown overlay (same branch/PR)
+`/review SWD-494` — Lasers then fix then code review
