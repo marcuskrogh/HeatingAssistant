@@ -1,3 +1,18 @@
+import {
+  CHART_COLOR_GRID_X,
+  CHART_COLOR_GRID_Y,
+  CHART_COLOR_LEGEND,
+  CHART_COLOR_TICK,
+  CHART_FONT_MONO,
+  CHART_FONT_SANS,
+  CHART_HEIGHT_SECONDARY,
+  CHART_LEGEND_SIZE,
+  CHART_LINE_WIDTH,
+  CHART_TICK_SIZE,
+  labelFont,
+  tickFont,
+} from './chart-theme.js?v=154';
+
 /** Dataset labels used only for shaded regions — hidden from legend and tooltip. */
 export const SHADING_DATASET_LABELS = new Set([
   'Constraint Upper',
@@ -36,14 +51,17 @@ const CHART_DEFAULTS = {
   maintainAspectRatio: false,
   animation: { duration: 300 },
   interaction: { mode: 'index', intersect: false },
+  elements: {
+    line: { borderWidth: CHART_LINE_WIDTH },
+  },
   plugins: {
     legend: {
       display: true,
       position: 'top',
       align: 'end',
       labels: {
-        color: '#9aa0a8',
-        font: { size: 10, family: "system-ui, sans-serif" },
+        color: CHART_COLOR_LEGEND,
+        font: labelFont(CHART_FONT_SANS, CHART_LEGEND_SIZE),
         boxWidth: 12,
         padding: 12,
         usePointStyle: true,
@@ -57,8 +75,8 @@ const CHART_DEFAULTS = {
       borderWidth: 1,
       titleColor: '#e8eaed',
       bodyColor: '#9aa0a8',
-      titleFont: { size: 11 },
-      bodyFont: { size: 11, family: "'JetBrains Mono', monospace" },
+      titleFont: labelFont(CHART_FONT_SANS, CHART_TICK_SIZE),
+      bodyFont: tickFont(CHART_FONT_MONO, CHART_TICK_SIZE),
       padding: 10,
       displayColors: true,
       boxPadding: 4,
@@ -68,13 +86,13 @@ const CHART_DEFAULTS = {
   scales: {
     x: {
       type: 'time',
-      grid: { color: 'rgba(54, 59, 68, 0.5)', drawBorder: false },
-      ticks: { color: '#6b7280', font: { size: 10 }, maxRotation: 0 },
+      grid: { color: CHART_COLOR_GRID_X, drawBorder: false },
+      ticks: { color: CHART_COLOR_TICK, font: labelFont(CHART_FONT_SANS, CHART_TICK_SIZE), maxRotation: 0 },
       border: { display: false },
     },
     y: {
-      grid: { color: 'rgba(54, 59, 68, 0.3)', drawBorder: false },
-      ticks: { color: '#6b7280', font: { size: 10, family: "'JetBrains Mono', monospace" } },
+      grid: { color: CHART_COLOR_GRID_Y, drawBorder: false },
+      ticks: { color: CHART_COLOR_TICK, font: tickFont() },
       border: { display: false },
     },
   },
@@ -132,7 +150,7 @@ export class TimeSeriesChart {
     this._container.innerHTML = `
       <div class="chart-container card">
         <div class="chart-container__title">${this._config.title}</div>
-        <div style="position: relative; height: ${this._config.height || 200}px; width: 100%; overflow: hidden;">
+        <div style="position: relative; height: ${this._config.height || CHART_HEIGHT_SECONDARY}px; width: 100%; overflow: hidden;">
           <canvas class="chart-container__canvas"></canvas>
         </div>
       </div>
@@ -224,24 +242,24 @@ export class TimeSeriesChart {
       opts.scales.y.title = {
         display: true,
         text: this._config.yLabel,
-        color: '#6b7280',
-        font: { size: 10 },
+        color: CHART_COLOR_TICK,
+        font: labelFont(),
       };
     }
 
     if (this._config.y2) {
       opts.scales.y2 = {
         position: 'right',
-        grid: { drawOnChartArea: false, color: 'rgba(54, 59, 68, 0.3)' },
-        ticks: { color: '#6b7280', font: { size: 10, family: "'JetBrains Mono', monospace" } },
+        grid: { drawOnChartArea: false, color: CHART_COLOR_GRID_Y },
+        ticks: { color: CHART_COLOR_TICK, font: tickFont() },
         border: { display: false },
       };
       if (this._config.y2Label) {
         opts.scales.y2.title = {
           display: true,
           text: this._config.y2Label,
-          color: '#6b7280',
-          font: { size: 10 },
+          color: CHART_COLOR_TICK,
+          font: labelFont(),
         };
       }
     }
@@ -360,7 +378,7 @@ function nowLinePlugin() {
       ctx.stroke();
 
       ctx.fillStyle = 'rgba(108, 122, 137, 0.8)';
-      ctx.font = '9px system-ui';
+      ctx.font = `${CHART_TICK_SIZE}px ${CHART_FONT_SANS}`;
       ctx.textAlign = 'center';
       ctx.fillText('NOW', x, chart.chartArea.top - 4);
 

@@ -4,6 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | In Progress | — | docs/agents/PLAN-app-ui-consistency.md | `/test SWD-498` |
+| SWD-499 | Sub-task | Design tokens + App UI styleguide | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
+| SWD-500 | Sub-task | Unify fonts and shared chrome across pages | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
+| SWD-501 | Sub-task | Unify plot sizes and Chart.js / PE canvas styling | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
+| SWD-502 | Sub-task | Tests, CalVer, changelog, App sync | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
 | SWD-494 | Task | [Bug] Next Compute timers do not show computing while NMPC/P is solving | Done | — | docs/agents/PLAN-next-compute-timers-computing.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/662 (`caab25b`) |
 | SWD-495 | Sub-task | Show computing overlay on wrap without waiting for Ingress poll | Done | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
 | SWD-496 | Sub-task | Tests, CalVer, changelog, App sync for compute timers | Done | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |

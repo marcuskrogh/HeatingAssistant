@@ -1,3 +1,5 @@
+import { CHART_HEIGHT_SECONDARY, readTheme } from '../components/chart-theme.js?v=154';
+
 function fmtClock(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
   const m = Math.floor(s / 60);
@@ -48,13 +50,8 @@ function drawPlot(canvas, snap) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
-  const cs = getComputedStyle(canvas);
-  const bg = cs.getPropertyValue('--bg-primary').trim() || '#1a1d23';
-  const grid = cs.getPropertyValue('--border').trim() || '#363b44';
-  const jCol = cs.getPropertyValue('--chart-temp').trim() || '#4fc3f7';
-  const warn = cs.getPropertyValue('--warning').trim() || '#f5a623';
-  const dim = cs.getPropertyValue('--text-dim').trim() || '#6b7280';
-  ctx.fillStyle = bg;
+  const theme = readTheme(canvas);
+  ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
 
   const hist = snap.f_hist || [];
@@ -71,10 +68,10 @@ function drawPlot(canvas, snap) {
   const xOf = (x) => padL + ((x - xMin) / (xMax - xMin)) * (w - padL - padR);
   const yOf = (y) => padT + (1 - y / yMax) * (h - padT - padB);
 
-  ctx.strokeStyle = grid;
+  ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
-  ctx.font = '10px ui-monospace, monospace';
-  ctx.fillStyle = dim;
+  ctx.font = `${theme.tickSize}px ${theme.fontMono}`;
+  ctx.fillStyle = theme.tick;
   niceTicks(yMax).forEach((v) => {
     if (v > yMax) return;
     const y = yOf(v);
@@ -86,7 +83,7 @@ function drawPlot(canvas, snap) {
   });
 
   ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = warn;
+  ctx.strokeStyle = theme.warn;
   ctx.lineWidth = 1.5;
   const yZero = yOf(0);
   ctx.beginPath();
@@ -94,11 +91,11 @@ function drawPlot(canvas, snap) {
   ctx.lineTo(w - padR, yZero);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = warn;
+  ctx.fillStyle = theme.warn;
   ctx.fillText('0', 14, yZero - 6);
 
-  ctx.strokeStyle = jCol;
-  ctx.lineWidth = 2.25;
+  ctx.strokeStyle = theme.series;
+  ctx.lineWidth = theme.lineWidth;
   ctx.beginPath();
   hist.forEach((p, i) => {
     const x = xOf(i);
@@ -108,7 +105,8 @@ function drawPlot(canvas, snap) {
   });
   ctx.stroke();
 
-  ctx.fillStyle = dim;
+  ctx.fillStyle = theme.tick;
+  ctx.font = `${theme.tickSize}px ${theme.fontSans}`;
   ctx.fillText('evaluation', w / 2 - 28, h - 8);
 }
 
@@ -153,11 +151,11 @@ export function renderPeProgress(overlay, snap) {
       </div>
       <div class="pe-progress__plot-wrap">
         <div class="pe-progress__plot-label">Fit error (toward zero)</div>
-        <canvas class="pe-progress__plot" width="680" height="200"></canvas>
+        <canvas class="pe-progress__plot" width="680" height="${CHART_HEIGHT_SECONDARY}"></canvas>
       </div>
       <div class="pe-progress__legend">
-        <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>fit error</span>
-        <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>target (zero)</span>
+        <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>Fit error</span>
+        <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>Target (zero)</span>
       </div>
       ${timedOut ? `<p class="pe-progress__timeout">${snap.message || 'Stopped at the time limit. Parameters were not applied.'}</p>` : ''}
     </div>

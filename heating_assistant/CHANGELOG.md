@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.10
+
+- Ingress type, plots, and shared chrome now follow one scale: the same
+  sizes for nav, titles, labels, and chart ticks on every page, including
+  the parameter-estimation progress popup.
+
 # 2026.09.9
 
 - Next Control and Next NMPC rings show a spinning overlay and a computing

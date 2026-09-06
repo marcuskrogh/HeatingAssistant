@@ -7,14 +7,14 @@
 }
 
 .config-section__title {
-  font-size: 14px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 6px;
 }
 
 .config-section__desc {
-  font-size: 12px;
+  font-size: var(--type-caption);
   line-height: 1.5;
   color: var(--text-secondary);
   margin: 0 0 16px 0;
@@ -62,20 +62,20 @@
 }
 
 .config-landing-card__title {
-  font-size: 15px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 4px;
 }
 
 .config-landing-card__desc {
-  font-size: 12px;
+  font-size: var(--type-caption);
   line-height: 1.45;
   color: var(--text-secondary);
 }
 
 .config-landing-card__chevron {
-  font-size: 24px;
+  font-size: var(--type-icon-lg);
   color: var(--text-dim);
   flex: 0 0 auto;
 }
@@ -96,7 +96,7 @@
 }
 
 .config-list-card__name {
-  font-size: 15px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -105,7 +105,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
-  font-size: 11px;
+  font-size: var(--type-kicker);
   color: var(--text-secondary);
 }
 
@@ -116,7 +116,7 @@
 }
 
 .config-empty {
-  font-size: 13px;
+  font-size: var(--type-ui);
   color: var(--text-secondary);
   padding: 16px;
   border: 1px dashed var(--border);
@@ -139,7 +139,7 @@
 }
 
 .config-list-editor__title {
-  font-size: 12px;
+  font-size: var(--type-caption);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -203,7 +203,7 @@
 /* Sub-heading used to label alternative methods within a section (e.g. the two
    ways to describe solar gain). */
 .config-subhead {
-  font-size: 12px;
+  font-size: var(--type-caption);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -229,7 +229,7 @@
   border: 1px solid var(--accent);
   border-radius: 999px;
   padding: 4px 6px 4px 12px;
-  font-size: 12px;
+  font-size: var(--type-caption);
   color: var(--text-primary);
   max-width: 100%;
 }
@@ -248,7 +248,7 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--type-subtitle);
   line-height: 1;
 }
 .entity-chip__remove:hover {
@@ -297,7 +297,7 @@
   border-bottom: 1px solid var(--border);
 }
 .ha-modal__title {
-  font-size: 14px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -305,14 +305,14 @@
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 22px;
+  font-size: var(--type-icon-lg);
   line-height: 1;
   cursor: pointer;
 }
 .ha-modal__close:hover { color: var(--accent); }
 .ha-modal__hint {
   margin: 0 0 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--type-caption);
   line-height: 1.35;
   color: var(--text-secondary, #9aa3ad);
 }
@@ -350,19 +350,19 @@
 }
 .ha-modal__row-name {
   grid-area: name;
-  font-size: 13px;
+  font-size: var(--type-ui);
   color: var(--text-primary);
 }
 .ha-modal__row-id {
   grid-area: id;
-  font-size: 11px;
+  font-size: var(--type-kicker);
   color: var(--text-dim);
   font-family: var(--font-mono);
 }
 .ha-modal__row-state {
   grid-area: state;
   align-self: center;
-  font-size: 12px;
+  font-size: var(--type-caption);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -370,14 +370,14 @@
   padding: 24px 12px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--type-ui);
 }
 
 /* Derived/computed helper note under datasheet-driven fields */
 .config-derived {
   display: block;
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--type-caption);
   color: var(--accent);
   font-style: italic;
 }

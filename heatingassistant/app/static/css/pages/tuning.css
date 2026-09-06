@@ -11,7 +11,7 @@
 }
 
 .tuning-section__title {
-  font-size: 11px;
+  font-size: var(--type-kicker);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -20,7 +20,7 @@
 }
 
 .tuning-section__desc {
-  font-size: 13px;
+  font-size: var(--type-ui);
   line-height: 1.5;
   color: var(--text-secondary);
   margin-bottom: 20px;
@@ -42,7 +42,7 @@
 }
 
 .tuning-toggle__label {
-  font-size: 13px;
+  font-size: var(--type-ui);
   color: var(--text-secondary);
 }
 
@@ -55,7 +55,7 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--type-kicker);
   font-weight: 600;
   letter-spacing: 0.06em;
   cursor: pointer;
@@ -92,7 +92,7 @@
 }
 
 .tuning-actions__status {
-  font-size: 11px;
+  font-size: var(--type-kicker);
   color: var(--text-dim);
   font-family: var(--font-mono);
   margin-left: auto;
@@ -131,7 +131,7 @@
   border-radius: var(--radius-sm);
   background: rgba(255, 193, 7, 0.08);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--type-ui);
   line-height: 1.5;
 }
 
@@ -174,7 +174,7 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--type-kicker);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;

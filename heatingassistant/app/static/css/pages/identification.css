@@ -8,7 +8,7 @@
 }
 
 .params-subsection__title {
-  font-size: 10px;
+  font-size: var(--type-kicker);
   font-weight: 700;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -39,7 +39,7 @@
   border-radius: calc(var(--radius-sm) - 2px);
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--type-caption);
   font-weight: 500;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -145,7 +145,7 @@
   border-radius: 0;
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--type-ui);
   color-scheme: dark;
   outline: none;
   cursor: pointer;
@@ -155,7 +155,7 @@
 .heater-scales-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--type-caption);
   font-family: var(--font-mono);
 }
 
@@ -168,7 +168,7 @@
 }
 
 .heater-scales-table th {
-  font-size: 10px;
+  font-size: var(--type-kicker);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -186,7 +186,7 @@
 .heater-scale__delta {
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: var(--type-kicker);
   font-weight: 600;
 }
 
@@ -233,13 +233,13 @@
 }
 
 .sysid-index-card__name {
-  font-size: 14px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .sysid-index-card__badge {
-  font-size: 9px;
+  font-size: var(--type-kicker);
   font-weight: 700;
   letter-spacing: 0.1em;
   padding: 3px 8px;
@@ -277,7 +277,7 @@
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--type-kicker);
   line-height: 1.45;
   color: var(--text-secondary);
 }
@@ -312,7 +312,7 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--type-caption);
   line-height: 1.45;
 }
 
@@ -346,7 +346,7 @@
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 16px;
+  font-size: var(--type-subtitle);
   line-height: 1;
   padding: 4px 6px;
   margin: -4px -6px -4px 0;
@@ -396,7 +396,7 @@
 
 .pe-progress__remaining {
   font-family: var(--font-mono);
-  font-size: 80px;
+  font-size: var(--type-metric);
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-primary);
@@ -414,7 +414,7 @@
 
 .pe-progress__clock-label {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--type-kicker);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -422,7 +422,7 @@
 
 .pe-progress__clock-cap {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--type-caption);
   color: var(--text-dim);
 }
 
@@ -452,7 +452,7 @@
 }
 
 .pe-progress__kicker {
-  font-size: 10px;
+  font-size: var(--type-kicker);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent);
@@ -460,7 +460,7 @@
 }
 
 .pe-progress__title {
-  font-size: 16px;
+  font-size: var(--type-subtitle);
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -474,7 +474,7 @@
 }
 
 .pe-progress__metric-label {
-  font-size: 10px;
+  font-size: var(--type-kicker);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -483,7 +483,7 @@
 .pe-progress__metric-value {
   margin-top: 4px;
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--type-subtitle);
   color: var(--text-primary);
 }
 
@@ -492,7 +492,7 @@
 }
 
 .pe-progress__plot-label {
-  font-size: 10px;
+  font-size: var(--type-kicker);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -501,7 +501,7 @@
 
 .pe-progress__plot {
   width: 100%;
-  height: 200px;
+  height: var(--chart-height-secondary);
   display: block;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -512,7 +512,7 @@
   display: flex;
   gap: 16px;
   padding: 6px 18px 18px;
-  font-size: 11px;
+  font-size: var(--type-kicker);
   color: var(--text-secondary);
 }
 
@@ -535,7 +535,7 @@
 .pe-progress__timeout {
   margin: 0;
   padding: 12px 18px 16px;
-  font-size: 13px;
+  font-size: var(--type-ui);
   color: var(--alarm);
   border-top: 1px solid var(--border);
   line-height: 1.4;
