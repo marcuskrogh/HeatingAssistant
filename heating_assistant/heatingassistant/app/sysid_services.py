@@ -416,7 +416,19 @@ def pe_job_snapshot(runtime: Any) -> dict[str, Any]:
     """Return a copy of the current parameter-estimation job status."""
 
     def _copy() -> dict[str, Any]:
-        return dict(getattr(runtime, "_pe_job", None) or {"status": "idle"})
+        job = dict(getattr(runtime, "_pe_job", None) or {"status": "idle"})
+        hist = job.get("f_hist")
+        if isinstance(hist, list):
+            job["f_hist"] = [
+                dict(point) if isinstance(point, dict) else point for point in hist
+            ]
+        cap = float(job.get("cap_s") or 0.0)
+        started = float(job.get("started_at") or 0.0)
+        if job.get("status") == "running" and cap > 0.0 and started > 0.0:
+            elapsed = max(0.0, time.time() - started)
+            job["elapsed_s"] = elapsed
+            job["remaining_s"] = max(0.0, cap - elapsed)
+        return job
 
     lock = getattr(runtime, "_pe_lock", None)
     if lock is None:
@@ -447,17 +459,18 @@ def _run_pe_worker(work: _PeJobWork) -> None:
         message = result.get("message")
         if not success:
             message = message or "Estimation failed"
-        _write_pe_job(
-            runtime,
-            lock,
+        with lock:
+            job = dict(getattr(runtime, "_pe_job", None) or {})
+        job.update(
             {
                 "status": "success" if success else "error",
                 "started_at": started_at,
                 "finished_at": time.time(),
                 "success": success,
                 "message": message,
-            },
+            }
         )
+        _write_pe_job(runtime, lock, job)
     except Exception as exc:  # noqa: BLE001 - surface any worker failure on the job
         _LOGGER.exception("Parameter estimation job failed")
         _write_pe_job(
@@ -492,9 +505,22 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
                 "started_at": current.get("started_at"),
             }
         started_at = time.time()
+        cap_s = float(
+            (getattr(runtime, "options", {}) or {}).get(
+                const.CONF_PE_MAX_COMPUTE_S, const.DEFAULT_PE_MAX_COMPUTE_S
+            )
+            or const.DEFAULT_PE_MAX_COMPUTE_S
+        )
         runtime._pe_job = {
             "status": "running",
             "started_at": started_at,
+            "cap_s": cap_s,
+            "elapsed_s": 0.0,
+            "remaining_s": cap_s,
+            "phase": "tiled_oe",
+            "nfev": 0,
+            "f": None,
+            "f_hist": [],
             "success": None,
             "message": None,
         }
@@ -517,6 +543,24 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
     horizon_hours = values.get("horizon_hours")
     horizon = float(horizon_hours) if horizon_hours is not None else None
     dataset_ids = _dataset_id_list(values.get("dataset_ids"))
+
+    last_pub = [0.0]
+
+    def on_progress(snap: Mapping[str, Any]) -> None:
+        now = time.monotonic()
+        if now - last_pub[0] < 0.2:
+            return
+        last_pub[0] = now
+        lock = getattr(runtime, "_pe_lock", None)
+        if lock is None:
+            return
+        with lock:
+            job = dict(getattr(runtime, "_pe_job", None) or {})
+            if job.get("status") != "running":
+                return
+            job.update(dict(snap))
+            job["status"] = "running"
+            runtime._pe_job = job
 
     history = await resolve_history(
         runtime,
@@ -544,6 +588,7 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
         dataset_ids=dataset_ids,
         window_start=values.get("window_start"),
         window_end=values.get("window_end"),
+        on_progress=on_progress,
     )
     if result.get("success"):
         _merge_ml_result(runtime, result, horizon)

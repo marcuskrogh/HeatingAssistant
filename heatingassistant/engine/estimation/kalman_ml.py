@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -167,6 +167,7 @@ class KalmanMLEstimator:
         origin_stride: Optional[int] = None,
         max_compute_s: float = 0.0,
         use_nstep_pem: bool = True,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         self._rooms = rooms
         self._sources = sources
@@ -187,6 +188,9 @@ class KalmanMLEstimator:
         self._origin_stride = int(origin_stride) if origin_stride else self._n_horizon_steps
         self._max_compute_s = float(max_compute_s)
         self._use_nstep_pem = bool(use_nstep_pem)
+        self._on_progress = on_progress
+        self._pe_nfev = 0
+        self._pe_f_hist: List[Dict[str, Any]] = []
         self._pe_deadline_mono: Optional[float] = None
         self._pe_t0_mono: Optional[float] = None
 
@@ -666,6 +670,8 @@ class KalmanMLEstimator:
             dataset_start_timestamps,
         )
         self._pe_t0_mono = time.monotonic()
+        self._pe_nfev = 0
+        self._pe_f_hist = []
         cap = max(0.0, float(self._max_compute_s))
         self._pe_deadline_mono = (
             None if cap <= 0.0 else self._pe_t0_mono + cap
@@ -1234,6 +1240,36 @@ class KalmanMLEstimator:
             origin_stride=self._origin_stride,
             dataset_start_ts=starts,
         )
+
+    def _record_pe_progress(self, f: float) -> None:
+        """Publish one unique NLP evaluation to an optional progress callback."""
+        self._pe_nfev += 1
+        cap = max(0.0, float(self._max_compute_s))
+        t0 = self._pe_t0_mono
+        elapsed = (time.monotonic() - t0) if t0 is not None else 0.0
+        remaining = max(0.0, cap - elapsed) if cap > 0.0 else 0.0
+        phase = "nstep_pem" if self._use_nstep_pem else "tiled_oe"
+        point = {"nfev": int(self._pe_nfev), "f": float(f)}
+        self._pe_f_hist.append(point)
+        if len(self._pe_f_hist) > 400:
+            self._pe_f_hist = self._pe_f_hist[-400:]
+        callback = self._on_progress
+        if callback is None:
+            return
+        try:
+            callback(
+                {
+                    "f": float(f),
+                    "nfev": int(self._pe_nfev),
+                    "phase": phase,
+                    "f_hist": list(self._pe_f_hist),
+                    "elapsed_s": float(elapsed),
+                    "cap_s": float(cap),
+                    "remaining_s": float(remaining),
+                }
+            )
+        except Exception:
+            _LOGGER.debug("PE progress callback failed", exc_info=True)
 
     def _nstep_pem_and_grad(
         self,
