@@ -67,7 +67,7 @@ visual (popup) and measure (window-runtime bench)
 |---|--------|-------------|---------|
 | 1 | Identification overlay: central 5 min countdown, J, relative-step plot vs ftol | sandbox/pe-progress/inspect/01_*.png | delta: plot J toward 0; larger clock; hide jargon |
 | 2 | Plot J (linear) with dashed target at 0; 80px countdown first; timeout still; no ftol footer | sandbox/pe-progress/inspect/02_*.png | delta: approximate eval runtime vs window size |
-| 3 | Bench N-step vs tiled-OE seconds/eval for 6 h–5 d; implied nfev in 1 min / 5 min caps | sandbox/pe-progress/inspect/03_window_runtime.* | waiting operator |
+| 3 | Bench N-step vs tiled-OE seconds/eval for 6 h–5 d; implied nfev in 1 min / 5 min caps | sandbox/pe-progress/inspect/03_window_runtime.* | accept: promote popup; bench stays isolation-only |
 
 ## Role in pipeline
 Post-merge inspect-loop instead of `/iterate` after SWD-481. Promotion
@@ -78,7 +78,7 @@ input for `/implement`. Supportive isolation — not production source.
 - Relates: [SWD-481](https://marcusknielsen.atlassian.net/browse/SWD-481)
 - Artifact: `docs/agents/SANDBOX-pe-progress.md`
 - Branch: `cursor/swd-486-pe-progress-popup-dfe4`
-- PR: — (sandbox never opens a PR)
+- PR: delivery PR (opened at implement)
 
 ## Next
-`/sandbox SWD-486` — name a delta, or accept and `/implement SWD-486`
+`/test SWD-486` — then restructure, review, closeout

@@ -22,6 +22,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
+import { renderPeProgress } from './pe-progress.js?v=152';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -31,6 +32,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   }
 
   container.innerHTML = '';
+  container.classList.add('sysid-detail-host');
 
   // Back navigation
   const nav = document.createElement('button');
@@ -178,6 +180,36 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
   const actionStatusEl = container.querySelector('#action-status');
+  const peOverlay = document.createElement('div');
+  peOverlay.className = 'pe-progress-overlay';
+  peOverlay.hidden = true;
+  container.appendChild(peOverlay);
+  let peOverlayJob = null;
+  let peOverlayTimer = null;
+
+  function paintPeOverlay(job) {
+    peOverlayJob = job;
+    peOverlay.hidden = false;
+    renderPeProgress(peOverlay, job);
+  }
+
+  function hidePeOverlay() {
+    if (peOverlayTimer != null) {
+      window.clearInterval(peOverlayTimer);
+      peOverlayTimer = null;
+    }
+    peOverlayJob = null;
+    peOverlay.hidden = true;
+    peOverlay.innerHTML = '';
+  }
+
+  function startPeOverlay(job) {
+    paintPeOverlay(job || { status: 'running' });
+    if (peOverlayTimer != null) window.clearInterval(peOverlayTimer);
+    peOverlayTimer = window.setInterval(() => {
+      if (peOverlayJob) renderPeProgress(peOverlay, peOverlayJob);
+    }, 250);
+  }
   const ekfStatusEl = container.querySelector('#ekf-status');
   const olStatusEl = container.querySelector('#ol-status');
 
@@ -1124,21 +1156,29 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // recommended estimation". Returns true on success.
   async function waitForPeJob() {
     const deadline = Date.now() + 30 * 60 * 1000;
-    while (Date.now() < deadline) {
-      if (!connection || typeof connection.getPeJob !== 'function') {
-        throw new Error('Parameter estimation status is unavailable.');
-      }
-      const job = await connection.getPeJob();
-      if (job != null) {
-        const status = job.status || 'idle';
-        if (status === 'success') return job;
-        if (status === 'error') {
-          throw new Error(job.message || 'Estimation failed');
+    startPeOverlay({ status: 'running' });
+    try {
+      while (Date.now() < deadline) {
+        if (!connection || typeof connection.getPeJob !== 'function') {
+          throw new Error('Parameter estimation status is unavailable.');
         }
+        const job = await connection.getPeJob();
+        if (job != null) {
+          paintPeOverlay(job);
+          const status = job.status || 'idle';
+          if (status === 'success') return job;
+          if (status === 'error') {
+            paintPeOverlay({ ...job, remaining_s: 0 });
+            await new Promise((res) => setTimeout(res, 1200));
+            throw new Error(job.message || 'Estimation failed');
+          }
+        }
+        await new Promise((res) => setTimeout(res, 1000));
       }
-      await new Promise((res) => setTimeout(res, 1000));
+      throw new Error('Parameter estimation timed out');
+    } finally {
+      hidePeOverlay();
     }
-    throw new Error('Parameter estimation timed out');
   }
 
   async function runAutoIdentification(idData, statusEl) {
@@ -1350,6 +1390,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       olInputsChart.destroy();
       olDisturbChart.destroy();
       if (refreshHandles && refreshHandles.destroy) refreshHandles.destroy();
+      hidePeOverlay();
     },
   };
 }
