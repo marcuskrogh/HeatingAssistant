@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-497 | Task | [Sandbox] PE popup KPIs, log plot, and Jacobian check | In Progress | — | docs/agents/SANDBOX-pe-progress.md | `/test SWD-497` — dedicated testing after promote |
+| SWD-497 | Task | [Sandbox] PE popup KPIs, log plot, and Jacobian check | In Review | — | docs/agents/SANDBOX-pe-progress.md | `/ship SWD-497` — closeout after CLEAN review on PR 663 |
 | SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |
 | SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
