@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-486 | Task | [Sandbox] Live PE optimisation progress popup | In Review | — | docs/agents/SANDBOX-pe-progress.md | `/ship SWD-486` closeout |
+| SWD-486 | Task | [Sandbox] Live PE optimisation progress popup | Done | — | docs/agents/SANDBOX-pe-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/661 (`c8068a3`) |
 | SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | Done | — | docs/agents/ITERATE-solar-gain-filt-persist.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659 |
 | SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-489 | Sub-task | Tests, THEORY, CalVer, changelog, App sync | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
@@ -212,6 +212,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/ship` SWD-486: merged #661 as `c8068a3`. Task Done. Changelog `# 2026.09.7`.
 - 2026-09-06 — `/ship` SWD-486 review CLEAN (focused sequential, COMMENT) on PR #661. Next closeout merge (CalVer 2026.09.7 after main 2026.09.6).
 - 2026-09-06 — `/ship` SWD-486 remaining: implement promote of PE progress popup. Next test → restructure → review → closeout.
 - 2026-09-05 — `/sandbox` SWD-486 iteration 3: N-step eval time vs window (6 h–5 d) on production PEM. Next operator verdict.
