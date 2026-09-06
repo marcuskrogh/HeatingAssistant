@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | In Progress | — | docs/agents/PLAN-app-ui-consistency.md | `/test SWD-498` |
+| SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | In Review | — | docs/agents/PLAN-app-ui-consistency.md | `/ship SWD-498` |
 | SWD-499 | Sub-task | Design tokens + App UI styleguide | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
 | SWD-500 | Sub-task | Unify fonts and shared chrome across pages | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
 | SWD-501 | Sub-task | Unify plot sizes and Chart.js / PE canvas styling | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |

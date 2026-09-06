@@ -110,4 +110,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/test SWD-498` — Spec-lock tests passed; remaining is review of desktop/390px artifacts
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664
