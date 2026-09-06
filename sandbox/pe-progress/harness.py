@@ -66,6 +66,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", default="01")
     parser.add_argument("--serve-only", action="store_true")
+    parser.add_argument(
+        "--height", type=int, default=980,
+        help="Chrome window height for stills",
+    )
     args = parser.parse_args()
     httpd, origin = _serve()
     print(f"sandbox: {origin}")
@@ -85,7 +89,7 @@ def main() -> None:
             ("timeout", f"{args.tag}_timeout.png"),
         ):
             dest = INSPECT / name
-            _screenshot(f"{origin}/?mode={mode}", dest)
+            _screenshot(f"{origin}/?mode={mode}", dest, height=args.height)
             print(f"wrote {dest}")
     finally:
         httpd.shutdown()
