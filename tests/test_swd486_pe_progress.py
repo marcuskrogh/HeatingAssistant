@@ -47,6 +47,28 @@ def test_nstep_estimate_publishes_progress_callback() -> None:
     assert all("f" in item for item in snaps)
 
 
+def test_progress_callback_failure_does_not_fail_estimate() -> None:
+    room = make_single_room()
+    sources = make_electric_heaters([room])
+    history = generate_history([room], sources, n_steps=80, dt=60.0)
+
+    def boom(_snap):
+        raise RuntimeError("progress sink down")
+
+    est = make_kalman_ml_estimator(
+        [room],
+        sources,
+        dt=60.0,
+        n_horizon_steps=8,
+        origin_stride=4,
+        max_compute_s=30.0,
+        use_nstep_pem=True,
+        on_progress=boom,
+    )
+    result = est.estimate(history)
+    assert result["success"] is True
+
+
 def test_pe_job_start_includes_compute_cap(tmp_path, monkeypatch) -> None:
     runtime = _runtime(tmp_path)
     runtime.options["pe_max_compute_s"] = 300.0
