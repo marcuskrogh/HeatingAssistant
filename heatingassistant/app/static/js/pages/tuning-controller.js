@@ -3,8 +3,8 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=156';
-import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=156';
+} from '../components/time-series-chart.js?v=157';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import {
   buildTemperatureChart,
   buildPowerChart,

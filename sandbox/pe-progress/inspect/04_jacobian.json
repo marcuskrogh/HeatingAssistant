@@ -1,0 +1,153 @@
+{
+  "host": "cursor",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "dt_s": 900.0,
+  "n_steps": 32,
+  "n_horizon": 8,
+  "origin_stride": 4,
+  "bar_dfdx": 0.0005,
+  "bar_theta": 0.05,
+  "dfdx": {
+    "max_rel_err": 9.669078088476936e-12,
+    "within_bar": true,
+    "bar": 0.0005,
+    "shape": [
+      2,
+      2
+    ]
+  },
+  "tiled_oe": {
+    "kind": "tiled_oe",
+    "mse_analytic": 97.40694894321037,
+    "mse_fd_center": 97.40694894321037,
+    "ntheta": 7,
+    "max_rel_err": 7.882732446526173e-08,
+    "within_bar": true,
+    "bar": 0.05,
+    "params": [
+      {
+        "name": "log_mass[0]",
+        "theta": 15.89495209964411,
+        "analytic": -16.47978718784961,
+        "fd": -16.47978716540809,
+        "rel_err": 1.3617602344999147e-09
+      },
+      {
+        "name": "log_r[0]",
+        "theta": -3.6888794541139363,
+        "analytic": 221.92788129212065,
+        "fd": 221.92788161016458,
+        "rel_err": 1.4330958707827082e-09
+      },
+      {
+        "name": "q_int[0]",
+        "theta": 0.0,
+        "analytic": 0.2949914003566981,
+        "fd": 0.29499137710331524,
+        "rel_err": 7.882732446526173e-08
+      },
+      {
+        "name": "t_wall[0]",
+        "theta": 20.0,
+        "analytic": 5.002032745064695,
+        "fd": 5.002032745053953,
+        "rel_err": 2.147630480202719e-12
+      },
+      {
+        "name": "log_alpha[0]",
+        "theta": 0.0,
+        "analytic": 238.40766847997065,
+        "fd": 238.40766847342817,
+        "rel_err": 2.7442399821390994e-11
+      },
+      {
+        "name": "c_air[0]",
+        "theta": 0.05,
+        "analytic": -335.63369886179123,
+        "fd": -335.63371288067856,
+        "rel_err": 4.176841237763903e-08
+      },
+      {
+        "name": "r_aw[0]",
+        "theta": 0.05,
+        "analytic": 845.8177733444777,
+        "fd": 845.817729840803,
+        "rel_err": 5.143386201811857e-08
+      }
+    ],
+    "R_var": 0.25
+  },
+  "nstep": {
+    "kind": "nstep",
+    "mse_analytic": 6.185810140650266,
+    "mse_fd_center": 6.185810140650266,
+    "ntheta": 7,
+    "max_rel_err": 0.002420931322303633,
+    "within_bar": true,
+    "bar": 0.05,
+    "params": [
+      {
+        "name": "log_mass[0]",
+        "theta": 15.89495209964411,
+        "analytic": -38.69165907106022,
+        "fd": -38.785556239012216,
+        "rel_err": 0.002420931322303633
+      },
+      {
+        "name": "log_r[0]",
+        "theta": -3.6888794541139363,
+        "analytic": 49.02241676370481,
+        "fd": 48.928518975682955,
+        "rel_err": 0.0019154051191408391
+      },
+      {
+        "name": "q_int[0]",
+        "theta": 0.0,
+        "analytic": -0.0019140715985506247,
+        "fd": -0.0019140732998579322,
+        "rel_err": 8.888412515948477e-07
+      },
+      {
+        "name": "t_wall[0]",
+        "theta": 20.0,
+        "analytic": 1.373008355475616,
+        "fd": 1.3730083553675776,
+        "rel_err": 7.86874068396387e-11
+      },
+      {
+        "name": "log_alpha[0]",
+        "theta": 0.0,
+        "analytic": 87.71407583476503,
+        "fd": 87.71407591612322,
+        "rel_err": 9.27538641866094e-10
+      },
+      {
+        "name": "c_air[0]",
+        "theta": 0.05,
+        "analytic": -843.7731823478869,
+        "fd": -845.666110440213,
+        "rel_err": 0.002238387076124785
+      },
+      {
+        "name": "r_aw[0]",
+        "theta": 0.05,
+        "analytic": 1003.4273017332804,
+        "fd": 1001.5766642751611,
+        "rel_err": 0.0018443164292247093
+      }
+    ],
+    "R_var": 0.25
+  },
+  "lbfgs": {
+    "nfev": 32,
+    "f_min": 0.4988531468138491,
+    "f_max": 1441.5032079940675,
+    "f_ratio": 2889.634388799346,
+    "phases": [
+      "nstep_pem",
+      "tiled_oe"
+    ]
+  },
+  "note": "End-to-end \u03b8-gradient vs central differences at the prior. L-BFGS trace uses the production RegularizedMseCache recorder (tiled OE warm-start, then N-step) so J jumps across the phase change are the same class as the live popup."
+}

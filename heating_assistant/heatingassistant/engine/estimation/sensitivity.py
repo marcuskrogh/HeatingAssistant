@@ -546,6 +546,7 @@ def _simulation_mse_and_grad(
     grad = total_grad / scale
     if not (np.isfinite(mse) and np.all(np.isfinite(grad))):
         return _SENTINEL, _zero_grad.copy()
+    est._pe_n_obs = int(n_steps_used)
     return mse, grad
 
 

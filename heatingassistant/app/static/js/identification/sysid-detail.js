@@ -1,5 +1,5 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=156';
-import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=156';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=157';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=124';
 import { createCollapsible } from '../components/collapsible.js?v=124';
 import { formatNumber, modelFitLabel } from '../utils.js?v=124';
@@ -23,7 +23,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=156';
+import { renderPeProgress } from './pe-progress.js?v=157';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -184,13 +184,34 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const peOverlay = document.createElement('div');
   peOverlay.className = 'pe-progress-overlay';
   peOverlay.hidden = true;
-  container.appendChild(peOverlay);
+  // Sit on the shadow root, as a sibling of .shell. On mobile .shell is the
+  // scroll container; an overlay inside the Identification page would live at
+  // the top of that long page, off screen from the Estimate button.
+  const overlayRoot = container.getRootNode();
+  const overlayHost = overlayRoot instanceof ShadowRoot
+    ? overlayRoot
+    : document.body;
+  overlayHost.appendChild(peOverlay);
   let peOverlayJob = null;
   let peOverlayTimer = null;
+
+  function peShell() {
+    if (!(overlayRoot instanceof ShadowRoot)) return null;
+    return overlayRoot.querySelector('.shell');
+  }
+
+  function lockPeBackground(on) {
+    const shell = peShell();
+    if (!shell) return;
+    if (on) shell.style.overflowY = 'hidden';
+    else shell.style.overflowY = '';
+  }
 
   function paintPeOverlay(job) {
     peOverlayJob = job;
     peOverlay.hidden = false;
+    lockPeBackground(true);
+    peOverlay.scrollTop = 0;
     renderPeProgress(peOverlay, job);
   }
 
@@ -202,6 +223,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     peOverlayJob = null;
     peOverlay.hidden = true;
     peOverlay.innerHTML = '';
+    lockPeBackground(false);
   }
 
   function startPeOverlay(job) {
@@ -1392,6 +1414,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       olDisturbChart.destroy();
       if (refreshHandles && refreshHandles.destroy) refreshHandles.destroy();
       hidePeOverlay();
+      peOverlay.remove();
     },
   };
 }

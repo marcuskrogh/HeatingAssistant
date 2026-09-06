@@ -1,66 +1,67 @@
 # Sandbox: PE live optimisation popup
 
 ## Element
-Popup on Identification while a background PE job runs: central countdown of
-remaining compute time, live fit-error (J) plot toward zero with a target
-line at 0. Plus a scale bench of N-step `J+grad` wall time vs window length.
+Popup on Identification while a background PE job runs: RMS error (°C) and
+evaluation count as the central KPIs, log-scale **normalised RMS**
+η = RMSE / σ_R against a reachable tolerance η ≤ 2 (1 °C). Time remaining
+visible but secondary. Jacobian check from iteration 4 still stands.
 
 ## Kind
-visual (popup) and measure (window-runtime bench)
+visual (popup) and measure (η on production J traces)
 
 ## Isolation
 - Path: `sandbox/pe-progress/`
-- Command: `python3 sandbox/pe-progress/harness.py --tag 02`
+- Command: `python3 sandbox/pe-progress/harness.py --tag 05`
 - Live: `python3 sandbox/pe-progress/harness.py --serve-only` then `/?live=1`
-- Bench: `python3 sandbox/pe-progress/bench_window.py`
+- Bench: `PYTHONPATH=. python3 sandbox/pe-progress/bench_proxy.py`
 - Inspectables: `sandbox/pe-progress/inspect/`
 
 ## Representativeness
 - Relevant areas:
-  - **Runtime** — Identification detail (`sysid-detail.js`) while
-    `pe_job.status === running`; industrial theme tokens from
-    `industrial.css` in a shadow host. Bench uses production
-    `nstep_pem_and_grad` / tiled OE `_simulation_mse_and_grad` on this
-    cloud VM (not HAOS).
-  - **Data** — popup: `pe_job`-shaped snapshot, `cap_s` 300. Bench:
-    one-room excited history at live NMPC grid (`dt=900 s`, `N=144`,
-    stride 8). Windows 6 h … 5 d (480 steps = `HISTORY_BUFFER_SIZE` /
-    15 min ticks).
+  - **Runtime** — Identification detail while `pe_job.status === running`;
+    industrial theme tokens from `industrial.css` in a shadow host.
+    Proxy bench uses production `nstep_pem_and_grad` /
+    `_simulation_mse_and_grad` J plus the same n_obs counting as those
+    loops.
+  - **Data** — popup: `pe_job`-shaped snapshot with `eta`, `n_obs`,
+    `eta_tol`, `r_var`. Replay η series with line-search spikes.
+    Bench: 32-step one-room excited history at live NMPC grid, plus a
+    5-day n_obs map of the operator's J≈54608 still.
   - **Neighbours** — dimmed Identification stub for the popup.
-  - **Path** — production receding N-step PEM + tiled OE warm-start
-    objective; JSONL history is one record per coordinator tick
-    (typically 15 min), same step count as the bench.
-  - **Baseline** — shipped wait is status text only. Bench baseline is
-    tiled OE eval time on the same windows.
-- How reproduced: harness maps `/ha-industrial-panel/` to production static
-  CSS; bench imports production estimator modules; fixture/history generators
-  live only in the sandbox tree.
+  - **Path** — production summed SSE/(n R_var); n_obs is residual-step
+    count (tiled OE windows vs receding N-step horizons).
+  - **Baseline** — iteration 4 plotted raw J vs SciPy ftol=1e-12 (not a
+    fit-quality line). Jacobian FD bar from iteration 4.
+- How reproduced: harness maps `/ha-industrial-panel/` to production
+  static CSS; `proxy.py` / `proxy.js` share η = sqrt(J / n_obs);
+  fixture lives only in the sandbox tree.
 - Gaps:
-  - **Real SciPy callback stream** — named. Popup fixture replays J.
-  - **Live Ingress poll / 5-day wall time** — named. Replay is sped up.
-  - **ftol vs J=0** — SciPy stops on relative change in J, not J=0.
-  - **HAOS / Pi wall time** — named. This host is faster; order of
-    magnitude vs window still holds.
-  - **Multi-room / multi-dataset** — named. Bench is one room, one segment.
-    Extra rooms grow EKF `P` Jacobians.
-  - These gaps do not move the visual popup verdict. They do mean the
-    seconds/eval numbers are a lower bound vs a loaded household on a Pi.
+  - **Regularisation in recorded J** — named. Promote η uses data MSE,
+    not MSE+regularisation.
+  - **Viewport on phone** — overlay must sit on the shadow root as a
+    sibling of `.shell` (`position: fixed`); otherwise Estimate is
+    below the overlay and the operator has to scroll up.
+  - **Live Ingress poll / HAOS / multi-room** — named as before.
+  - These gaps do not move the visual η/tolerance verdict.
 
 ## Bar
-- Measure: order-of-magnitude seconds per N-step `J+grad` vs window hours
-  on this host; implied L-BFGS evaluations inside 60 s and 300 s caps.
-- Scenario: production NMPC grid, one-room excited history, windows above.
+- Measure: after a short L-BFGS on the 32-step bench, last N-step η ≤ 2.
+  Operator screenshot J mapped with 5-day n_obs is reported (no pass/fail).
+- Scenario: production NMPC grid, one-room excited history.
 
 ## Promote map
 - Production targets:
-  - `heatingassistant/app/static/js/identification/` overlay + poll
-  - `heatingassistant/app/sysid_services.py` / `kalman_ml.py` /
-    `nlp_eval.py` — publish progress on `pe_job`
-  - CSS with other Identification / modal rules
-- Copy notes: do not ship `index.html`, fixture replay, or the timing
-  bench unless a later product ask wants scale copy in the popup. Wire
-  real `pe_job` fields. Keep timeout: do not apply θ when the cap hits.
-  User-facing copy stays plain (fit error, time remaining).
+  - `heatingassistant/app/static/js/identification/pe-progress.js` + CSS
+  - `kalman_ml._record_pe_progress` / `RegularizedMseCache`: publish
+    `n_obs` (residual steps for that eval's objective), `r_var`,
+    `eta = sqrt(data_mse / n_obs)`, `eta_tol` (default 2)
+  - `nstep_pem_and_grad` / `_simulation_mse_and_grad` already count
+    `n_steps_used` internally — set `est._pe_n_obs`
+- Copy notes: keep timeout: do not apply θ when the cap hits. Plot η,
+  not raw J and not SciPy ftol. η_tol = 2 ⇔ RMS ≤ 1 °C at R_var=0.25.
+  Overlay on the shadow root (`position: fixed`), not inside the page
+  scroller; dialog `overflow-y: auto`. Keep `liveClock`. Do not ship
+  fixture replay or benches.
 
 ## Iterations
 | N | Change | Inspectable | Verdict |
@@ -68,17 +69,19 @@ visual (popup) and measure (window-runtime bench)
 | 1 | Identification overlay: central 5 min countdown, J, relative-step plot vs ftol | sandbox/pe-progress/inspect/01_*.png | delta: plot J toward 0; larger clock; hide jargon |
 | 2 | Plot J (linear) with dashed target at 0; 80px countdown first; timeout still; no ftol footer | sandbox/pe-progress/inspect/02_*.png | delta: approximate eval runtime vs window size |
 | 3 | Bench N-step vs tiled-OE seconds/eval for 6 h–5 d; implied nfev in 1 min / 5 min caps | sandbox/pe-progress/inspect/03_window_runtime.* | accept: promote popup; bench stays isolation-only |
+| 4 | Hero KPIs = fit error + evaluations; time in a thin footer; log J vs ftol; FD Jacobian check | sandbox/pe-progress/inspect/04_*.png / 04_jacobian.md | delta: reachable normalised proxy + realistic tol |
+| 5 | η = RMSE/σ_R; plot vs η_tol=2 (1 °C); KPI is RMS °C | sandbox/pe-progress/inspect/05_*.png / 05_proxy.md | accept |
 
 ## Role in pipeline
-Post-merge inspect-loop instead of `/iterate` after SWD-481. Promotion
+Post-merge inspect-loop instead of `/iterate` after SWD-486. Promotion
 input for `/implement`. Supportive isolation — not production source.
 
 ## Tracker
-- Task: [SWD-486](https://marcusknielsen.atlassian.net/browse/SWD-486)
-- Relates: [SWD-481](https://marcusknielsen.atlassian.net/browse/SWD-481)
+- Task: [SWD-497](https://marcusknielsen.atlassian.net/browse/SWD-497)
+- Relates: [SWD-486](https://marcusknielsen.atlassian.net/browse/SWD-486)
 - Artifact: `docs/agents/SANDBOX-pe-progress.md`
-- Branch: `cursor/swd-486-pe-progress-popup-dfe4`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/661
+- Branch: `cursor/swd-497-pe-popup-log-e770`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/663
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/661 (`c8068a3`)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/663 (`74934ce`)

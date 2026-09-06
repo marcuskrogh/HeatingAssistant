@@ -364,14 +364,17 @@
 }
 
 .pe-progress-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 1000;
   background: rgba(0, 0, 0, 0.62);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px 16px;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .pe-progress-overlay[hidden] {
@@ -380,74 +383,20 @@
 
 .pe-progress {
   width: min(720px, 100%);
+  margin: auto 0;
+  max-height: calc(100dvh - 32px);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-
-.pe-progress__clock {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 28px 18px 10px;
-}
-
-.pe-progress__remaining {
-  font-family: var(--font-mono);
-  font-size: var(--type-metric);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-primary);
-  line-height: 0.95;
-  font-variant-numeric: tabular-nums;
-}
-
-.pe-progress__remaining--warn {
-  color: var(--warning);
-}
-
-.pe-progress__remaining--last {
-  color: var(--alarm);
-}
-
-.pe-progress__clock-label {
-  margin-top: 10px;
-  font-size: var(--type-kicker);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.pe-progress__clock-cap {
-  margin-top: 4px;
-  font-size: var(--type-caption);
-  color: var(--text-dim);
-}
-
-.pe-progress__bar {
-  width: min(460px, 88%);
-  height: 8px;
-  margin: 16px 0 0;
-  background: var(--bg-elevated);
-  border-radius: 99px;
-  overflow: hidden;
-}
-
-.pe-progress__bar-fill {
-  height: 100%;
-  background: var(--accent);
-  width: 0%;
-  transition: width 200ms linear;
-}
-
-.pe-progress__bar-fill--done {
-  background: var(--alarm);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .pe-progress__head {
-  padding: 4px 18px 8px;
+  padding: 16px 18px 4px;
   text-align: center;
 }
 
@@ -468,9 +417,9 @@
 
 .pe-progress__metrics {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
-  padding: 10px 18px 4px;
+  padding: 14px 18px 4px;
 }
 
 .pe-progress__metric-label {
@@ -487,6 +436,24 @@
   color: var(--text-primary);
 }
 
+.pe-progress__metric-value--lead {
+  font-size: var(--type-hero);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.pe-progress__metric-value--ok {
+  color: var(--accent);
+}
+
+.pe-progress__metric-sub {
+  margin-top: 4px;
+  font-size: var(--type-kicker);
+  color: var(--text-dim);
+}
+
 .pe-progress__plot-wrap {
   padding: 8px 18px 6px;
 }
@@ -500,7 +467,7 @@
 }
 
 .pe-progress__plot-frame {
-  height: var(--chart-height-secondary);
+  height: var(--chart-height-primary);
 }
 
 .pe-progress__plot {
@@ -514,8 +481,9 @@
 
 .pe-progress__legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
-  padding: 6px 18px 18px;
+  padding: 6px 18px 10px;
   font-size: var(--type-kicker);
   color: var(--text-secondary);
 }
@@ -534,6 +502,57 @@
   background: var(--warning);
   height: 0;
   border-top: 2px dashed var(--warning);
+}
+
+.pe-progress__time {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 18px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pe-progress__time-remain {
+  font-family: var(--font-mono);
+  font-size: var(--type-kicker);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-progress__time-remain--warn {
+  color: var(--warning);
+}
+
+.pe-progress__time-remain--last {
+  color: var(--alarm);
+}
+
+.pe-progress__time-meta {
+  font-size: var(--type-kicker);
+  color: var(--text-dim);
+}
+
+.pe-progress__bar {
+  width: 100%;
+  height: 4px;
+  margin-top: 6px;
+  background: var(--bg-elevated);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.pe-progress__bar-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 200ms linear;
+}
+
+.pe-progress__bar-fill--done {
+  background: var(--alarm);
 }
 
 .pe-progress__timeout {
@@ -555,10 +574,6 @@
 
   .pe-progress {
     width: 100%;
-  }
-
-  .pe-progress__clock {
-    padding: 18px 12px 8px;
   }
 
   .pe-progress__head,

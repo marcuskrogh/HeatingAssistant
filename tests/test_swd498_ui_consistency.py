@@ -84,12 +84,12 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     ).read_text(encoding="utf-8")
     ident = (CSS_ROOT / "pages" / "identification.css").read_text(encoding="utf-8")
     theme = (STATIC / "js" / "components" / "chart-theme.js").read_text(encoding="utf-8")
-    assert "from '../components/chart-theme.js?v=156'" in progress
+    assert "from '../components/chart-theme.js?v=157'" in progress
     assert "sizePlotCanvas(canvas)" in progress
     assert "CHART_LINE_WIDTH" in progress
     assert "CHART_DASH_PATTERN" in progress
     assert "CHART_TICK_SIZE" in progress
-    assert "height: var(--chart-height-secondary)" in ident
+    assert "height: var(--chart-height-primary)" in ident
     assert ".pe-progress__plot-frame" in ident
     assert "@media (max-width: 768px)" in ident
     assert "align-items: flex-start" in ident
@@ -100,7 +100,7 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     assert "CHART_HEIGHT_PRIMARY = 240" in theme
     assert "CHART_HEIGHT_SECONDARY = 200" in theme
     assert "font-size: 80px" not in ident
-    assert "font-size: var(--type-metric)" in ident
+    assert "font-size: var(--type-hero)" in ident
 
 
 def test_room_chart_js_defaults_are_unchanged_from_the_guide() -> None:
@@ -108,7 +108,7 @@ def test_room_chart_js_defaults_are_unchanged_from_the_guide() -> None:
         encoding="utf-8"
     )
     room = (STATIC / "js" / "charts" / "room-charts.js").read_text(encoding="utf-8")
-    assert "from './chart-theme.js?v=156'" in chart
+    assert "from './chart-theme.js?v=157'" in chart
     assert "elements: {\n    line: { borderWidth:" not in chart
     assert "CHART_LINE_WIDTH" not in chart
     assert 'font: { size: 10, family: "system-ui, sans-serif" }' in chart
@@ -139,5 +139,5 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
     assert '__version__ = "2026.09.10"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=156" in index
-    assert "return '156'" in dashboard
+    assert "industrial-dashboard.js?v=157" in index
+    assert "return '157'" in dashboard

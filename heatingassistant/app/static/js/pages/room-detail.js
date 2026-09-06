@@ -1,5 +1,5 @@
-import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=156';
-import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=156';
+import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=157';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
 import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=153';

@@ -70,8 +70,8 @@ def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=156" in index
-        assert "return '156'" in dashboard
+        assert "industrial-dashboard.js?v=157" in index
+        assert "return '157'" in dashboard
 
 
 def test_load_catalog_harness() -> None:

@@ -1,0 +1,39 @@
+{
+  "r_var": 0.25,
+  "sigma_c": 0.5,
+  "eta_tol": 2.0,
+  "eta_noise": 1.0,
+  "n_hist_bench": 32,
+  "n_obs_oe": 30,
+  "n_obs_nstep": 58,
+  "prior_oe": {
+    "j": 97.40694894321037,
+    "eta": 1.8019151750587519,
+    "rmse_c": 0.9009575875293759,
+    "within_tol": true
+  },
+  "prior_nstep": {
+    "j": 6.185810140650266,
+    "eta": 0.3265760232728801,
+    "rmse_c": 0.16328801163644005,
+    "within_tol": true
+  },
+  "lbfgs_last_nstep": {
+    "j": 0.4988531468138491,
+    "eta": 0.09274112531329728,
+    "rmse_c": 0.04637056265664864,
+    "within_tol": true
+  },
+  "screenshot_5d": {
+    "n_hist": 480,
+    "n_obs": 7398,
+    "j": 54608.05,
+    "eta": 2.71688446676175,
+    "rmse_c": 1.358442233380875,
+    "note": "Operator still J\u224854608; \u03b7 uses 5-day N-step n_obs on the live grid."
+  },
+  "eta_min": 0.09274112531329728,
+  "eta_max": 6.931818443463128,
+  "n_within_tol": 24,
+  "n_evals": 32
+}

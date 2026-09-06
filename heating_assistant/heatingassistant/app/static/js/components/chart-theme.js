@@ -36,6 +36,7 @@ export function readTheme(el) {
     legend: read('--text-secondary', CHART_COLOR_LEGEND),
     series: read('--chart-temp', '#4fc3f7'),
     warn: read('--warning', '#f5a623'),
+    accent: read('--accent', '#2ec4b6'),
     fontSans: read('--font-sans', CHART_FONT_SANS),
     fontMono: read('--font-mono', CHART_FONT_MONO),
     tickSize: CHART_TICK_SIZE,

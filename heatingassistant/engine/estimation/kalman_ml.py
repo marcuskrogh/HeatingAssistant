@@ -17,6 +17,8 @@ from mbc.control import ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
     MIN_HISTORY_STEPS,
+    PE_ETA_NOISE,
+    PE_ETA_TOL,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
     _C_AIR_HI,
@@ -191,6 +193,7 @@ class KalmanMLEstimator:
         self._on_progress = on_progress
         self._pe_nfev = 0
         self._pe_f_hist: List[Dict[str, Any]] = []
+        self._pe_n_obs = 0
         self._pe_deadline_mono: Optional[float] = None
         self._pe_t0_mono: Optional[float] = None
 
@@ -672,6 +675,7 @@ class KalmanMLEstimator:
         self._pe_t0_mono = time.monotonic()
         self._pe_nfev = 0
         self._pe_f_hist = []
+        self._pe_n_obs = 0
         cap = max(0.0, float(self._max_compute_s))
         self._pe_deadline_mono = (
             None if cap <= 0.0 else self._pe_t0_mono + cap
@@ -1241,7 +1245,12 @@ class KalmanMLEstimator:
             dataset_start_ts=starts,
         )
 
-    def _record_pe_progress(self, f: float) -> None:
+    def _record_pe_progress(
+        self,
+        f: float,
+        n_obs: int = 0,
+        data_mse: Optional[float] = None,
+    ) -> None:
         """Publish one unique NLP evaluation to an optional progress callback."""
         self._pe_nfev += 1
         cap = max(0.0, float(self._max_compute_s))
@@ -1249,7 +1258,22 @@ class KalmanMLEstimator:
         elapsed = (time.monotonic() - t0) if t0 is not None else 0.0
         remaining = max(0.0, cap - elapsed) if cap > 0.0 else 0.0
         phase = "nstep_pem" if self._use_nstep_pem else "tiled_oe"
-        point = {"nfev": int(self._pe_nfev), "f": float(f)}
+        n_obs = int(n_obs or getattr(self, "_pe_n_obs", 0) or 0)
+        r_var = float(self._R_var)
+        misfit = float(data_mse if data_mse is not None else f)
+        eta = None
+        rmse_c = None
+        if n_obs > 0 and math.isfinite(misfit) and misfit >= 0.0:
+            eta = math.sqrt(misfit / float(n_obs))
+            rmse_c = eta * math.sqrt(max(r_var, 0.0))
+        point = {
+            "nfev": int(self._pe_nfev),
+            "f": float(f),
+            "data_mse": misfit,
+            "n_obs": n_obs,
+            "eta": eta,
+            "rmse_c": rmse_c,
+        }
         self._pe_f_hist.append(point)
         if len(self._pe_f_hist) > 400:
             self._pe_f_hist = self._pe_f_hist[-400:]
@@ -1266,6 +1290,13 @@ class KalmanMLEstimator:
                     "elapsed_s": float(elapsed),
                     "cap_s": float(cap),
                     "remaining_s": float(remaining),
+                    "data_mse": misfit,
+                    "n_obs": n_obs,
+                    "eta": eta,
+                    "rmse_c": rmse_c,
+                    "r_var": r_var,
+                    "eta_tol": float(PE_ETA_TOL),
+                    "eta_noise": float(PE_ETA_NOISE),
                 }
             )
         except Exception:

@@ -79,9 +79,10 @@
    `font-size` of 8px or 9px (or rem equivalents ≤ 0.65rem).
 2. `.panel-nav__link` uses `var(--type-ui)` at the base rule and in the
    ≤1024px hamburger override (not a smaller pixel size).
-3. Chart.js defaults and PE canvas `drawPlot` share tick size 11 and the
-   same sans/mono families; PE plot CSS height uses
-   `var(--chart-height-secondary)`.
+3. PE canvas `drawPlot` uses room-guide ticks (10px) and `sizePlotCanvas`;
+   series width 2. PE plot CSS height uses `--chart-height-primary` (240,
+   matching SWD-497 log plot). Room Chart.js defaults stay 10px ticks with
+   per-dataset line widths.
 4. Identification reconstruction charts use height 240 and heating /
    disturbance charts use 200.
 5. `docs/agents/APP-UI-STYLEGUIDE.md` documents the type scale, plot tokens, and
