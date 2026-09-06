@@ -214,7 +214,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. Next `/test SWD-491`.
+- 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/660. Next `/test SWD-491`.
 - 2026-09-06 — `/define`+`/architect` SWD-491: periods counted but not rendered (`ensureWhenState` dropped). Next `/implement SWD-491`.
 - 2026-09-05 — `/review` SWD-487 CLEAN (focused sequential). Fast suite 1152 passed, 88 skipped, 18 deselected. PR https://github.com/marcuskrogh/HeatingAssistant/pull/658. Next `/ship SWD-487`.
 - 2026-09-05 — `/test`+`/harden` SWD-487: EMA spec locks + SWD-462/432; panel cache-bust fallback 150. No extract. Next `/review SWD-487`.

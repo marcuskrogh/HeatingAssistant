@@ -56,7 +56,7 @@
 - Task: SWD-491
 - Sub-tasks: SWD-492, SWD-493
 - Branch: cursor/swd-491-schedule-periods-not-displayed-2822
-- PR: (draft — opening)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/660
 - Classification: bug
 - Workflow: fix-fast
 
