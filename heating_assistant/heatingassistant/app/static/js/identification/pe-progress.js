@@ -1,4 +1,11 @@
-import { CHART_HEIGHT_SECONDARY, readTheme } from '../components/chart-theme.js?v=154';
+import {
+  CHART_DASH_PATTERN,
+  CHART_DASH_WIDTH,
+  CHART_LINE_WIDTH,
+  CHART_TICK_SIZE,
+  readTheme,
+  sizePlotCanvas,
+} from '../components/chart-theme.js?v=155';
 
 function fmtClock(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
@@ -47,9 +54,7 @@ export function liveClock(snap, nowS = Date.now() / 1000) {
 }
 
 function drawPlot(canvas, snap) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
+  const { ctx, cssW: w, cssH: h } = sizePlotCanvas(canvas);
   const theme = readTheme(canvas);
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
@@ -70,7 +75,7 @@ function drawPlot(canvas, snap) {
 
   ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
-  ctx.font = `${theme.tickSize}px ${theme.fontMono}`;
+  ctx.font = `${CHART_TICK_SIZE}px ${theme.fontMono}`;
   ctx.fillStyle = theme.tick;
   niceTicks(yMax).forEach((v) => {
     if (v > yMax) return;
@@ -82,9 +87,9 @@ function drawPlot(canvas, snap) {
     ctx.fillText(v >= 10 ? v.toFixed(0) : v.toFixed(1), 8, y + 3);
   });
 
-  ctx.setLineDash([5, 4]);
+  ctx.setLineDash(CHART_DASH_PATTERN);
   ctx.strokeStyle = theme.warn;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = CHART_DASH_WIDTH;
   const yZero = yOf(0);
   ctx.beginPath();
   ctx.moveTo(padL, yZero);
@@ -95,7 +100,7 @@ function drawPlot(canvas, snap) {
   ctx.fillText('0', 14, yZero - 6);
 
   ctx.strokeStyle = theme.series;
-  ctx.lineWidth = theme.lineWidth;
+  ctx.lineWidth = CHART_LINE_WIDTH;
   ctx.beginPath();
   hist.forEach((p, i) => {
     const x = xOf(i);
@@ -106,7 +111,7 @@ function drawPlot(canvas, snap) {
   ctx.stroke();
 
   ctx.fillStyle = theme.tick;
-  ctx.font = `${theme.tickSize}px ${theme.fontSans}`;
+  ctx.font = `${CHART_TICK_SIZE}px ${theme.fontSans}`;
   ctx.fillText('evaluation', w / 2 - 28, h - 8);
 }
 
@@ -151,7 +156,9 @@ export function renderPeProgress(overlay, snap) {
       </div>
       <div class="pe-progress__plot-wrap">
         <div class="pe-progress__plot-label">Fit error (toward zero)</div>
-        <canvas class="pe-progress__plot" width="680" height="${CHART_HEIGHT_SECONDARY}"></canvas>
+        <div class="pe-progress__plot-frame">
+          <canvas class="pe-progress__plot"></canvas>
+        </div>
       </div>
       <div class="pe-progress__legend">
         <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>Fit error</span>
@@ -161,5 +168,7 @@ export function renderPeProgress(overlay, snap) {
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');
-  drawPlot(canvas, snap);
+  const paint = () => drawPlot(canvas, snap);
+  paint();
+  requestAnimationFrame(paint);
 }

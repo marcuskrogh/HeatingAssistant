@@ -11,7 +11,10 @@
 </head>
 <body>
   <ha-scale-preview></ha-scale-preview>
-  <script>
+  <script type="module">
+    import { renderPeProgress } from '/heatingassistant/app/static/js/identification/pe-progress.js?v=155';
+    import { sizePlotCanvas, CHART_LINE_WIDTH, CHART_DASH_PATTERN, CHART_DASH_WIDTH } from '/heatingassistant/app/static/js/components/chart-theme.js?v=155';
+
     class HaScalePreview extends HTMLElement {
       constructor() {
         super();
@@ -32,6 +35,7 @@
             <div class="panel-nav__brand">
               <span class="panel-nav__name">HEATING ASSISTANT</span>
             </div>
+            <button type="button" class="panel-nav__toggle">Menu</button>
             <div class="panel-nav__links panel-nav__links--open">
               <a class="panel-nav__link panel-nav__link--active" href="#">OVERVIEW</a>
               <a class="panel-nav__link" href="#">SCHEDULES</a>
@@ -43,75 +47,68 @@
           </nav>
           <div class="content">
             <div class="section-header">SYSTEM STATUS</div>
-            <div class="grid-kpi" style="margin-bottom:24px">
-              <div class="card kpi">
-                <div class="kpi__value">21.4</div>
-                <div class="kpi__label">Comfort</div>
-              </div>
-              <div class="card gauge">
-                <div class="gauge__label">Tracking error</div>
-                <div class="gauge__value">0.31 °C</div>
-              </div>
-            </div>
             <h2 class="room-header__title">Living room</h2>
             <div class="tuning-section__title">Controller Preview</div>
             <div class="chart-container card">
               <div class="chart-container__title">Temperature</div>
-              <div class="chart-container__canvas" style="height:var(--chart-height-primary);display:flex;align-items:flex-end;padding:8px 12px">
-                <svg viewBox="0 0 320 80" width="100%" height="100%" preserveAspectRatio="none">
-                  <line x1="0" y1="40" x2="320" y2="40" stroke="#6b7280" stroke-dasharray="4 4"/>
-                  <polyline fill="none" stroke="#4fc3f7" stroke-width="2"
-                    points="0,50 40,46 80,30 120,28 160,36 200,22 240,26 280,18 320,20"/>
-                </svg>
+              <div class="chart-container__canvas room-guide" style="height:var(--chart-height-primary);position:relative">
+                <canvas class="room-guide-canvas"></canvas>
               </div>
             </div>
-            <div class="pe-progress" style="margin-top:24px;position:relative">
-              <div class="pe-progress__clock">
-                <div class="pe-progress__remaining">29:36</div>
-                <div class="pe-progress__clock-label">Time remaining</div>
-                <div class="pe-progress__clock-cap">of 30:00 maximum</div>
-              </div>
-              <div class="pe-progress__head">
-                <div class="pe-progress__kicker">Parameter estimation</div>
-                <p class="pe-progress__title">Getting a starting guess</p>
-              </div>
-              <div class="pe-progress__metrics">
-                <div>
-                  <div class="pe-progress__metric-label">Fit error</div>
-                  <div class="pe-progress__metric-value">0.53</div>
-                </div>
-                <div>
-                  <div class="pe-progress__metric-label">Evaluations</div>
-                  <div class="pe-progress__metric-value">34</div>
-                </div>
-              </div>
-              <div class="pe-progress__plot-wrap">
-                <div class="pe-progress__plot-label">Fit error (toward zero)</div>
-                <canvas class="pe-progress__plot" width="680" height="200"></canvas>
-              </div>
-              <div class="pe-progress__legend">
-                <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>Fit error</span>
-                <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>Target (zero)</span>
-              </div>
+            <div class="sysid-detail-host" style="min-height:720px;margin-top:24px;position:relative">
+              <div class="pe-progress-overlay" id="pe-host"></div>
             </div>
           </div>
         `;
         root.appendChild(wrap);
-        const canvas = root.querySelector('.pe-progress__plot');
-        const ctx = canvas.getContext('2d');
-        const cs = getComputedStyle(canvas);
-        ctx.fillStyle = cs.getPropertyValue('--bg-primary').trim() || '#1a1d23';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = cs.getPropertyValue('--chart-temp').trim() || '#4fc3f7';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(40, 40);
-        ctx.lineTo(200, 90);
-        ctx.lineTo(640, 150);
-        ctx.stroke();
-        ctx.fillStyle = cs.getPropertyValue('--text-dim').trim() || '#6b7280';
-        ctx.font = '11px system-ui, sans-serif';
-        ctx.fillText('evaluation', 300, 190);
+
+        const roomCanvas = root.querySelector('.room-guide-canvas');
+        const roomFrame = root.querySelector('.room-guide');
+        roomCanvas.style.width = '100%';
+        roomCanvas.style.height = '100%';
+        const paintRoom = () => {
+          const { ctx, cssW: w, cssH: h } = sizePlotCanvas(roomCanvas);
+          ctx.fillStyle = '#1a1d23';
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = 'rgba(54, 59, 68, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, h * 0.5);
+          ctx.lineTo(w, h * 0.5);
+          ctx.stroke();
+          ctx.setLineDash(CHART_DASH_PATTERN);
+          ctx.lineWidth = CHART_DASH_WIDTH;
+          ctx.strokeStyle = '#f5a623';
+          ctx.beginPath();
+          ctx.moveTo(0, h * 0.35);
+          ctx.lineTo(w, h * 0.35);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#4fc3f7';
+          ctx.lineWidth = CHART_LINE_WIDTH;
+          ctx.beginPath();
+          const pts = [0.62, 0.58, 0.38, 0.35, 0.45, 0.28, 0.32, 0.22, 0.25];
+          pts.forEach((y, i) => {
+            const x = (i / (pts.length - 1)) * w;
+            const py = y * h;
+            if (i === 0) ctx.moveTo(x, py);
+            else ctx.lineTo(x, py);
+          });
+          ctx.stroke();
+        };
+        requestAnimationFrame(paintRoom);
+
+        const hist = [];
+        for (let i = 0; i < 34; i++) hist.push({ f: Math.max(0.05, 2.4 * Math.exp(-i / 10) + 0.08 * Math.sin(i)) });
+        renderPeProgress(root.querySelector('#pe-host'), {
+          phase: 'tiled_oe',
+          f: 0.53,
+          nfev: 34,
+          cap_s: 1800,
+          elapsed_s: 24,
+          started_at: Date.now() / 1000 - 24,
+          f_hist: hist,
+        });
       }
     }
     customElements.define('ha-scale-preview', HaScalePreview);

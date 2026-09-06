@@ -26,6 +26,8 @@ def test_styleguide_documents_the_closed_scale() -> None:
         "--chart-height-secondary",
         ".panel-nav__link",
         "chart-theme.js",
+        "sizePlotCanvas",
+        "Room-view plots are the guide",
     ):
         assert token in text
 
@@ -68,41 +70,51 @@ def test_nav_links_use_ui_size_including_hamburger() -> None:
     css = (CSS_ROOT / "industrial.css").read_text(encoding="utf-8")
     assert ".panel-nav__link {\n  font-size: var(--type-ui);" in css
     hamburger = css.split("@media (max-width: 1024px)", 1)[1]
+    assert "min-height: 44px;" in hamburger
     assert (
-        ".panel-nav__link {\n    padding: 6px 10px;\n    border-radius: var(--radius-sm);\n"
-        "    font-size: var(--type-ui);"
+        ".panel-nav__link {\n    min-height: 44px;\n    padding: 12px 14px;\n"
+        "    display: flex;\n    align-items: center;\n"
+        "    border-radius: var(--radius-sm);\n    font-size: var(--type-ui);"
     ) in hamburger
 
 
-def test_pe_progress_plot_matches_chart_theme() -> None:
+def test_pe_progress_plot_matches_room_guide() -> None:
     progress = (
         STATIC / "js" / "identification" / "pe-progress.js"
     ).read_text(encoding="utf-8")
     ident = (CSS_ROOT / "pages" / "identification.css").read_text(encoding="utf-8")
     theme = (STATIC / "js" / "components" / "chart-theme.js").read_text(encoding="utf-8")
-    assert "from '../components/chart-theme.js?v=154'" in progress
-    assert "readTheme(canvas)" in progress
-    assert "theme.tickSize" in progress
-    assert "theme.fontMono" in progress
-    assert "theme.fontSans" in progress
+    assert "from '../components/chart-theme.js?v=155'" in progress
+    assert "sizePlotCanvas(canvas)" in progress
+    assert "CHART_LINE_WIDTH" in progress
+    assert "CHART_DASH_PATTERN" in progress
+    assert "CHART_TICK_SIZE" in progress
     assert "height: var(--chart-height-secondary)" in ident
-    assert "CHART_TICK_SIZE = 11" in theme
+    assert ".pe-progress__plot-frame" in ident
+    assert "@media (max-width: 768px)" in ident
+    assert "align-items: flex-start" in ident
+    assert "CHART_TICK_SIZE = 10" in theme
+    assert "CHART_LINE_WIDTH = 2" in theme
+    assert "export function sizePlotCanvas" in theme
     assert "CHART_HEIGHT_PRIMARY = 240" in theme
     assert "CHART_HEIGHT_SECONDARY = 200" in theme
     assert "font-size: 80px" not in ident
     assert "font-size: var(--type-metric)" in ident
 
 
-def test_chart_js_defaults_use_shared_theme() -> None:
+def test_room_chart_js_defaults_are_unchanged_from_the_guide() -> None:
     chart = (STATIC / "js" / "components" / "time-series-chart.js").read_text(
         encoding="utf-8"
     )
-    assert "from './chart-theme.js?v=154'" in chart
-    assert "CHART_TICK_SIZE" in chart
-    assert "CHART_LEGEND_SIZE" in chart
-    assert "CHART_LINE_WIDTH" in chart
-    assert "font: { size: 10" not in chart
-    assert "9px system-ui" not in chart
+    room = (STATIC / "js" / "charts" / "room-charts.js").read_text(encoding="utf-8")
+    assert "from './chart-theme.js?v=155'" in chart
+    assert "elements: {\n    line: { borderWidth:" not in chart
+    assert "CHART_LINE_WIDTH" not in chart
+    assert 'font: { size: 10, family: "system-ui, sans-serif" }' in chart
+    assert "9px system-ui" in chart
+    assert "borderWidth: options.borderWidth || 1.5" in chart
+    assert "borderWidth: 2" in room
+    assert "titleFont: { size: 11 }" in chart
 
 
 def test_identification_plots_use_primary_and_secondary_heights() -> None:
@@ -126,5 +138,5 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
     assert '__version__ = "2026.09.10"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=154" in index
-    assert "return '154'" in dashboard
+    assert "industrial-dashboard.js?v=155" in index
+    assert "return '155'" in dashboard

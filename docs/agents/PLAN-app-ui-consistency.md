@@ -36,8 +36,9 @@
 - Kickers (ALL-CAPS labels, chart titles, buttons, badges) stay 11px; they
   are a role, not “tiny body text”. Ban 8px/9px.
 - Nav, body, forms, and back links use `--type-ui` (13px) on all breakpoints.
-- Plots share one theme object: tick/legend 11px, y ticks mono, grid and
-  line weight from tokens, family from `--font-sans` / `--font-mono`.
+- Plots: room view is the visual guide (ticks 10px, primary series width 2,
+  dashed overlays 1.5 / [5,5]). PE canvas copies those CSS-pixel values via
+  `sizePlotCanvas`. Do not change Chart.js global line width or room datasets.
 
 **Constraints**
 - Dual tree: edit `heatingassistant/`, then sync.
@@ -108,4 +109,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/architect SWD-498` — Shape stamp for tokens + shared chart theme, then implement
+`/test SWD-498` — Spec-lock tests plus desktop and 390px overlay/nav inspection

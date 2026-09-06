@@ -1,5 +1,5 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=154';
-import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=154';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=155';
+import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=155';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=124';
 import { createCollapsible } from '../components/collapsible.js?v=124';
 import { formatNumber, modelFitLabel } from '../utils.js?v=124';
@@ -23,7 +23,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=154';
+import { renderPeProgress } from './pe-progress.js?v=155';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);

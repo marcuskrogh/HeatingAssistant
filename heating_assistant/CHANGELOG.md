@@ -6,9 +6,9 @@ must be the exact calendar version on its own line.
 
 # 2026.09.10
 
-- Ingress type, plots, and shared chrome now follow one scale: the same
-  sizes for nav, titles, labels, and chart ticks on every page, including
-  the parameter-estimation progress popup.
+- Ingress type and shared chrome now follow one scale across pages and
+  popups. Room-view plots stay the visual guide; other plots, including the
+  parameter-estimation progress canvas, match those line widths and ticks.
 
 # 2026.09.9
 

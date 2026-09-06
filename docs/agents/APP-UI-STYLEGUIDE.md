@@ -75,23 +75,40 @@ stack as pages. A popup must not introduce a unique display size except
 
 ## Plots
 
-All time-series charts go through `TimeSeriesChart` and
-`js/components/chart-theme.js`. Canvas plots (PE progress) must call
-`readTheme(canvas)` and use the same tick size, families, and line width.
+Room-view plots are the guide. They live in `time-series-chart.js` +
+`room-charts.js` and are not restyled to match other screens. Other plots
+(Identification Chart.js, PE canvas) copy those CSS-pixel values.
 
 | Token / constant | Value | Use |
 | --- | --- | --- |
 | `--chart-height-primary` / `CHART_HEIGHT_PRIMARY` | 240px | Temperature / reconstruction / forecast |
 | `--chart-height-secondary` / `CHART_HEIGHT_SECONDARY` | 200px | Power, disturbances, PE progress, default |
-| Tick / axis title / legend | 11px | Sans for legend and axis titles; mono for tick numbers |
-| Line width | 2 | Data series |
-| Grid | `--border` at ~30–50% opacity | Match Chart.js defaults |
+| Tick / legend | 10px | Room Chart.js `font.size: 10`; PE canvas ticks |
+| Tooltip | 11px | Room Chart.js tooltips only |
+| Primary series | 2 | Room temp/power/disturbance `borderWidth` |
+| Dashed overlay | 1.5 / `[5, 5]` | `makeDataset({ dashed: true })` |
+| NOW marker | 9px system-ui | Room plugin only |
 | Chart card title | `.chart-container__title` | `--type-kicker` |
 
-Do not set plot height to 180 or 260. Do not hard-code a 10px canvas font.
+Canvas plots must call `sizePlotCanvas(canvas)` so `lineWidth: 2` is 2 CSS
+pixels (a 680×200 bitmap stretched with `width: 100%` looks thinner). Use
+`CHART_LINE_WIDTH` / `CHART_DASH_*` / `CHART_TICK_SIZE` from
+`chart-theme.js`. Do not set Chart.js `elements.line.borderWidth` globally —
+room series set width per dataset.
+
+Do not set plot height to 180 or 260. Do not change room dataset
+`borderWidth`, dash, or tension.
 
 Legend copy is sentence case (Chart.js label text). Plot card titles stay
 ALL-CAPS kickers.
+
+## Narrow screens
+
+- Nav stays `--type-ui` (13px). Hamburger links use `min-height: 44px` and
+  `12px 14px` padding; do not shrink type.
+- PE overlay scrolls (`align-items: flex-start`) at `max-width: 768px`.
+- Room plot heights stay 240 / 200. Chart.js already disables sticky
+  tooltips on coarse / ≤768px viewports.
 
 ## Adding a page
 

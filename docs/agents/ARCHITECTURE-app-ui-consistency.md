@@ -8,8 +8,9 @@
 - Depends on: existing colour tokens on `:host`; Chart.js already loaded by
   `TimeSeriesChart`.
 - Seams: CSS custom properties consumed by CSS and (via `getComputedStyle`) by
-  canvas drawing; `chart-theme.js` exports numeric Chart.js defaults and
-  height constants so pages do not invent 180/260 plot sizes.
+  canvas drawing; `chart-theme.js` exports room-guide numeric constants
+  (`CHART_TICK_SIZE` 10, `CHART_LINE_WIDTH` 2) and `sizePlotCanvas` so PE
+  copies room CSS-pixel strokes without changing Chart.js defaults.
 - Will not add: a CSS-in-JS runtime, a second chart library, new typefaces,
   or a parallel token file that pages could skip.
 
