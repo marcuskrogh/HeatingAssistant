@@ -103,7 +103,7 @@
 - Task: SWD-498
 - Sub-tasks: SWD-499, SWD-500, SWD-501, SWD-502
 - Branch: `cursor/swd-498-app-ui-consistency-dcd6`
-- PR: (draft after first delivery commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/664
 - Classification: feature
 - Workflow: feature-standard
 
