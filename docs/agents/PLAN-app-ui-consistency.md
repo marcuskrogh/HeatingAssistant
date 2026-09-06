@@ -110,4 +110,4 @@
 - Workflow: feature-standard
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664 (`ba064c9`)
