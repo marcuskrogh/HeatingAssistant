@@ -95,4 +95,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review SWD-494` — Lasers then fix then code review
+`/ship SWD-494` — Closeout merge after CI green
