@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.9
+
+- While automatic parameter estimation runs, a popup stays on screen (including
+  on a phone) with RMS error against a 1 °C tolerance and a log plot of
+  normalised fit quality. Time left sits in a thin footer. If the popup is
+  taller than the screen, scroll inside it.
+
 # 2026.09.8
 
 - Room schedule pages show each configured comfort period as a card you

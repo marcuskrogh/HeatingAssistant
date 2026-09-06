@@ -73,7 +73,11 @@ class RegularizedMseCache:
         self._cache[2] = g_mse + reg_grad
         record = getattr(self._est, "_record_pe_progress", None)
         if callable(record):
-            record(float(self._cache[1]))
+            record(
+                float(self._cache[1]),
+                n_obs=int(getattr(self._est, "_pe_n_obs", 0) or 0),
+                data_mse=float(mse),
+            )
 
     def fun(self, theta: np.ndarray) -> float:
         self.eval(theta)

@@ -36,10 +36,11 @@ visual (popup) and measure (η on production J traces)
   static CSS; `proxy.py` / `proxy.js` share η = sqrt(J / n_obs);
   fixture lives only in the sandbox tree.
 - Gaps:
-  - **Live Ingress does not yet publish n_obs** — named. Promote must
-    add per-eval n_obs (phase-specific). UI can derive η from J+n_obs.
-  - **Regularisation in recorded J** — named. η uses mse+reg; on long
-    windows the data term dominates.
+  - **Regularisation in recorded J** — named. Promote η uses data MSE,
+    not MSE+regularisation.
+  - **Viewport on phone** — overlay must sit on the shadow root as a
+    sibling of `.shell` (`position: fixed`); otherwise Estimate is
+    below the overlay and the operator has to scroll up.
   - **Live Ingress poll / HAOS / multi-room** — named as before.
   - These gaps do not move the visual η/tolerance verdict.
 
@@ -53,12 +54,14 @@ visual (popup) and measure (η on production J traces)
   - `heatingassistant/app/static/js/identification/pe-progress.js` + CSS
   - `kalman_ml._record_pe_progress` / `RegularizedMseCache`: publish
     `n_obs` (residual steps for that eval's objective), `r_var`,
-    `eta = sqrt(f / n_obs)`, `eta_tol` (default 2)
+    `eta = sqrt(data_mse / n_obs)`, `eta_tol` (default 2)
   - `nstep_pem_and_grad` / `_simulation_mse_and_grad` already count
-    `n_steps_used` internally — return it with (mse, grad)
+    `n_steps_used` internally — set `est._pe_n_obs`
 - Copy notes: keep timeout: do not apply θ when the cap hits. Plot η,
   not raw J and not SciPy ftol. η_tol = 2 ⇔ RMS ≤ 1 °C at R_var=0.25.
-  Do not ship `index.html`, fixture replay, or benches.
+  Overlay on the shadow root (`position: fixed`), not inside the page
+  scroller; dialog `overflow-y: auto`. Keep `liveClock`. Do not ship
+  fixture replay or benches.
 
 ## Iterations
 | N | Change | Inspectable | Verdict |
@@ -67,7 +70,7 @@ visual (popup) and measure (η on production J traces)
 | 2 | Plot J (linear) with dashed target at 0; 80px countdown first; timeout still; no ftol footer | sandbox/pe-progress/inspect/02_*.png | delta: approximate eval runtime vs window size |
 | 3 | Bench N-step vs tiled-OE seconds/eval for 6 h–5 d; implied nfev in 1 min / 5 min caps | sandbox/pe-progress/inspect/03_window_runtime.* | accept: promote popup; bench stays isolation-only |
 | 4 | Hero KPIs = fit error + evaluations; time in a thin footer; log J vs ftol; FD Jacobian check | sandbox/pe-progress/inspect/04_*.png / 04_jacobian.md | delta: reachable normalised proxy + realistic tol |
-| 5 | η = RMSE/σ_R; plot vs η_tol=2 (1 °C); KPI is RMS °C | sandbox/pe-progress/inspect/05_*.png / 05_proxy.md | — |
+| 5 | η = RMSE/σ_R; plot vs η_tol=2 (1 °C); KPI is RMS °C | sandbox/pe-progress/inspect/05_*.png / 05_proxy.md | accept |
 
 ## Role in pipeline
 Post-merge inspect-loop instead of `/iterate` after SWD-486. Promotion

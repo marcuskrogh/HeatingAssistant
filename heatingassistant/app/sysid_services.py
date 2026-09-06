@@ -521,6 +521,11 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
             "nfev": 0,
             "f": None,
             "f_hist": [],
+            "n_obs": 0,
+            "eta": None,
+            "rmse_c": None,
+            "eta_tol": 2.0,
+            "eta_noise": 1.0,
             "success": None,
             "message": None,
         }

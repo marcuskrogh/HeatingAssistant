@@ -436,6 +436,7 @@ def nstep_pem_and_grad(
     grad = total_grad / scale
     if not (np.isfinite(mse) and np.all(np.isfinite(grad))):
         return _SENTINEL, _zero.copy()
+    est._pe_n_obs = int(n_steps_used)
     return mse, grad
 
 

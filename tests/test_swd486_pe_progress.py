@@ -104,7 +104,13 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
     assert "renderPeProgress" in detail
     assert "pe-progress-overlay" in detail
     assert "waitForPeJob" in detail
-    assert "Time remaining" in progress
+    assert "RMS error" in progress
+    assert "Normalised RMS" in progress
+    assert "Time remaining" not in progress
     assert "pe-progress-overlay" in css
+    assert "position: fixed" in css
+    assert "overflow-y: auto" in css
+    assert "overlayRoot.appendChild" in detail
+    assert "getRootNode" in detail
     assert "ftol" not in progress
     assert "L-BFGS" not in progress
