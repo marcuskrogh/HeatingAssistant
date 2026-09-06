@@ -4,10 +4,17 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.7
+# 2026.09.8
 
 - Room schedule pages show each configured comfort period as a card you
   can open and edit. The inactive list stays hidden when it is empty.
+
+# 2026.09.7
+
+- Parameter estimation now shows a live popup while a fit is running: remaining
+  time against the configured maximum, fit error, and a plot of that error
+  moving toward zero. If the time limit is reached, previous parameters stay
+  in place.
 
 # 2026.09.6
 

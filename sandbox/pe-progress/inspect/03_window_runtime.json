@@ -1,0 +1,77 @@
+{
+  "host": "cursor",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "dt_s": 900.0,
+  "n_horizon": 144,
+  "origin_stride": 8,
+  "rooms": 1,
+  "repeats": 2,
+  "caps_s": [
+    60.0,
+    300.0
+  ],
+  "note": "Seconds per one J+grad evaluation at the prior. A production job also runs tiled-OE L-BFGS first on the same cap, then one or more N-step L-BFGS starts (maxiter 500). This host is not the HAOS box.",
+  "rows": [
+    {
+      "window_h": 6,
+      "n_steps": 24,
+      "n_origins": 3,
+      "ntheta": 7,
+      "nstep_s": 0.0177,
+      "oe_s": 0.0047,
+      "nfev_in_60s": 3392.7,
+      "nfev_in_300s": 16963.6
+    },
+    {
+      "window_h": 12,
+      "n_steps": 48,
+      "n_origins": 6,
+      "ntheta": 7,
+      "nstep_s": 0.0511,
+      "oe_s": 0.0095,
+      "nfev_in_60s": 1173.3,
+      "nfev_in_300s": 5866.5
+    },
+    {
+      "window_h": 24,
+      "n_steps": 96,
+      "n_origins": 12,
+      "ntheta": 7,
+      "nstep_s": 0.1612,
+      "oe_s": 0.0187,
+      "nfev_in_60s": 372.1,
+      "nfev_in_300s": 1860.7
+    },
+    {
+      "window_h": 48,
+      "n_steps": 192,
+      "n_origins": 24,
+      "ntheta": 7,
+      "nstep_s": 0.5351,
+      "oe_s": 0.0373,
+      "nfev_in_60s": 112.1,
+      "nfev_in_300s": 560.7
+    },
+    {
+      "window_h": 72,
+      "n_steps": 288,
+      "n_origins": 36,
+      "ntheta": 7,
+      "nstep_s": 0.9224,
+      "oe_s": 0.0555,
+      "nfev_in_60s": 65.0,
+      "nfev_in_300s": 325.2
+    },
+    {
+      "window_h": 120,
+      "n_steps": 480,
+      "n_origins": 60,
+      "ntheta": 7,
+      "nstep_s": 1.7273,
+      "oe_s": 0.0932,
+      "nfev_in_60s": 34.7,
+      "nfev_in_300s": 173.7
+    }
+  ]
+}

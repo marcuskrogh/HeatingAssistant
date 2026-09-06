@@ -7,10 +7,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |
 | SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
+| SWD-486 | Task | [Sandbox] Live PE optimisation progress popup | Done | — | docs/agents/SANDBOX-pe-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/661 (`c8068a3`) |
 | SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | Done | — | docs/agents/ITERATE-solar-gain-filt-persist.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659 |
 | SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-489 | Sub-task | Tests, THEORY, CalVer, changelog, App sync | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
-| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | In Review | — | docs/agents/PLAN-pe-nstep-mle.md | `/ship SWD-481` |
+| SWD-481 | Task | [Feature] Horizon-matched N-step PE MLE with EKF Jacobians | Done | — | docs/agents/PLAN-pe-nstep-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/657 (`21df120`) |
 | SWD-482 | Sub-task | Formulate N-step PEM with EKF Jacobians | Done | SWD-481 | docs/agents/MODEL-pe-nstep-mle.md | — |
 | SWD-483 | Sub-task | Production receding N-step MLE estimator | Done | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
 | SWD-484 | Sub-task | PE time cap and Advanced config page | Done | SWD-481 | docs/agents/PLAN-pe-nstep-mle.md | — |
@@ -220,6 +221,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-09-06 — `/test` SWD-491: DOM spec lock renders one Evening card, expands editor, hides empty inactive; source lock still requires ensureWhenState. CRAP runner skips JS. Next `/restructure SWD-491`.
 - 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. PR https://github.com/marcuskrogh/HeatingAssistant/pull/660. Next `/test SWD-491`.
 - 2026-09-06 — `/define`+`/architect` SWD-491: periods counted but not rendered (`ensureWhenState` dropped). Next `/implement SWD-491`.
+- 2026-09-06 — `/ship` SWD-486: merged #661 as `c8068a3`. Task Done. Changelog `# 2026.09.7`.
+- 2026-09-06 — `/ship` SWD-486 review CLEAN (focused sequential, COMMENT) on PR #661. Next closeout merge (CalVer 2026.09.7 after main 2026.09.6).
+- 2026-09-06 — `/ship` SWD-486 remaining: implement promote of PE progress popup. Next test → restructure → review → closeout.
+- 2026-09-05 — `/sandbox` SWD-486 iteration 3: N-step eval time vs window (6 h–5 d) on production PEM. Next operator verdict.
+- 2026-09-05 — `/sandbox` SWD-486 iteration 2: J-toward-zero plot, larger countdown, no ftol jargon. Next operator verdict.
+- 2026-09-05 — `/sandbox` SWD-486 (post-merge after SWD-481): live PE popup isolation `sandbox/pe-progress/`. Next operator verdict.
 - 2026-09-05 — `/review` SWD-487 CLEAN (focused sequential). Fast suite 1152 passed, 88 skipped, 18 deselected. PR https://github.com/marcuskrogh/HeatingAssistant/pull/658. Next `/ship SWD-487`.
 - 2026-09-05 — `/test`+`/harden` SWD-487: EMA spec locks + SWD-462/432; panel cache-bust fallback 150. No extract. Next `/review SWD-487`.
 - 2026-09-04 — `/ship` SWD-481 remaining: N-step PEM + Advanced cap + CalVer 2026.09.4; review CLEAN (focused sequential) on PR #657. Next merge.

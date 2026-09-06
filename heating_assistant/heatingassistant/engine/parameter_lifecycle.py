@@ -751,6 +751,7 @@ async def async_estimate_parameters_ml(
     window_start: Optional[float] = None,
     window_end: Optional[float] = None,
     executor: Any | None = None,
+    on_progress: Any | None = None,
 ) -> Dict[str, Any]:
     """Run ML parameter estimation and optionally apply the result."""
 
@@ -785,6 +786,7 @@ async def async_estimate_parameters_ml(
         origin_stride=timing.fast_substeps,
         max_compute_s=cap_s,
         use_nstep_pem=True,
+        on_progress=on_progress,
     )
 
     def _run_estimate() -> Dict[str, Any]:
