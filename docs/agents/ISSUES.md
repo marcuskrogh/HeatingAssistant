@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-494 | Task | [Bug] Next Compute timers do not show computing while NMPC/P is solving | To Do | — | docs/agents/PLAN-next-compute-timers-computing.md | `/test SWD-494` — Overlay wrap + spin group on same PR |
+| SWD-494 | Task | [Bug] Next Compute timers do not show computing while NMPC/P is solving | To Do | — | docs/agents/PLAN-next-compute-timers-computing.md | `/test SWD-494` — Overlay wrap + spin group; PR https://github.com/marcuskrogh/HeatingAssistant/pull/662 |
 | SWD-495 | Sub-task | Show computing overlay on wrap without waiting for Ingress poll | To Do | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
 | SWD-496 | Sub-task | Tests, CalVer, changelog, App sync for compute timers | To Do | SWD-494 | docs/agents/PLAN-next-compute-timers-computing.md | — |
 | SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | Done | — | docs/agents/PLAN-schedule-periods-not-displayed.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660 |

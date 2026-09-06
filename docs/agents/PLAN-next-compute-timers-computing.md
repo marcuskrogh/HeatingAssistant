@@ -90,7 +90,7 @@
 - Task: SWD-494
 - Sub-tasks: SWD-495, SWD-496
 - Branch: cursor/next-compute-timers-computing-febc
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/662
 - Classification: bug
 - Workflow: fix-fast
 
