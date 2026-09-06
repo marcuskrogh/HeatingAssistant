@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.7
+
+- Room schedule pages show each configured comfort period as a card you
+  can open and edit. The inactive list stays hidden when it is empty.
+
 # 2026.09.6
 
 - Solar-gain smoothing now continues after an App restart. The lag no

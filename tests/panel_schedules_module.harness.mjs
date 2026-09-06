@@ -13,6 +13,7 @@ const JS_ROOT = join(ROOT, 'heatingassistant/app/static/js');
 const SCHEDULES_PAGE = join(JS_ROOT, 'pages/schedules.js');
 const SCHEDULES_DETAIL = join(JS_ROOT, 'schedules/schedules-detail.js');
 const SCHEDULES_SHARED = join(JS_ROOT, 'schedules/schedules-shared.js');
+const SCHEDULES_CSS = join(ROOT, 'heatingassistant/app/static/css/pages/schedules.css');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -130,6 +131,32 @@ function scanSchedulesDetailPreservesExpandedOnRefresh() {
   );
 }
 
+/** SWD-491: period cards must be able to materialise editor when-state. */
+function scanSchedulesDetailDefinesEnsureWhenState() {
+  const source = readFileSync(SCHEDULES_DETAIL, 'utf8');
+  assert(
+    /function\s+ensureWhenState\s*\(\s*period\s*\)/.test(source),
+    'schedules-detail.js must define ensureWhenState(period) so period cards can render',
+  );
+  assert(
+    /const whenByType = ensureWhenState\(p\)/.test(source),
+    'buildPeriodCard must call ensureWhenState before periodBodyHtml',
+  );
+  assert(
+    /period\._whenByType = normalized\._whenByType/.test(source),
+    'ensureWhenState must copy _whenByType from normalizePeriodForEditor',
+  );
+}
+
+/** SWD-491: display:flex on section headers must not override HTML hidden. */
+function scanInactiveSectionHeaderHonorsHidden() {
+  const css = readFileSync(SCHEDULES_CSS, 'utf8');
+  assert(
+    /\.sched-detail__section-header\[hidden\]\s*\{[^}]*display:\s*none/.test(css),
+    '.sched-detail__section-header[hidden] must set display:none so INACTIVE PERIODS can hide',
+  );
+}
+
 async function loadSchedulesModuleChain() {
   const pageUrl = `${pathToFileURL(SCHEDULES_PAGE).href}?v=94`;
   const mod = await import(pageUrl);
@@ -149,5 +176,7 @@ async function loadSchedulesModuleChain() {
 scanForImportExportShadowing();
 scanSchedulesDetailDoesNotExportPatchStateSchedule();
 scanSchedulesDetailPreservesExpandedOnRefresh();
+scanSchedulesDetailDefinesEnsureWhenState();
+scanInactiveSectionHeaderHonorsHidden();
 await loadSchedulesModuleChain();
 console.log('panel schedules module harness: ok');

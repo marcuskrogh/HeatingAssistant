@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-491 | Task | [Bug] Schedule periods counted but not shown or editable on room detail | In Progress | — | docs/agents/PLAN-schedule-periods-not-displayed.md | `/test SWD-491` |
+| SWD-492 | Sub-task | Restore ensureWhenState and hide empty inactive header | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
+| SWD-493 | Sub-task | Spec-lock harness, CalVer, changelog, App sync | Done | SWD-491 | docs/agents/PLAN-schedule-periods-not-displayed.md | — |
 | SWD-490 | Task | [Iterate] Persist solar-gain LPF state across App restart | Done | — | docs/agents/ITERATE-solar-gain-filt-persist.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/659 |
 | SWD-488 | Sub-task | Low-pass solar gain on the forecast/history path | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
 | SWD-489 | Sub-task | Tests, THEORY, CalVer, changelog, App sync | Done | SWD-487 | docs/agents/PLAN-solar-gain-lpf.md | — |
@@ -211,6 +214,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-06 — `/implement` SWD-491: restored `ensureWhenState`; inactive header honors `hidden`. Next `/test SWD-491`.
+- 2026-09-06 — `/define`+`/architect` SWD-491: periods counted but not rendered (`ensureWhenState` dropped). Next `/implement SWD-491`.
 - 2026-09-05 — `/review` SWD-487 CLEAN (focused sequential). Fast suite 1152 passed, 88 skipped, 18 deselected. PR https://github.com/marcuskrogh/HeatingAssistant/pull/658. Next `/ship SWD-487`.
 - 2026-09-05 — `/test`+`/harden` SWD-487: EMA spec locks + SWD-462/432; panel cache-bust fallback 150. No extract. Next `/review SWD-487`.
 - 2026-09-04 — `/ship` SWD-481 remaining: N-step PEM + Advanced cap + CalVer 2026.09.4; review CLEAN (focused sequential) on PR #657. Next merge.
