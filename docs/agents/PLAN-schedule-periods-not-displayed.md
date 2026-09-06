@@ -61,4 +61,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review SWD-491` — Lasers then fix then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/660
