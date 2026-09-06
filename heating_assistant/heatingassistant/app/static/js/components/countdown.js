@@ -27,6 +27,7 @@ export function createCountdown(state, options = false) {
   const remaining = computeRemaining(state, dtS, spec);
 
   renderCountdownContent(container, remaining, dtS, spec.small, isSystemStopped(state), spec.label);
+  setCountdownComputing(container, countdownIsComputing(state, spec));
 
   return {
     element: container,
@@ -36,6 +37,7 @@ export function createCountdown(state, options = false) {
       const dt = getDtSeconds(currentState, spec);
       const rem = computeRemaining(currentState, dt, spec);
       updateCountdownDOM(container, rem, dt, isSystemStopped(currentState), spec.label);
+      setCountdownComputing(container, countdownIsComputing(currentState, spec));
     },
   };
 }
@@ -43,11 +45,46 @@ export function createCountdown(state, options = false) {
 export function updateCountdown(countdown, state) {
   const spec = countdown._spec || COUNTDOWN_CONTROL;
   countdown._dtS = getDtSeconds(state, spec);
+  setCountdownComputing(countdown.element, countdownIsComputing(state, spec));
 }
 
 export function setCountdownComputing(container, computing) {
   if (!container) return;
-  container.classList.toggle('countdown--computing', !!computing);
+  const on = !!computing;
+  container.classList.toggle('countdown--computing', on);
+  const host = container.closest('.kpi-expand');
+  if (host) host.classList.toggle('countdown--computing', on);
+}
+
+/**
+ * Overlay when the runtime flag is set, or right after a period wrap until
+ * the matching result stamp lands in this slot (so a 5 s poll is not required).
+ */
+export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
+  const resolved = resolveSpec(spec);
+  if (isSystemStopped(state)) return false;
+  const entity = systemEntity('mpc_performance');
+  const flagName = resolved.dtAttr === 'nmpc_period_s' ? 'nmpc_computing' : 'control_computing';
+  if (entityAttr(state, entity, flagName)) return true;
+
+  const dtS = getDtSeconds(state, resolved);
+  const lastRunTs = parseFloat(entityAttr(state, entity, resolved.lastRunAttr));
+  if (!Number.isFinite(dtS) || dtS <= 0 || !Number.isFinite(lastRunTs)) return false;
+
+  const nowS = nowMs / 1000;
+  const elapsed = nowS - lastRunTs;
+  if (elapsed < 0) return false;
+  const intoSlot = elapsed % dtS;
+  const slotStart = nowS - intoSlot;
+  const resultAttr = resolved.dtAttr === 'nmpc_period_s' ? 'nmpc_result_ts' : 'last_control_ran_ts';
+  const resultTs = parseFloat(entityAttr(state, entity, resultAttr));
+  if (Number.isFinite(resultTs) && resultTs >= slotStart - 0.05) return false;
+
+  const lastNmpcDuration = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
+  const cap = resolved.dtAttr === 'nmpc_period_s'
+    ? Math.min(600, Math.max(90, (Number.isFinite(lastNmpcDuration) ? lastNmpcDuration : 30) * 4))
+    : 2.5;
+  return intoSlot < cap;
 }
 
 export function countdownRemaining(state, options = false) {
@@ -111,7 +148,9 @@ function renderCountdownContent(container, remaining, dtS, small, stopped, label
   container.classList.toggle('countdown--paused', !!stopped);
   container.innerHTML = `
     <svg class="${ringClass}" viewBox="0 0 80 80">
-      <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
+      <g class="countdown__spin">
+        <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
+      </g>
       <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
         stroke-dasharray="${circumference}"
         stroke-dashoffset="${dashOffset}" />
