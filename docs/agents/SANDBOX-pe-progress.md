@@ -81,7 +81,7 @@ input for `/implement`. Supportive isolation — not production source.
 - Relates: [SWD-486](https://marcusknielsen.atlassian.net/browse/SWD-486)
 - Artifact: `docs/agents/SANDBOX-pe-progress.md`
 - Branch: `cursor/swd-497-pe-popup-log-e770`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/663
 
 ## Next
-`/sandbox SWD-497` — next inspect turn after operator verdict (accept and promote, name a delta, or end sandbox-only)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/663

@@ -1,6 +1,6 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=147';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=153';
 import { bindKpiExpandSection } from '../components/kpi-expand.js?v=149';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';

@@ -4,12 +4,18 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.9
+# 2026.09.10
 
 - While automatic parameter estimation runs, a popup stays on screen (including
   on a phone) with RMS error against a 1 °C tolerance and a log plot of
   normalised fit quality. Time left sits in a thin footer. If the popup is
   taller than the screen, scroll inside it.
+
+# 2026.09.9
+
+- Next Control and Next NMPC rings show a spinning overlay and a computing
+  label while that solver is running, including right after the countdown
+  wraps, instead of staying idle until the next dashboard refresh.
 
 # 2026.09.8
 
