@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_P_DEADBAND, DEFAULT_U_REF_GATE
+from ..const import (
+    DEFAULT_GROUND_ALBEDO,
+    DEFAULT_P_DEADBAND,
+    DEFAULT_U_REF_GATE,
+    SOLAR_GAIN_SMOOTHING_TAU_S,
+)
+from ..solar_model import coerce_solar_gain_smoothing_tau_s
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
@@ -38,6 +44,7 @@ class ControllerBuildConfig:
     nmpc_horizon_h: Optional[float] = None
     p_deadband: float = DEFAULT_P_DEADBAND
     u_ref_gate: float = DEFAULT_U_REF_GATE
+    solar_gain_smoothing_tau_s: float = SOLAR_GAIN_SMOOTHING_TAU_S
 
     @classmethod
     def from_coordinator(
@@ -57,6 +64,7 @@ class ControllerBuildConfig:
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
             CONF_SOFT_CONSTRAINT_WEIGHT,
+            CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
             CONF_TERMINAL_WEIGHT,
             CONF_TRACKING_WEIGHT,
             CONF_U_REF_GATE,
@@ -145,6 +153,16 @@ class ControllerBuildConfig:
                     getattr(coordinator, "_u_ref_gate", DEFAULT_U_REF_GATE),
                 )
             ),
+            solar_gain_smoothing_tau_s=coerce_solar_gain_smoothing_tau_s(
+                ov.get(
+                    CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
+                    getattr(
+                        coordinator,
+                        "_solar_gain_smoothing_tau_s",
+                        SOLAR_GAIN_SMOOTHING_TAU_S,
+                    ),
+                )
+            ),
         )
 
 
@@ -177,4 +195,5 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         nmpc_horizon_h=config.nmpc_horizon_h,
         p_deadband=config.p_deadband,
         u_ref_gate=config.u_ref_gate,
+        solar_gain_smoothing_tau_s=config.solar_gain_smoothing_tau_s,
     )

@@ -24,6 +24,32 @@ from .thermal_model import HouseModel, Room, RoomConnection, Window
 _LOGGER = logging.getLogger(__name__)
 
 
+def _coerce_room_watt_map(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[str, float] = {}
+    for name, value in raw.items():
+        try:
+            watts = float(value)
+        except (TypeError, ValueError):
+            continue
+        if watts < 0.0 or watts != watts:
+            continue
+        out[str(name)] = watts
+    return out
+
+
+def _coerce_solar_forecast(raw: Any) -> list[dict[str, float]]:
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out: list[dict[str, float]] = []
+    for step in raw:
+        mapped = _coerce_room_watt_map(step)
+        if mapped:
+            out.append(mapped)
+    return out
+
+
 def reject_negative_p_gating_knobs(mapping: Mapping[str, Any]) -> None:
     """Raise if live P-deadband or NMPC-off gate knobs are negative."""
 
@@ -69,6 +95,40 @@ class ControlEngine(BuildMixin, PreviewMixin):
         self._last_p_actions: dict[str, float] = {}
         self.update_config(config or {})
 
+    def solar_gain_filter_state(self) -> dict[str, float]:
+        """Return the live per-room solar-gain EMA state [W]."""
+        ctrl = self._controller
+        if ctrl is None:
+            return {}
+        return _coerce_room_watt_map(getattr(ctrl, "_solar_gain_filt", None))
+
+    def solar_forecast_cache(self) -> list[dict[str, float]]:
+        """Copy the last applied solar schedule (k = 0 is NOW)."""
+        with self._forecast_lock:
+            return [
+                dict(item)
+                for item in self._last_solar_forecast
+                if isinstance(item, Mapping)
+            ]
+
+    def restore_solar_lpf_runtime(
+        self,
+        *,
+        filt: Mapping[str, Any] | None = None,
+        solar_forecast: Any = None,
+    ) -> None:
+        """Reinstall solar EMA state after a controller rebuild or App restart."""
+        cleaned_filt = _coerce_room_watt_map(filt)
+        ctrl = self._controller
+        if ctrl is not None and cleaned_filt:
+            ctrl._solar_gain_filt = dict(cleaned_filt)
+        steps = _coerce_solar_forecast(solar_forecast)
+        if not steps and cleaned_filt:
+            steps = [dict(cleaned_filt)]
+        if steps:
+            with self._forecast_lock:
+                self._last_solar_forecast = [dict(step) for step in steps]
+
     def update_config(self, config: Mapping[str, Any]) -> None:
         """Rebuild model/controller state from an App config dictionary."""
 
@@ -89,7 +149,10 @@ class ControlEngine(BuildMixin, PreviewMixin):
         )
         self._source_output_tags = _source_output_tags(self.config, self.heat_sources)
         self._room_output_tags = _room_output_tags(self.config)
+        prev_filt = self.solar_gain_filter_state()
+        prev_forecast = self.solar_forecast_cache()
         self._controller = self._try_build_controller()
+        self.restore_solar_lpf_runtime(filt=prev_filt, solar_forecast=prev_forecast)
 
     def step(self, inputs: Mapping[str, Any]) -> dict[str, float]:
         """Compute actuator outputs from a generic input payload."""

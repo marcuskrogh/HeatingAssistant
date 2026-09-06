@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from heatingassistant.engine.const import SOLAR_GAIN_SMOOTHING_TAU_S
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater
 from heatingassistant.engine.solar_forecast import select_ghi_for_step
+from heatingassistant.engine.solar_model import smooth_solar_gain_step
 from heatingassistant.engine.thermal_model import HouseModel, Room, Window
 
 
@@ -82,8 +84,26 @@ class TestForecastSolarNoneIsAnalytical:
             "living_room", t2, cloud_cover=1.0, ghi=500.0,
         )
         g2 = schedules[2]["living_room"]
-        assert g2 == pytest.approx(analytical, rel=1e-12)
-        assert g2 != pytest.approx(leaked, rel=1e-9)
+        v = smooth_solar_gain_step(
+            None,
+            ctrl._room_gain("living_room", _NOW, cloud_cover=1.0, ghi=500.0),
+            900.0,
+            SOLAR_GAIN_SMOOTHING_TAU_S,
+        )
+        v = smooth_solar_gain_step(
+            v,
+            ctrl._room_gain(
+                "living_room",
+                _NOW + timedelta(seconds=900.0),
+                cloud_cover=1.0,
+                ghi=500.0,
+            ),
+            900.0,
+            SOLAR_GAIN_SMOOTHING_TAU_S,
+        )
+        v = smooth_solar_gain_step(v, analytical, 900.0, SOLAR_GAIN_SMOOTHING_TAU_S)
+        assert g2 == pytest.approx(v)
+        assert analytical != pytest.approx(leaked, rel=1e-9)
 
     def test_past_coverage_tail_is_analytical(self):
         ctrl = _windowed_controller()
@@ -102,5 +122,24 @@ class TestForecastSolarNoneIsAnalytical:
             "living_room", t3, cloud_cover=1.0, ghi=500.0,
         )
         g3 = schedules[3]["living_room"]
-        assert g3 == pytest.approx(analytical, rel=1e-12)
-        assert g3 != pytest.approx(leaked, rel=1e-9)
+        v = None
+        inst = [
+            ctrl._room_gain("living_room", _NOW, cloud_cover=1.0, ghi=500.0),
+            ctrl._room_gain(
+                "living_room",
+                _NOW + timedelta(seconds=900.0),
+                cloud_cover=1.0,
+                ghi=500.0,
+            ),
+            ctrl._room_gain(
+                "living_room",
+                _NOW + timedelta(seconds=1800.0),
+                cloud_cover=1.0,
+                ghi=None,
+            ),
+            analytical,
+        ]
+        for sample in inst:
+            v = smooth_solar_gain_step(v, sample, 900.0, SOLAR_GAIN_SMOOTHING_TAU_S)
+        assert g3 == pytest.approx(v)
+        assert analytical != pytest.approx(leaked, rel=1e-9)

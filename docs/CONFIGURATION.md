@@ -27,6 +27,7 @@ Changes in the panel take effect without restarting Home Assistant Core.
 | Weather entity | Optional; improves outdoor forecast over the horizon |
 | Electricity price sensor | Optional; used for price-aware plots / planning inputs |
 | Site latitude / longitude | Used by the solar model (defaults to `0.0` / `0.0` until set) |
+| Solar-gain smoothing | First-order lag on modelled solar watts (default **30 min**; **0** disables). Stored as `solar_gain_smoothing_tau_s`. |
 | Control interval | Default **900 s** (15 min) |
 
 ## Rooms

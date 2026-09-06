@@ -40,6 +40,7 @@ from heatingassistant.engine.electricity_price import (
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
+from heatingassistant.engine.solar_model import coerce_solar_gain_smoothing_tau_s
 from heatingassistant.engine.parameter_lifecycle import (
     PARAMETER_HISTORY_KEY,
     estimated_params_snapshot,
@@ -170,6 +171,10 @@ class HeatingRuntime(
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
         self.control_engine = ControlEngine(self.options)
+        self.control_engine.restore_solar_lpf_runtime(
+            filt=self.state.get(const.STATE_SOLAR_GAIN_FILT),
+            solar_forecast=self.state.get(const.STATE_SOLAR_FORECAST),
+        )
         self._restore_estimated_parameters()
         self.sysid_results: dict[str, Any] = {}
         self.open_loop_results: dict[str, Any] = {}
@@ -1082,6 +1087,14 @@ class HeatingRuntime(
             const.CONF_PRICE_ENTITY: self.options.get(const.CONF_PRICE_ENTITY, ""),
             const.CONF_LATITUDE: self.options.get(const.CONF_LATITUDE, 0.0),
             const.CONF_LONGITUDE: self.options.get(const.CONF_LONGITUDE, 0.0),
+            const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S: (
+                coerce_solar_gain_smoothing_tau_s(
+                    self.options.get(
+                        const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
+                        const.SOLAR_GAIN_SMOOTHING_TAU_S,
+                    )
+                )
+            ),
         }
         return {
             "rooms": [dict(room) for room in self._rooms()],
@@ -2655,6 +2668,12 @@ class HeatingRuntime(
         self.state["energy_total_wh"] = dict(self._energy_total_wh)
         self.state["energy_last_ts"] = self._energy_last_ts
         self.state["config"] = dict(self.options)
+        self.state[const.STATE_SOLAR_GAIN_FILT] = (
+            self.control_engine.solar_gain_filter_state()
+        )
+        self.state[const.STATE_SOLAR_FORECAST] = (
+            self.control_engine.solar_forecast_cache()
+        )
         save_state(self.data_dir, self.state)
 
     def _accumulate_energy(self, now: float) -> None:

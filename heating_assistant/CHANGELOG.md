@@ -4,12 +4,25 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.5
+# 2026.09.7
 
 - Parameter estimation now shows a live popup while a fit is running: remaining
   time against the configured maximum, fit error, and a plot of that error
   moving toward zero. If the time limit is reached, previous parameters stay
   in place.
+
+# 2026.09.6
+
+- Solar-gain smoothing now continues after an App restart. The lag no
+  longer reseeds to a sudden sky jump on the first sample.
+
+# 2026.09.5
+
+- Solar gain no longer jumps in one sample when cloud cover or a solar
+  irradiance forecast steps. The watt trace after the usual sky model is
+  low-pass filtered (default 30 min; set under Environment → Solar model)
+  so history, NOW, and the forecast change gradually. Set the time
+  constant to 0 to disable smoothing.
 
 # 2026.09.4
 

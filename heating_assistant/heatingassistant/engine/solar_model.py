@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import List
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .const import SOLAR_GAIN_SMOOTHING_TAU_S
 from .thermal_model import Window
 
 
@@ -602,3 +603,69 @@ def room_solar_gains_from_exposure(
         dni, dhi, altitude, azimuth_deg, tilt, facing, albedo=albedo,
     )
     return aperture * poa
+
+
+def coerce_solar_gain_smoothing_tau_s(value: Any) -> float:
+    """Return a finite τ ≥ 0 seconds; invalid input uses the 1800 s default."""
+    if value is None or value == "":
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    try:
+        tau = float(value)
+    except (TypeError, ValueError):
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    if not math.isfinite(tau):
+        return float(SOLAR_GAIN_SMOOTHING_TAU_S)
+    return max(0.0, tau)
+
+
+def smooth_solar_gain_step(
+    prev: Optional[float],
+    obs: float,
+    dt: float,
+    tau: float,
+) -> float:
+    """One first-order EMA step for a solar-gain watt sample.
+
+    ``α = 1 − exp(−dt / τ)``.  The first valid observation seeds the filter
+    (no startup transient).  Watts are clamped to ``≥ 0``.  ``τ ≤ 0`` is
+    identity (returns the observation).
+    """
+    obs = max(0.0, float(obs))
+    if prev is None or tau <= 0.0:
+        return obs
+    prev = max(0.0, float(prev))
+    alpha = 1.0 - math.exp(-dt / tau) if dt > 0.0 else 1.0
+    return alpha * obs + (1.0 - alpha) * prev
+
+
+def smooth_solar_gain_schedule(
+    schedules: Sequence[Mapping[str, float]],
+    prev: Optional[Mapping[str, float]],
+    dt: float,
+    tau: float,
+    rooms: Iterable[str],
+) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
+    """Walk a solar schedule with a causal per-room EMA.
+
+    Returns ``(filtered_schedule, k0_state)``.  ``k0_state`` is the filtered
+    k = 0 map so the next live cycle can continue from NOW, not from the
+    horizon tail.
+    """
+    names = [str(name) for name in rooms]
+    state: Dict[str, float] = {
+        name: float(prev[name])
+        for name in names
+        if prev is not None and name in prev
+    }
+    out: List[Dict[str, float]] = []
+    for step in schedules:
+        filtered: Dict[str, float] = {}
+        for name in names:
+            inst = float(step.get(name, 0.0) or 0.0)
+            filtered[name] = smooth_solar_gain_step(
+                state.get(name), inst, dt, tau,
+            )
+            state[name] = filtered[name]
+        out.append(filtered)
+    persist = dict(out[0]) if out else {}
+    return out, persist
