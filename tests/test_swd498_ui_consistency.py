@@ -137,7 +137,7 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     changelog = (ROOT / "heating_assistant" / "CHANGELOG.md").read_text(encoding="utf-8")
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
-    assert '__version__ = "2026.09.12"' in init
+    assert '__version__ = "2026.09.13"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=158" in index
-    assert "return '158'" in dashboard
+    assert "industrial-dashboard.js?v=159" in index
+    assert "return '159'" in dashboard

@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.13
+
+- The Heating Assistant panel loads again after the last progress-popup
+  change. A JavaScript syntax error had blocked the whole UI.
+
 # 2026.09.12
 
 - After automatic parameter estimation finishes, the progress popup stays
