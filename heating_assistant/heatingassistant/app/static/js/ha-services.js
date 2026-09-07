@@ -129,6 +129,10 @@ export async function estimateParametersMl(hass, data = {}) {
   return ha(hass, 'estimate_parameters_ml', data);
 }
 
+export async function cancelParameterEstimation(hass) {
+  return ha(hass, 'cancel_parameter_estimation', {});
+}
+
 export async function storeIdentifiedParameters(hass, data) {
   return ha(hass, 'store_identified_parameters', data);
 }

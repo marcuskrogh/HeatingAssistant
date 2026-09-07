@@ -382,6 +382,7 @@
 }
 
 .pe-progress {
+  position: relative;
   width: min(720px, 100%);
   margin: auto 0;
   max-height: calc(100dvh - 32px);
@@ -396,8 +397,30 @@
 }
 
 .pe-progress__head {
-  padding: 16px 18px 4px;
+  padding: 16px 44px 4px 18px;
   text-align: center;
+}
+
+.pe-progress__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pe-progress__close:hover,
+.pe-progress__close:focus-visible {
+  color: var(--text);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
 }
 
 .pe-progress__kicker {

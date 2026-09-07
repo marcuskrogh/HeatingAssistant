@@ -9,7 +9,7 @@ import numpy as np
 from mbc.control import NLPProblem, ScipyNLPBackend
 
 from .constants import _T_WALL_MIN_LAM, _T_WALL_PRIOR_STD
-from .nstep_pem import PeComputeTimeout, _check_deadline
+from .nstep_pem import PeCancelled, PeComputeTimeout, _check_deadline
 
 _LOGGER = logging.getLogger("heatingassistant.engine.estimation.kalman_ml")
 
@@ -38,14 +38,15 @@ class RegularizedMseCache:
     def eval(self, theta: np.ndarray) -> None:
         if self._cache[0] is not None and np.array_equal(theta, self._cache[0]):
             return
+        cancel_check = getattr(self._est, "_pe_cancel_check", None)
         deadline = getattr(self._est, "_pe_deadline_mono", None)
-        if deadline is not None:
-            t0 = getattr(self._est, "_pe_t0_mono", None)
-            _check_deadline(
-                deadline,
-                float(getattr(self._est, "_max_compute_s", 60.0)),
-                float(t0 if t0 is not None else 0.0),
-            )
+        t0 = getattr(self._est, "_pe_t0_mono", None)
+        _check_deadline(
+            deadline,
+            float(getattr(self._est, "_max_compute_s", 60.0)),
+            float(t0 if t0 is not None else 0.0),
+            cancel_check=cancel_check,
+        )
         if self._est._use_nstep_pem:
             mse, g_mse = self._est._nstep_pem_and_grad(
                 theta,
@@ -140,6 +141,25 @@ class WallInitMseCache:
         return np.asarray(self._cache[2], dtype=float)  # type: ignore[arg-type]
 
 
+def lbfgs_exit_label(res: Any) -> str:
+    """Map a SciPy L-BFGS-B result to a short operator sentence."""
+
+    raw = str(getattr(res, "message", "") or "").strip()
+    upper = raw.upper()
+    if "ITERATION" in upper and "LIMIT" in upper:
+        return "Maximum iterations reached"
+    if "EVALUATION" in upper and "LIMIT" in upper:
+        return "Maximum evaluations reached"
+    if bool(getattr(res, "success", False)):
+        status = int(getattr(res, "status", 0) or 0)
+        if status == 1 or "GRADIENT" in upper or "PGTOL" in upper:
+            return "Converged (gradient small enough)"
+        return "Converged (cost reduction)"
+    if raw:
+        return raw
+    return "Did not converge"
+
+
 def solve_lbfgs(
     fun: Callable[[np.ndarray], float],
     jac: Callable[[np.ndarray], np.ndarray],
@@ -149,8 +169,8 @@ def solve_lbfgs(
     *,
     invalidate: Callable[[], None] | None = None,
     backend: ScipyNLPBackend | None = None,
-) -> Optional[Tuple[float, np.ndarray, bool]]:
-    """Run SciPy L-BFGS-B from one start; return (f, theta, ok)."""
+) -> Optional[Tuple[float, np.ndarray, bool, str]]:
+    """Run SciPy L-BFGS-B from one start; return (f, theta, ok, exit_label)."""
 
     if invalidate is not None:
         invalidate()
@@ -171,9 +191,16 @@ def solve_lbfgs(
         res = backend.solve(problem)
     except PeComputeTimeout:
         raise
+    except PeCancelled:
+        raise
     except Exception as exc:
         _LOGGER.debug("Optimiser failed: %s", exc)
         return None
     if not np.isfinite(res.fun):
         return None
-    return float(res.fun), np.asarray(res.x, dtype=float), bool(res.success)
+    return (
+        float(res.fun),
+        np.asarray(res.x, dtype=float),
+        bool(res.success),
+        lbfgs_exit_label(res),
+    )

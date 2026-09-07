@@ -752,6 +752,7 @@ async def async_estimate_parameters_ml(
     window_end: Optional[float] = None,
     executor: Any | None = None,
     on_progress: Any | None = None,
+    on_cancel: Any | None = None,
 ) -> Dict[str, Any]:
     """Run ML parameter estimation and optionally apply the result."""
 
@@ -788,6 +789,7 @@ async def async_estimate_parameters_ml(
         use_nstep_pem=True,
         on_progress=on_progress,
     )
+    estimator._pe_cancel_check = on_cancel
 
     def _run_estimate() -> Dict[str, Any]:
         return estimator.estimate(

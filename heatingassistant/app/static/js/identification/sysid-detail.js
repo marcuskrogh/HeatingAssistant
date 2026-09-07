@@ -9,6 +9,7 @@ import {
   deleteDataset,
   deleteParameterHistory,
   estimateParametersMl,
+  cancelParameterEstimation,
   runOpenLoopSimulation,
   runSysidSimulation,
   storeIdentifiedParameters,
@@ -23,7 +24,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=157';
+import { renderPeProgress } from './pe-progress.js?v=158';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -192,8 +193,18 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     ? overlayRoot
     : document.body;
   overlayHost.appendChild(peOverlay);
+  peOverlay.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-pe-close]');
+    if (!btn || !peOverlay.contains(btn)) return;
+    const running = peOverlayJob && peOverlayJob.status === 'running';
+    hidePeOverlay();
+    if (running) {
+      cancelParameterEstimation(hass).catch(() => {});
+    }
+  });
   let peOverlayJob = null;
   let peOverlayTimer = null;
+  let peOverlayDismissed = false;
 
   function peShell() {
     if (!(overlayRoot instanceof ShadowRoot)) return null;
@@ -208,14 +219,21 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   }
 
   function paintPeOverlay(job) {
+    if (peOverlayDismissed) return;
     peOverlayJob = job;
     peOverlay.hidden = false;
     lockPeBackground(true);
     peOverlay.scrollTop = 0;
     renderPeProgress(peOverlay, job);
+    const status = job && job.status;
+    if (status && status !== 'running' && peOverlayTimer != null) {
+      window.clearInterval(peOverlayTimer);
+      peOverlayTimer = null;
+    }
   }
 
   function hidePeOverlay() {
+    peOverlayDismissed = true;
     if (peOverlayTimer != null) {
       window.clearInterval(peOverlayTimer);
       peOverlayTimer = null;
@@ -227,6 +245,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   }
 
   function startPeOverlay(job) {
+    peOverlayDismissed = false;
     paintPeOverlay(job || { status: 'running' });
     if (peOverlayTimer != null) window.clearInterval(peOverlayTimer);
     peOverlayTimer = window.setInterval(() => {
@@ -1190,17 +1209,18 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
           paintPeOverlay(job);
           const status = job.status || 'idle';
           if (status === 'success') return job;
+          if (status === 'cancelled') {
+            const err = new Error(job.message || 'Estimation stopped');
+            err.peCancelled = true;
+            throw err;
+          }
           if (status === 'error') {
-            paintPeOverlay({ ...job, remaining_s: 0 });
-            await new Promise((res) => setTimeout(res, 1200));
             throw new Error(job.message || 'Estimation failed');
           }
         }
         await new Promise((res) => setTimeout(res, 1000));
       }
       throw new Error('Parameter estimation timed out');
-    } finally {
-      hidePeOverlay();
     }
   }
 
@@ -1230,6 +1250,10 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       setStatus(statusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
       return true;
     } catch (err) {
+      if (err && err.peCancelled) {
+        setStatus(statusEl, err.message || 'Estimation stopped', '');
+        return false;
+      }
       setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
       return false;
     }

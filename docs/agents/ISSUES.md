@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-504 | Task | [Tweak] PE popup stays open with convergence info and close control | In Progress | — | docs/agents/PLAN-pe-popup-close-exit.md | `/test SWD-504` — after implement |
+| SWD-505 | Sub-task | Popup close control, stay-open, human-readable exit | In Progress | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
+| SWD-506 | Sub-task | Tests, CalVer, changelog, App sync for PE popup close | In Progress | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
 | SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | Done | — | docs/agents/SANDBOX-pe-single-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665 (`083cbe3`) |
 | SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | Done | — | docs/agents/PLAN-app-ui-consistency.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664 (`ba064c9`) |
 | SWD-499 | Sub-task | Design tokens + App UI styleguide | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
