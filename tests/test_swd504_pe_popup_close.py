@@ -74,6 +74,9 @@ def test_overlay_stays_open_and_has_close_control() -> None:
     assert "hidePeOverlay();" in detail
     assert "finally {\n      hidePeOverlay();" not in detail
     assert "exit_label" in progress
+    assert "Finished" in progress
+    assert "Stopped" in progress
+    assert "if (running)" in detail
     assert "Maximum iterations reached" not in progress
     assert "lbfgs_exit_label" not in progress
 
@@ -151,3 +154,61 @@ def test_successful_job_keeps_exit_label(tmp_path, monkeypatch) -> None:
     job = wait_pe_job(runtime, timeout=2.0)
     assert job["status"] == "success"
     assert job["exit_label"] == "Maximum iterations reached"
+
+
+def test_http_cancel_parameter_estimation_stops_job(tmp_path, monkeypatch) -> None:
+    from tests.test_app_http import app_server, get_json, send_json
+
+    gate = {"go": False}
+
+    async def fake_handle(_runtime, _data):
+        gate["go"] = True
+        while not getattr(_runtime, "_pe_cancel").is_set():
+            await asyncio.sleep(0.01)
+        return {
+            "success": False,
+            "cancelled": True,
+            "exit_label": "Stopped by the user",
+            "message": "Stopped by the user. Parameters were not applied.",
+        }
+
+    monkeypatch.setattr(sysid_services, "handle_estimate_parameters_ml", fake_handle)
+    runtime = _runtime(tmp_path)
+    with app_server(runtime) as base_url:
+        started = send_json(
+            base_url,
+            "/api/services",
+            "POST",
+            {
+                "domain": "heating_assistant",
+                "service": "estimate_parameters_ml",
+                "data": {"apply_parameters": False},
+            },
+        )
+        assert started["status"] == "running"
+        deadline = time.monotonic() + 2.0
+        while not gate["go"]:
+            if time.monotonic() > deadline:
+                raise AssertionError("PE worker did not start")
+            time.sleep(0.01)
+        cancelled = send_json(
+            base_url,
+            "/api/services",
+            "POST",
+            {
+                "domain": "heating_assistant",
+                "service": "cancel_parameter_estimation",
+                "data": {},
+            },
+        )
+        assert cancelled["status"] == "cancelling"
+        deadline = time.monotonic() + 2.0
+        job = get_json(base_url, "/api/pe_job")
+        while time.monotonic() < deadline:
+            job = get_json(base_url, "/api/pe_job")
+            if job["job"]["status"] == "cancelled":
+                break
+            time.sleep(0.02)
+        assert job["job"]["status"] == "cancelled"
+        assert job["job"]["success"] is False
+        assert job["job"]["exit_label"] == "Stopped by the user"

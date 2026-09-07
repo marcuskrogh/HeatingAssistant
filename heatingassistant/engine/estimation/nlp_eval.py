@@ -150,14 +150,12 @@ def lbfgs_exit_label(res: Any) -> str:
         return "Maximum iterations reached"
     if "EVALUATION" in upper and "LIMIT" in upper:
         return "Maximum evaluations reached"
-    if bool(getattr(res, "success", False)):
-        status = int(getattr(res, "status", 0) or 0)
-        if status == 1 or "GRADIENT" in upper or "PGTOL" in upper:
-            return "Converged (gradient small enough)"
-        return "Converged (cost reduction)"
-    if raw:
-        return raw
-    return "Did not converge"
+    if not bool(getattr(res, "success", False)):
+        return raw or "Did not converge"
+    status = int(getattr(res, "status", 0) or 0)
+    if status == 1 or "GRADIENT" in upper or "PGTOL" in upper:
+        return "Converged (gradient small enough)"
+    return "Converged (cost reduction)"
 
 
 def solve_lbfgs(
