@@ -30,4 +30,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/667
 
 ## Next
-`/test SWD-507` — Dedicated testing phase, then harden and code review
+`/restructure SWD-507` — Structure pass (same catalog as implement; small diffs included)
