@@ -88,4 +88,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/test SWD-504` — Implement complete; dedicated test phase on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/666
