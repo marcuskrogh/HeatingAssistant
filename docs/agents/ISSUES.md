@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | In Progress | — | docs/agents/ITERATE.md | `/restructure SWD-507` — https://github.com/marcuskrogh/HeatingAssistant/pull/667 |
+| SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | In Review | — | docs/agents/ITERATE.md | `/review SWD-507` — https://github.com/marcuskrogh/HeatingAssistant/pull/667 |
 | SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-504 | Task | [Tweak] PE popup stays open with convergence info and close control | Done | — | docs/agents/PLAN-pe-popup-close-exit.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/666 (`60f325e2`) |
