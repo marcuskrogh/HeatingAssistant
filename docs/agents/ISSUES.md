@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | To Do | — | docs/agents/SANDBOX-pe-single-mle.md | `/implement SWD-503` (accept) or `/sandbox SWD-503` (delta) |
+| SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | In Progress | — | docs/agents/SANDBOX-pe-single-mle.md | `/test SWD-503` — then restructure, review, closeout |
 | SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | Done | — | docs/agents/PLAN-app-ui-consistency.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664 (`ba064c9`) |
 | SWD-499 | Sub-task | Design tokens + App UI styleguide | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
 | SWD-500 | Sub-task | Unify fonts and shared chrome across pages | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |

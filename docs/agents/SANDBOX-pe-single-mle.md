@@ -49,8 +49,9 @@ measure
 
 ## Promote map
 - Production targets: `heatingassistant/engine/estimation/kalman_ml.py`
-  `_multistart_joint_nlp` — one N-step L-BFGS from `theta_prior` (drop tiled
-  OE, physics start, and extra prior start).
+  `_solve_joint_nlp` (was `_multistart_joint_nlp`) — one L-BFGS from
+  `theta_prior` on the active objective (drop tiled OE, physics start, and
+  extra prior start).
 - Copy notes: keep timeout / no-apply-on-cap. Overlay `f_hist` will lose the
   ~35-eval reset spikes. Tests that assume OE-then-PEM phase order need a
   look. Do not treat C/R recovery as part of this promote.
@@ -69,8 +70,7 @@ input for `/implement`. Supportive isolation — not production source.
 - Relates: [SWD-481](https://marcusknielsen.atlassian.net/browse/SWD-481)
 - Artifact: `docs/agents/SANDBOX-pe-single-mle.md`
 - Branch: `cursor/swd-503-pe-single-mle-3539`
-- PR: — (sandbox never opens a PR)
+- PR: (delivery PR opened at implement)
 
 ## Next
-`/implement SWD-503` — promote single-start N-step MLE (operator accept)
-or `/sandbox SWD-503` — name a delta
+`/test SWD-503` — dedicated testing phase, then restructure, then review

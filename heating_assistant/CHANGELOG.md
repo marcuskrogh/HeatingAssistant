@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.11
+
+- Automatic parameter estimation now runs one model fit from your current
+  settings instead of several restarts. The progress plot no longer jumps
+  back to a poor error every few dozen evaluations. Fit quality is unchanged.
+
 # 2026.09.10
 
 - Ingress type and shared chrome now follow one scale across pages and

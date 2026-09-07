@@ -42,7 +42,7 @@ def test_nstep_estimate_publishes_progress_callback() -> None:
     assert snaps[0]["nfev"] == 1
     assert snaps[-1]["nfev"] >= 1
     assert snaps[-1]["f_hist"]
-    assert snaps[-1]["phase"] in {"tiled_oe", "nstep_pem"}
+    assert snaps[-1]["phase"] == "nstep_pem"
     assert snaps[-1]["cap_s"] == 30.0
     assert all("f" in item for item in snaps)
 
