@@ -70,7 +70,7 @@ input for `/implement`. Supportive isolation — not production source.
 - Relates: [SWD-481](https://marcusknielsen.atlassian.net/browse/SWD-481)
 - Artifact: `docs/agents/SANDBOX-pe-single-mle.md`
 - Branch: `cursor/swd-503-pe-single-mle-3539`
-- PR: (delivery PR opened at implement)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/665
 
 ## Next
-`/restructure SWD-503` — structure pass, then review
+`/review SWD-503` — lasers then code review
