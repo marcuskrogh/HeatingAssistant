@@ -27,6 +27,7 @@
 - Relates: [SWD-504](https://marcusknielsen.atlassian.net/browse/SWD-504)
 - Sub-tasks: [SWD-508](https://marcusknielsen.atlassian.net/browse/SWD-508), [SWD-509](https://marcusknielsen.atlassian.net/browse/SWD-509)
 - Branch: `cursor/swd-507-pe-try-syntax-cfe8`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/667
 
 ## Next
 `/test SWD-507` — Dedicated testing phase, then harden and code review

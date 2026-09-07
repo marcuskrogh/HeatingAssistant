@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | In Progress | — | docs/agents/ITERATE.md | `/test SWD-507` |
-| SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | To Do | SWD-507 | docs/agents/ITERATE.md | — |
-| SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | To Do | SWD-507 | docs/agents/ITERATE.md | — |
+| SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | In Progress | — | docs/agents/ITERATE.md | `/test SWD-507` — https://github.com/marcuskrogh/HeatingAssistant/pull/667 |
+| SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
+| SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-504 | Task | [Tweak] PE popup stays open with convergence info and close control | Done | — | docs/agents/PLAN-pe-popup-close-exit.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/666 (`60f325e2`) |
 | SWD-505 | Sub-task | Popup close control, stay-open, human-readable exit | Done | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
 | SWD-506 | Sub-task | Tests, CalVer, changelog, App sync for PE popup close | Done | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
