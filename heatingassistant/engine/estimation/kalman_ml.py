@@ -696,9 +696,6 @@ class KalmanMLEstimator:
         try:
             best_theta, best_f, best_converged = self._solve_joint_nlp(
                 mse_cache,
-                layout,
-                std_history,
-                dataset_start_timestamps,
                 theta_prior,
                 lb,
                 ub,
@@ -1130,9 +1127,6 @@ class KalmanMLEstimator:
     def _solve_joint_nlp(
         self,
         mse_cache: RegularizedMseCache,
-        _layout: "_ThetaLayout",
-        _std_history: List[Dict[str, Any]],
-        _dataset_start_timestamps: Optional[List[float]],
         theta_prior: np.ndarray,
         lb: np.ndarray,
         ub: np.ndarray,
