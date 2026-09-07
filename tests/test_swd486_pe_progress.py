@@ -83,6 +83,7 @@ def test_pe_job_start_includes_compute_cap(tmp_path, monkeypatch) -> None:
     assert started["status"] == "running"
     job = sysid_services.pe_job_snapshot(runtime)
     assert job.get("cap_s") == 300.0
+    assert job.get("phase") == "nstep_pem"
     done = wait_pe_job(runtime, timeout=5.0)
     assert done["status"] == "success"
     assert done.get("cap_s") == 300.0

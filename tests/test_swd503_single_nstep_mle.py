@@ -62,13 +62,14 @@ def test_tiled_oe_estimate_still_runs_one_lbfgs() -> None:
         calls.append(1)
         return real_solve(*args, **kwargs)
 
+    snaps: list[dict] = []
     est = make_kalman_ml_estimator(
         [room],
         sources,
         dt=60.0,
         max_compute_s=30.0,
         use_nstep_pem=False,
-        on_progress=lambda _snap: None,
+        on_progress=snaps.append,
     )
     with patch(
         "heatingassistant.engine.estimation.kalman_ml.solve_lbfgs",
@@ -77,3 +78,5 @@ def test_tiled_oe_estimate_still_runs_one_lbfgs() -> None:
         result = est.estimate(history)
     assert result["success"] is True
     assert len(calls) == 1
+    assert snaps
+    assert all(item.get("phase") == "tiled_oe" for item in snaps)

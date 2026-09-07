@@ -73,4 +73,4 @@ input for `/implement`. Supportive isolation — not production source.
 - PR: (delivery PR opened at implement)
 
 ## Next
-`/test SWD-503` — dedicated testing phase, then restructure, then review
+`/restructure SWD-503` — structure pass, then review
