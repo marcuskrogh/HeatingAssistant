@@ -1,46 +1,33 @@
-# Iterate: Room view still shows idle U=0 / free-response instead of the NMPC plan
+# Iterate: Ingress LOAD ERROR after PE popup close
 
 ## Prior work
-- Task: [SWD-450](https://marcusknielsen.atlassian.net/browse/SWD-450)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/646
-- Spec context: `docs/agents/PLAN-2026-08-30-swd-450-catalog-forecast-attrs.md`
+- Task: [SWD-504](https://marcusknielsen.atlassian.net/browse/SWD-504)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/666 (`60f325e2`)
+- Spec context: docs/agents/PLAN-pe-popup-close-exit.md
 
 ## Problem
-- After SWD-450, room-view Forecast still spikes like a heater-off free
-  response (~28 °C) and Planned Power stays at 0 kW for the whole window.
-- The heater never receives the planned power either.
-- `TickerMixin._slow_slot_start` calls `slow_slot_start_s` but
-  `runtime_ticker.py` does not import it. The NMPC worker evaluates
-  `plan_epoch=self._slow_slot_start(stamp)` before `apply_nmpc_result`.
-- When `last_nmpc_ts` is set, that is a `NameError`. The worker except path
-  records a reject, so U*/T* never reach the forecast snapshot, the P command
-  is never installed on `actuator_outputs`, and MQTT never publishes to the
-  heater.
+- After merge, Ingress shows `LOAD ERROR — Unexpected token '}'. Try statements must have at least a catch or finally block.`
+- `waitForPeJob` in `sysid-detail.js` dropped `finally { hidePeOverlay(); }` so the popup can stay open, but left a `try { ... }` with neither `catch` nor `finally`.
+- Engines that enforce that grammar (WebKit / the HA companion WebView) fail to parse the panel module.
 
-## Acceptance criteria
-- `HeatingRuntime._slow_slot_start` returns the slow-slot origin (no NameError).
-- An NMPC worker apply can pass `plan_epoch` into `apply_nmpc_result`.
-- When `last_nmpc_ts` is set, an accepted worker result installs the P command
-  onto `actuator_outputs` and publishes it on the heater MQTT out topic
-  (no reject).
-- Tests, CalVer 2026.08.37, changelog, App sync.
+## Pass criteria
+- `waitForPeJob` is valid JavaScript (every `try` has `catch` or `finally`).
+- The overlay still stays open after a fit: `waitForPeJob` does not hide it in `finally`.
+- Close still hides the overlay; while running, close still cancels and does not apply parameters.
 
 ## Out of scope
-- Catalog overlay (SWD-450).
-- NMPC cost weights.
-- Plot styling.
+- PE algorithm, `exit_label` wording, overlay layout.
 
 ## Work packages
-1. Import `slow_slot_start_s` so NMPC apply can install the plan (SWD-457)
-2. Tests, CalVer, changelog, App sync for NMPC plan plot (SWD-458)
+1. Remove the bare `try` in `waitForPeJob` (keep the poll loop and throws).
+2. Regression parse test, cache bust, CalVer, changelog, App package sync.
 
 ## Tracker
-- Task: [SWD-456](https://marcusknielsen.atlassian.net/browse/SWD-456)
-- Relates: [SWD-450](https://marcusknielsen.atlassian.net/browse/SWD-450)
-- Sub-tasks: [SWD-457](https://marcusknielsen.atlassian.net/browse/SWD-457),
-  [SWD-458](https://marcusknielsen.atlassian.net/browse/SWD-458)
-- Branch: `cursor/swd-456-nmpc-slow-slot-import-6bcb`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/648
+- Task: [SWD-507](https://marcusknielsen.atlassian.net/browse/SWD-507)
+- Relates: [SWD-504](https://marcusknielsen.atlassian.net/browse/SWD-504)
+- Sub-tasks: [SWD-508](https://marcusknielsen.atlassian.net/browse/SWD-508), [SWD-509](https://marcusknielsen.atlassian.net/browse/SWD-509)
+- Branch: `cursor/swd-507-pe-try-syntax-cfe8`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/667
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/648 (`87be700`)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667

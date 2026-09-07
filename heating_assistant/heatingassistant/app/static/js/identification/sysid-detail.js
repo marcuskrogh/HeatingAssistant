@@ -24,7 +24,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=158';
+import { renderPeProgress } from './pe-progress.js?v=159';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -1199,29 +1199,27 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   async function waitForPeJob() {
     const deadline = Date.now() + 30 * 60 * 1000;
     startPeOverlay({ status: 'running' });
-    try {
-      while (Date.now() < deadline) {
-        if (!connection || typeof connection.getPeJob !== 'function') {
-          throw new Error('Parameter estimation status is unavailable.');
-        }
-        const job = await connection.getPeJob();
-        if (job != null) {
-          paintPeOverlay(job);
-          const status = job.status || 'idle';
-          if (status === 'success') return job;
-          if (status === 'cancelled') {
-            const err = new Error(job.message || 'Estimation stopped');
-            err.peCancelled = true;
-            throw err;
-          }
-          if (status === 'error') {
-            throw new Error(job.message || 'Estimation failed');
-          }
-        }
-        await new Promise((res) => setTimeout(res, 1000));
+    while (Date.now() < deadline) {
+      if (!connection || typeof connection.getPeJob !== 'function') {
+        throw new Error('Parameter estimation status is unavailable.');
       }
-      throw new Error('Parameter estimation timed out');
+      const job = await connection.getPeJob();
+      if (job != null) {
+        paintPeOverlay(job);
+        const status = job.status || 'idle';
+        if (status === 'success') return job;
+        if (status === 'cancelled') {
+          const err = new Error(job.message || 'Estimation stopped');
+          err.peCancelled = true;
+          throw err;
+        }
+        if (status === 'error') {
+          throw new Error(job.message || 'Estimation failed');
+        }
+      }
+      await new Promise((res) => setTimeout(res, 1000));
     }
+    throw new Error('Parameter estimation timed out');
   }
 
   async function runAutoIdentification(idData, statusEl) {

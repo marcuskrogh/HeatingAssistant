@@ -400,6 +400,9 @@ class TestJointInternalGainAndHeaterScale:
         estimator = KalmanMLEstimator(
             [prior_room], sources, dt=60.0,
             regularization=0.01,
+            # This claim is tiled OE / simulation-MSE identifiability of the
+            # heater-off offset. Production defaults to N-step PEM.
+            use_nstep_pem=False,
         )
         result = estimator.estimate(history)
         assert result["success"]
