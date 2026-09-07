@@ -42,7 +42,7 @@ def test_nstep_estimate_publishes_progress_callback() -> None:
     assert snaps[0]["nfev"] == 1
     assert snaps[-1]["nfev"] >= 1
     assert snaps[-1]["f_hist"]
-    assert snaps[-1]["phase"] in {"tiled_oe", "nstep_pem"}
+    assert snaps[-1]["phase"] == "nstep_pem"
     assert snaps[-1]["cap_s"] == 30.0
     assert all("f" in item for item in snaps)
 
@@ -83,6 +83,7 @@ def test_pe_job_start_includes_compute_cap(tmp_path, monkeypatch) -> None:
     assert started["status"] == "running"
     job = sysid_services.pe_job_snapshot(runtime)
     assert job.get("cap_s") == 300.0
+    assert job.get("phase") == "nstep_pem"
     done = wait_pe_job(runtime, timeout=5.0)
     assert done["status"] == "success"
     assert done.get("cap_s") == 300.0

@@ -694,11 +694,8 @@ class KalmanMLEstimator:
 
         timed_out = False
         try:
-            best_theta, best_f, best_converged = self._multistart_joint_nlp(
+            best_theta, best_f, best_converged = self._solve_joint_nlp(
                 mse_cache,
-                layout,
-                std_history,
-                dataset_start_timestamps,
                 theta_prior,
                 lb,
                 ub,
@@ -1127,88 +1124,28 @@ class KalmanMLEstimator:
     ) -> np.ndarray:
         return _dFdtheta_const(self, q, layout, model, ntheta, nx)
 
-    def _multistart_joint_nlp(
+    def _solve_joint_nlp(
         self,
         mse_cache: RegularizedMseCache,
-        layout: "_ThetaLayout",
-        std_history: List[Dict[str, Any]],
-        dataset_start_timestamps: Optional[List[float]],
         theta_prior: np.ndarray,
         lb: np.ndarray,
         ub: np.ndarray,
         scipy_backend: ScipyNLPBackend,
     ) -> Tuple[np.ndarray, float, bool]:
-        """L-BFGS from OE (when PEM), physics, and prior; keep best N-step RMSE."""
-        best_theta = theta_prior.copy()
-        best_f = float("inf")
-        best_converged = False
-        best_nstep_rmse = float("inf")
-        starts: List[np.ndarray] = []
-        if self._use_nstep_pem:
-            self._use_nstep_pem = False
-            mse_cache.invalidate()
-            try:
-                out_oe = solve_lbfgs(
-                    mse_cache.fun,
-                    mse_cache.jac,
-                    theta_prior.copy(),
-                    lb,
-                    ub,
-                    invalidate=mse_cache.invalidate,
-                    backend=scipy_backend,
-                )
-            finally:
-                self._use_nstep_pem = True
-            mse_cache.invalidate()
-            if out_oe is not None:
-                starts.append(out_oe[1])
-                best_theta = np.asarray(out_oe[1], dtype=float)
-                best_nstep_rmse = self._nstep_rmse_theta(
-                    best_theta, layout, std_history, dataset_start_timestamps,
-                )
-                try:
-                    best_f = float(mse_cache.fun(best_theta))
-                except PeComputeTimeout:
-                    raise
-                except Exception:
-                    best_f = float("inf")
-        phys_theta = self._physics_informed_theta(
-            std_history, layout, theta_prior, lb, ub,
+        """One L-BFGS on the active PE objective, from the configured prior."""
+        out = solve_lbfgs(
+            mse_cache.fun,
+            mse_cache.jac,
+            theta_prior.copy(),
+            lb,
+            ub,
+            invalidate=mse_cache.invalidate,
+            backend=scipy_backend,
         )
-        if phys_theta is not None:
-            starts.append(phys_theta)
-        starts.append(theta_prior.copy())
-
-        for theta_start in starts:
-            out = solve_lbfgs(
-                mse_cache.fun,
-                mse_cache.jac,
-                theta_start,
-                lb,
-                ub,
-                invalidate=mse_cache.invalidate,
-                backend=scipy_backend,
-            )
-            if out is None:
-                continue
-            f_cand, theta_c, converged = out
-            if self._use_nstep_pem:
-                rmse_c = self._nstep_rmse_theta(
-                    theta_c, layout, std_history, dataset_start_timestamps,
-                )
-                better_rmse = np.isfinite(rmse_c) and rmse_c < best_nstep_rmse
-                if better_rmse or (
-                    not np.isfinite(best_nstep_rmse) and f_cand < best_f
-                ):
-                    best_nstep_rmse = float(rmse_c)
-                    best_f = f_cand
-                    best_theta = theta_c
-                    best_converged = converged
-            elif f_cand < best_f:
-                best_f = f_cand
-                best_theta = theta_c
-                best_converged = converged
-        return best_theta, best_f, best_converged
+        if out is None:
+            return theta_prior.copy(), float("inf"), False
+        f_cand, theta_c, converged = out
+        return theta_c, f_cand, converged
 
     def _nstep_rmse_theta(
         self,
