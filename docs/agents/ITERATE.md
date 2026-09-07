@@ -30,4 +30,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/667
 
 ## Next
-`/review SWD-507` — Lasers then fix then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667
