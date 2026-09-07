@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | In Review | — | docs/agents/SANDBOX-pe-single-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665 |
+| SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | Done | — | docs/agents/SANDBOX-pe-single-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665 (`083cbe3`) |
 | SWD-498 | Task | [Feature] App UI consistency: typography, plots, shared elements, styleguide | Done | — | docs/agents/PLAN-app-ui-consistency.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/664 (`ba064c9`) |
 | SWD-499 | Sub-task | Design tokens + App UI styleguide | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
 | SWD-500 | Sub-task | Unify fonts and shared chrome across pages | Done | SWD-498 | docs/agents/PLAN-app-ui-consistency.md | — |
@@ -225,6 +225,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.
 - 2026-09-06 — `/sandbox` SWD-503 iteration 1 (post-merge after SWD-481): single N-step MLE matches production η/θ with 99 vs 432 evals. Next operator verdict (`/implement` or delta).
 - 2026-09-06 — `/ship` SWD-497: merged #663 as `74934ce`. Task Done. Changelog `# 2026.09.10`.

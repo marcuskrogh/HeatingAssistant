@@ -73,4 +73,4 @@ input for `/implement`. Supportive isolation — not production source.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/665
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665 (`083cbe3`)
