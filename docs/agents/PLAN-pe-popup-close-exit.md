@@ -83,9 +83,9 @@
 - Task: SWD-504
 - Sub-tasks: SWD-505, SWD-506
 - Branch: cursor/swd-504-pe-popup-close-cfe8
-- PR: (draft after first push)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/666
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/architect SWD-504` — Shape stamp for overlay/job cancel, then implement
+`/test SWD-504` — Implement complete; dedicated test phase on the same PR

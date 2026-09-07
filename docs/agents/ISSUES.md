@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-504 | Task | [Tweak] PE popup stays open with convergence info and close control | In Progress | — | docs/agents/PLAN-pe-popup-close-exit.md | `/test SWD-504` — after implement |
+| SWD-504 | Task | [Tweak] PE popup stays open with convergence info and close control | In Progress | — | docs/agents/PLAN-pe-popup-close-exit.md | `/test SWD-504` — https://github.com/marcuskrogh/HeatingAssistant/pull/666 |
 | SWD-505 | Sub-task | Popup close control, stay-open, human-readable exit | In Progress | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
 | SWD-506 | Sub-task | Tests, CalVer, changelog, App sync for PE popup close | In Progress | SWD-504 | docs/agents/PLAN-pe-popup-close-exit.md | — |
 | SWD-503 | Task | [Sandbox] Single-start N-step MLE vs production PE multistart | Done | — | docs/agents/SANDBOX-pe-single-mle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665 (`083cbe3`) |
