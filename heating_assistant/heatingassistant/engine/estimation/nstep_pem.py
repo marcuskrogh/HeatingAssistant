@@ -25,6 +25,16 @@ class PeComputeTimeout(Exception):
         super().__init__(timeout_user_message(self.cap_s))
 
 
+class PeCancelled(Exception):
+    """Operator stopped PE while the NLP was running."""
+
+    def __init__(self) -> None:
+        super().__init__(CANCEL_USER_MESSAGE)
+
+
+CANCEL_USER_MESSAGE = "Stopped by the user. Parameters were not applied."
+
+
 def timeout_user_message(cap_s: float) -> str:
     cap = float(cap_s)
     if cap >= 60.0 and abs(cap / 60.0 - round(cap / 60.0)) < 1e-6:
@@ -40,7 +50,14 @@ def timeout_user_message(cap_s: float) -> str:
     )
 
 
-def _check_deadline(deadline_mono: Optional[float], cap_s: float, t0: float) -> None:
+def _check_deadline(
+    deadline_mono: Optional[float],
+    cap_s: float,
+    t0: float,
+    cancel_check: Any = None,
+) -> None:
+    if callable(cancel_check) and cancel_check():
+        raise PeCancelled()
     if deadline_mono is None:
         return
     if time.monotonic() > deadline_mono:
@@ -283,6 +300,7 @@ def nstep_pem_and_grad(
 ) -> Tuple[float, np.ndarray]:
     """N-step path misfit (OE scale) + gradient through EKF and open-loop."""
     t0 = time.monotonic() if t0_mono is None else t0_mono
+    cancel_check = getattr(est, "_pe_cancel_check", None)
     _zero = np.zeros(len(theta))
     if not np.all(np.isfinite(theta)):
         return _SENTINEL, _zero.copy()
@@ -321,7 +339,7 @@ def nstep_pem_and_grad(
     n_steps_used = 0
 
     for seg_i in range(len(seg_starts) - 1):
-        _check_deadline(deadline_mono, cap_s, t0)
+        _check_deadline(deadline_mono, cap_s, t0, cancel_check=cancel_check)
         seg_begin = seg_starts[seg_i]
         seg_end = seg_starts[seg_i + 1]
         if (seg_end - seg_begin) < 2:
@@ -350,7 +368,7 @@ def nstep_pem_and_grad(
         sP = np.zeros((ntheta, nx, nx))
 
         for k in range(len(seg) - 1):
-            _check_deadline(deadline_mono, cap_s, t0)
+            _check_deadline(deadline_mono, cap_s, t0, cancel_check=cancel_check)
             rec_k = seg[k]
             rec_next = seg[k + 1]
             try:

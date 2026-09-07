@@ -75,7 +75,7 @@ def wait_pe_job(runtime: HeatingRuntime, timeout: float = 2.0) -> dict:
     last = None
     while time.monotonic() < deadline:
         last = sysid_services.pe_job_snapshot(runtime)
-        if last.get("status") in {"success", "error"}:
+        if last.get("status") in {"success", "error", "cancelled"}:
             return last
         time.sleep(0.02)
     raise AssertionError(f"PE job did not finish: {last}")

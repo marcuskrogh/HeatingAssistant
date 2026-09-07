@@ -74,6 +74,8 @@ from .sensitivity import (
 )
 from .nlp_eval import RegularizedMseCache, WallInitMseCache, solve_lbfgs
 from .nstep_pem import (
+    CANCEL_USER_MESSAGE,
+    PeCancelled,
     PeComputeTimeout,
     nstep_path_rmse,
     nstep_pem_and_grad,
@@ -693,8 +695,10 @@ class KalmanMLEstimator:
         )
 
         timed_out = False
+        cancelled = False
+        exit_label = "Did not converge"
         try:
-            best_theta, best_f, best_converged = self._solve_joint_nlp(
+            best_theta, best_f, best_converged, exit_label = self._solve_joint_nlp(
                 mse_cache,
                 theta_prior,
                 lb,
@@ -703,12 +707,19 @@ class KalmanMLEstimator:
             )
         except PeComputeTimeout as exc:
             timed_out = True
+            exit_label = "Time limit reached"
             _LOGGER.info("PE compute timeout after %.1f s (cap %.1f s)", exc.elapsed_s, exc.cap_s)
+        except PeCancelled:
+            cancelled = True
+            exit_label = "Stopped by the user"
+            _LOGGER.info("PE cancelled by the user")
 
-        if timed_out:
+        if timed_out or cancelled:
             return {
                 "success": False,
-                "timed_out": True,
+                "timed_out": timed_out,
+                "cancelled": cancelled,
+                "exit_label": exit_label,
                 "estimated_params": {
                     name: {"thermal_mass": p["thermal_mass"],
                            "r_external": p["r_external"]}
@@ -736,7 +747,11 @@ class KalmanMLEstimator:
                 "n_steps": n_steps,
                 "log_likelihood": None,
                 "neg_normalized_mse": None,
-                "message": timeout_user_message(cap if cap > 0.0 else self._max_compute_s),
+                "message": (
+                    timeout_user_message(cap if cap > 0.0 else self._max_compute_s)
+                    if timed_out
+                    else CANCEL_USER_MESSAGE
+                ),
             }
 
         # ── Unpack and clip the best solution ──────────────────────────────
@@ -840,14 +855,7 @@ class KalmanMLEstimator:
         except Exception:
             log_ll_val = None
 
-        msg_parts = []
-        if best_converged:
-            msg_parts.append("Joint optimisation converged.")
-        else:
-            msg_parts.append(
-                "Joint optimisation reached iteration limit "
-                "(result may be approximate)."
-            )
+        msg_parts = [f"{exit_label}."]
         if identifiable_sources:
             n_excited = len(excited_sources)
             msg_parts.append(
@@ -914,6 +922,9 @@ class KalmanMLEstimator:
                 self._room_names[i] for i in identifiable_ua
             ],
             "stage2_converged": best_converged,
+            "exit_label": exit_label,
+            "cancelled": False,
+            "timed_out": False,
             "n_steps": n_steps,
             "log_likelihood": log_ll_val,
             "neg_normalized_mse": log_ll_val,
@@ -1131,7 +1142,7 @@ class KalmanMLEstimator:
         lb: np.ndarray,
         ub: np.ndarray,
         scipy_backend: ScipyNLPBackend,
-    ) -> Tuple[np.ndarray, float, bool]:
+    ) -> Tuple[np.ndarray, float, bool, str]:
         """One L-BFGS on the active PE objective, from the configured prior."""
         out = solve_lbfgs(
             mse_cache.fun,
@@ -1143,9 +1154,9 @@ class KalmanMLEstimator:
             backend=scipy_backend,
         )
         if out is None:
-            return theta_prior.copy(), float("inf"), False
-        f_cand, theta_c, converged = out
-        return theta_c, f_cand, converged
+            return theta_prior.copy(), float("inf"), False, "Optimiser failed"
+        f_cand, theta_c, converged, exit_label = out
+        return theta_c, f_cand, converged, exit_label
 
     def _nstep_rmse_theta(
         self,
@@ -1236,6 +1247,8 @@ class KalmanMLEstimator:
                     "eta_noise": float(PE_ETA_NOISE),
                 }
             )
+        except PeCancelled:
+            raise
         except Exception:
             _LOGGER.debug("PE progress callback failed", exc_info=True)
 

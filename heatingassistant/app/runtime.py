@@ -849,6 +849,8 @@ class HeatingRuntime(
                 return {"config": await self._set_room_enabled(payload)}
             if service == "estimate_parameters_ml":
                 return sysid_services.start_estimate_parameters_ml(self, payload)
+            if service == "cancel_parameter_estimation":
+                return sysid_services.cancel_estimate_parameters_ml(self)
             sysid_handler = {
                 "get_pe_coverage": sysid_services.handle_get_pe_coverage,
                 "get_pe_inputs": sysid_services.handle_get_pe_inputs,

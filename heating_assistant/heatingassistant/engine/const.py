@@ -691,6 +691,7 @@ MPC_STATS_BUFFER_SIZE = 100
 ESTIMATION_HISTORY_SIZE = 20
 #: Service name for ML parameter estimation
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
+SERVICE_CANCEL_PARAMETER_ESTIMATION = "cancel_parameter_estimation"
 #: Service name for runtime comfort-schedule suspend/resume
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
 #: Service names for per-room climate control from platform entities / dashboard

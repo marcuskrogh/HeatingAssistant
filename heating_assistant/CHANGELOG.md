@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.12
+
+- After automatic parameter estimation finishes, the progress popup stays
+  open with a short reason the fit stopped (for example maximum iterations
+  reached). An X in the upper right closes it, and stops a running fit
+  without applying new parameters.
+
 # 2026.09.11
 
 - Automatic parameter estimation now runs one model fit from your current

@@ -456,17 +456,27 @@ def _run_pe_worker(work: _PeJobWork) -> None:
     try:
         result = asyncio.run(handle_estimate_parameters_ml(runtime, work.payload))
         success = bool(result.get("success"))
+        cancelled = bool(result.get("cancelled"))
         message = result.get("message")
-        if not success:
+        if cancelled:
+            status = "cancelled"
+            message = message or "Stopped by the user. Parameters were not applied."
+        elif success:
+            status = "success"
+        else:
+            status = "error"
             message = message or "Estimation failed"
         with lock:
             job = dict(getattr(runtime, "_pe_job", None) or {})
         job.update(
             {
-                "status": "success" if success else "error",
+                "status": status,
                 "started_at": started_at,
                 "finished_at": time.time(),
                 "success": success,
+                "cancelled": cancelled,
+                "timed_out": bool(result.get("timed_out")),
+                "exit_label": result.get("exit_label"),
                 "message": message,
             }
         )
@@ -527,8 +537,12 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
             "eta_tol": 2.0,
             "eta_noise": 1.0,
             "success": None,
+            "cancelled": False,
+            "timed_out": False,
+            "exit_label": None,
             "message": None,
         }
+        runtime._pe_cancel = threading.Event()
         payload = _payload(data)
 
     thread = threading.Thread(
@@ -540,6 +554,22 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
     runtime._pe_thread = thread
     thread.start()
     return {"status": "running", "started_at": started_at}
+
+
+def cancel_estimate_parameters_ml(runtime: Any) -> dict[str, Any]:
+    """Ask a running PE worker to stop; parameters are not applied."""
+
+    event = getattr(runtime, "_pe_cancel", None)
+    if event is not None:
+        event.set()
+    lock = getattr(runtime, "_pe_lock", None)
+    if lock is not None:
+        with lock:
+            job = dict(getattr(runtime, "_pe_job", None) or {})
+            if job.get("status") == "running":
+                job["message"] = "Stopping…"
+                runtime._pe_job = job
+    return {"status": "cancelling"}
 
 
 async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
@@ -580,6 +610,7 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
         if dataset_ids
         else None
     )
+    cancel_event = getattr(runtime, "_pe_cancel", None)
     result = await async_estimate_parameters_ml(
         _model(runtime),
         _heat_sources(runtime),
@@ -594,6 +625,7 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
         window_start=values.get("window_start"),
         window_end=values.get("window_end"),
         on_progress=on_progress,
+        on_cancel=cancel_event.is_set if cancel_event is not None else None,
     )
     if result.get("success"):
         _merge_ml_result(runtime, result, horizon)
@@ -988,6 +1020,7 @@ __all__ = [
     "handle_estimate_parameters_ml",
     "pe_job_snapshot",
     "start_estimate_parameters_ml",
+    "cancel_estimate_parameters_ml",
     "annotate_datasets_with_coverage",
     "handle_get_pe_coverage",
     "handle_get_pe_inputs",

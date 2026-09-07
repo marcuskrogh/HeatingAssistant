@@ -27,11 +27,17 @@ function fmtEta(v) {
   return v.toFixed(2);
 }
 
-function phaseLabel(phase, timedOut) {
-  if (timedOut) return 'Time limit reached';
-  if (phase === 'tiled_oe') return 'Getting a starting guess';
-  if (phase === 'nstep_pem') return 'Fitting the model';
-  return phase || 'Fitting';
+function phaseLabel(snap) {
+  const status = snap.status || 'running';
+  if (status === 'cancelled') return 'Stopped';
+  if (status === 'success') return 'Finished';
+  if (status === 'error') {
+    if (snap.timed_out) return 'Time limit reached';
+    return 'Failed';
+  }
+  if (snap.phase === 'tiled_oe') return 'Getting a starting guess';
+  if (snap.phase === 'nstep_pem') return 'Fitting the model';
+  return snap.phase || 'Fitting';
 }
 
 function positiveF(v) {
@@ -64,11 +70,14 @@ function fmtTick(v) {
 export function liveClock(snap, nowS = Date.now() / 1000) {
   const cap = Number(snap.cap_s) || 0;
   const started = Number(snap.started_at);
+  const finished = Number(snap.finished_at);
+  const running = (snap.status || 'running') === 'running';
   let elapsed = Number(snap.elapsed_s) || 0;
+  const end = Number.isFinite(finished) && finished > 1e9 ? finished : nowS;
   if (cap > 0 && Number.isFinite(started) && started > 1e9) {
-    elapsed = Math.max(0, nowS - started);
+    elapsed = Math.max(0, end - started);
   }
-  const remaining = cap > 0 ? Math.max(0, cap - elapsed) : 0;
+  const remaining = running && cap > 0 ? Math.max(0, cap - elapsed) : 0;
   return { cap, elapsed, remaining };
 }
 
@@ -168,9 +177,11 @@ export function renderPeProgress(overlay, snap) {
   const cap = clock.cap || 1;
   const elapsed = clock.elapsed;
   const usedPct = Math.min(100, (elapsed / cap) * 100);
-  const timedOut = snap.status === 'error' || (clock.cap > 0 && remain <= 0);
+  const status = snap.status || 'running';
+  const running = status === 'running';
+  const timedOut = Boolean(snap.timed_out);
   let timeClass = 'pe-progress__time-remain';
-  if (timedOut || remain <= 30) timeClass += ' pe-progress__time-remain--last';
+  if (!running || timedOut || remain <= 30) timeClass += ' pe-progress__time-remain--last';
   else if (remain <= 60) timeClass += ' pe-progress__time-remain--warn';
 
   const eta = Number.isFinite(Number(snap.eta))
@@ -185,11 +196,16 @@ export function renderPeProgress(overlay, snap) {
     ? 'pe-progress__metric-value pe-progress__metric-value--lead pe-progress__metric-value--ok'
     : 'pe-progress__metric-value pe-progress__metric-value--lead';
 
+  const exitLine = snap.exit_label
+    || (!running ? (snap.message || '') : '');
+  const remainText = running ? `${fmtClock(remain)} left` : 'Done';
+
   overlay.innerHTML = `
     <div class="pe-progress" role="dialog" aria-live="polite" aria-label="Parameter estimation progress">
+      <button type="button" class="pe-progress__close" data-pe-close aria-label="Close">×</button>
       <div class="pe-progress__head">
         <div class="pe-progress__kicker">Parameter estimation</div>
-        <p class="pe-progress__title">${phaseLabel(snap.phase, timedOut)}</p>
+        <p class="pe-progress__title">${phaseLabel(snap)}</p>
       </div>
       <div class="pe-progress__metrics">
         <div>
@@ -213,15 +229,15 @@ export function renderPeProgress(overlay, snap) {
         <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>reasonable fit (η ≤ ${fmtEta(etaTol)} ≈ 1 °C)</span>
       </div>
       <div class="pe-progress__time">
-        <div class="${timeClass}">${fmtClock(remain)} left</div>
+        <div class="${timeClass}">${remainText}</div>
         <div class="pe-progress__time-meta">
           ${fmtClock(elapsed)} elapsed · ${fmtClock(cap)} maximum
         </div>
         <div class="pe-progress__bar" aria-hidden="true">
-          <div class="pe-progress__bar-fill${timedOut ? ' pe-progress__bar-fill--done' : ''}" style="width:${usedPct}%"></div>
+          <div class="pe-progress__bar-fill${!running || timedOut ? ' pe-progress__bar-fill--done' : ''}" style="width:${usedPct}%"></div>
         </div>
       </div>
-      ${timedOut ? `<p class="pe-progress__timeout">${snap.message || 'Stopped at the time limit. Parameters were not applied.'}</p>` : ''}
+      ${exitLine ? `<p class="pe-progress__timeout">${exitLine}</p>` : ''}
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');
