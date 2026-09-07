@@ -73,4 +73,4 @@ input for `/implement`. Supportive isolation — not production source.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/665
 
 ## Next
-`/review SWD-503` — lasers then code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/665
