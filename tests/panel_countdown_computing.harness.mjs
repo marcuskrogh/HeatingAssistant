@@ -74,6 +74,10 @@ assert(
   countdown.countdownIsComputing(state({}), nmpc, threeSecondsIn),
   'NMPC overlay must still show a few seconds after wrap (poll not required)',
 );
+assert(
+  !countdown.countdownIsComputing(state({}), control, threeSecondsIn),
+  'CONTROL wrap overlay must clear after the short P cap',
+);
 
 const fifteenSecondsIn = (epoch + 15) * 1000;
 assert(
@@ -87,6 +91,14 @@ assert(
     fifteenSecondsIn,
   ),
   'NMPC flag must keep overlay after wrap catch-up',
+);
+assert(
+  countdown.countdownIsComputing(
+    state({ control_computing: true }),
+    control,
+    fifteenSecondsIn,
+  ),
+  'CONTROL flag must keep overlay after wrap catch-up',
 );
 assert(
   !countdown.countdownIsComputing(state({}), control, fifteenSecondsIn),
@@ -121,7 +133,7 @@ assert(
 
 assert(
   !countdown.countdownIsComputing(state({}), nmpc, (epoch + 700) * 1000),
-  'NMPC wrap overlay must not stick past the duration cap',
+  'NMPC wrap overlay must not stick past the poll-gap cap',
 );
 
 assert(
