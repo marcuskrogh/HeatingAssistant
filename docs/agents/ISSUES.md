@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-513 | Task | [Iterate] Next compute overlay toggles while computing is no | In Review | — | docs/agents/ITERATE-next-compute-overlay-cycle.md | `/ship SWD-513` |
+| SWD-513 | Task | [Iterate] Next compute overlay toggles while computing is no | In Review | — | docs/agents/ITERATE-next-compute-overlay-cycle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/670 |
 | SWD-514 | Sub-task | Stop wrap overlay fighting computing flags | Done | SWD-513 | docs/agents/ITERATE-next-compute-overlay-cycle.md | — |
 | SWD-515 | Sub-task | Tests, CalVer, changelog, App sync for overlay cycle | Done | SWD-513 | docs/agents/ITERATE-next-compute-overlay-cycle.md | — |
 | SWD-510 | Task | [Bug] Overview health warns on sensors that are no longer configured | Done | — | docs/agents/PLAN-sensor-health-config-cycle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/668 |
@@ -240,6 +240,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-08 — `/ship` SWD-513 closeout: merged origin/main; CalVer `# 2026.09.16`. Next merge #670.
 - 2026-09-08 — `/review-fix` SWD-513 CLEAN (focused Core+Integration). COMMENT on PR #670 (self-review cannot REQUEST_CHANGES). Harness now locks CONTROL wrap cap and flag. Next closeout merge.
 - 2026-09-08 — `/iterate` SWD-513 In Review: wrap overlay no longer fights idle computing flags; PR https://github.com/marcuskrogh/HeatingAssistant/pull/670. Next `/review-fix SWD-513`.
 - 2026-09-08 — `/ship` SWD-510: Overview health from current configured sensors only on PR https://github.com/marcuskrogh/HeatingAssistant/pull/668. Changelog `# 2026.09.15`.
