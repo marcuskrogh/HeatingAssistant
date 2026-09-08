@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.14
+
+- Next Control and Next NMPC rings no longer flash a computing overlay when
+  the solver is idle after a countdown wrap. The spin still appears as soon
+  as a compute starts, including in the first seconds after the timer resets.
+
 # 2026.09.13
 
 - The Heating Assistant panel loads again after the last progress-popup

@@ -59,8 +59,10 @@ export function setCountdownComputing(container, computing) {
 }
 
 /**
- * Overlay when the runtime flag is set, or right after a period wrap until
- * the matching result stamp lands in this slot (so a 5 s poll is not required).
+ * Overlay when the runtime flag is set, or for a short catch-up right after
+ * a period wrap so a 5 s Ingress poll is not required to start the chrome.
+ * After the catch-up, trust the flag: a stale result stamp must not keep
+ * the overlay on while computing is no.
  */
 export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
   const resolved = resolveSpec(spec);
@@ -82,8 +84,7 @@ export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
   const resultTs = parseFloat(entityAttr(state, entity, resultAttr));
   if (Number.isFinite(resultTs) && resultTs >= slotStart - 0.05) return false;
 
-  const lastNmpcDuration = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
-  return intoSlot < wrapOverlayCapS(resolved, lastNmpcDuration);
+  return intoSlot < wrapOverlayCapS(resolved);
 }
 
 export function countdownRemaining(state, options = false) {
@@ -102,10 +103,8 @@ function isSystemStopped(state) {
 }
 
 /** Seconds to keep wrap overlay before a skipped worker is treated as idle. */
-function wrapOverlayCapS(resolved, lastNmpcDuration) {
-  if (resolved.dtAttr !== 'nmpc_period_s') return 2.5;
-  const last = Number.isFinite(lastNmpcDuration) ? lastNmpcDuration : 30;
-  return Math.min(600, Math.max(90, last * 4));
+function wrapOverlayCapS(resolved) {
+  return resolved.dtAttr === 'nmpc_period_s' ? 8 : 2.5;
 }
 
 function resolveSpec(options) {

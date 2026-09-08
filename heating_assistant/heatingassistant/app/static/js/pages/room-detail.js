@@ -2,7 +2,7 @@ import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '
 import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown, COUNTDOWN_NMPC, setCountdownComputing } from '../components/countdown.js?v=153';
+import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=154';
 import { bindKpiExpandSection } from '../components/kpi-expand.js?v=149';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
@@ -281,18 +281,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     key: 'next-nmpc',
     detail: nextNmpcDetail,
   });
-
-  function paintCountdownLoading(s) {
-    setCountdownComputing(
-      nmpcCountdown.element,
-      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'nmpc_computing')),
-    );
-    setCountdownComputing(
-      countdown.element,
-      Boolean(entityAttr(s, systemEntity('mpc_performance'), 'control_computing')),
-    );
-  }
-  paintCountdownLoading(state);
 
   function paintRegulatorGauge(s) {
     updateGauge(regulatorGauge, {
@@ -574,8 +562,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       paintSolarGauge(entityValue(newState, solarEntity));
       paintHeatLossGauge(newState);
       paintModelFitGauge(newState);
-      paintCountdownLoading(newState);
       kpiExpand.paint(newState);
+      updateCountdown(countdown, newState);
+      updateCountdown(nmpcCountdown, newState);
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.

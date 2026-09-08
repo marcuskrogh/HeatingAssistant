@@ -69,14 +69,37 @@ assert(
   'CONTROL wrap with stale last_control_ran_ts must show overlay',
 );
 
+const threeSecondsIn = (epoch + 3) * 1000;
+assert(
+  countdown.countdownIsComputing(state({}), nmpc, threeSecondsIn),
+  'NMPC overlay must still show a few seconds after wrap (poll not required)',
+);
+
 const fifteenSecondsIn = (epoch + 15) * 1000;
 assert(
-  countdown.countdownIsComputing(state({}), nmpc, fifteenSecondsIn),
-  'NMPC overlay must still show 15 s after wrap (stale result, no poll)',
+  !countdown.countdownIsComputing(state({}), nmpc, fifteenSecondsIn),
+  'NMPC wrap overlay must clear after the poll-gap cap when computing is false',
+);
+assert(
+  countdown.countdownIsComputing(
+    state({ nmpc_computing: true }),
+    nmpc,
+    fifteenSecondsIn,
+  ),
+  'NMPC flag must keep overlay after wrap catch-up',
 );
 assert(
   !countdown.countdownIsComputing(state({}), control, fifteenSecondsIn),
   'CONTROL wrap overlay must clear after the short P cap',
+);
+
+assert(
+  !countdown.countdownIsComputing(
+    state({ nmpc_result_ts: undefined }),
+    nmpc,
+    fifteenSecondsIn,
+  ),
+  'missing nmpc_result_ts must not keep overlay after catch-up',
 );
 
 assert(
