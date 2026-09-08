@@ -4,7 +4,7 @@ import {
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
   loadingNode, entitySelectorField, advancedSubsection,
-} from './config-ui.js?v=124';
+} from './config-ui.js?v=160';
 
 // System Parameters
 // ---------------------------------------------------------------------------

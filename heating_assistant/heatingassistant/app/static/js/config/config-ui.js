@@ -200,8 +200,35 @@ function fmt(v, unit, def) {
 // Searchable Home Assistant entity picker (modal)
 // ---------------------------------------------------------------------------
 
+function combineDeviceEntityName(deviceName, entityName, fallbackId) {
+  const device = String(deviceName || '').trim();
+  const entity = String(entityName || '').trim();
+  if (device && entity) {
+    if (entity.toLowerCase().startsWith(device.toLowerCase())) return entity;
+    return `${device} ${entity}`;
+  }
+  return entity || fallbackId;
+}
+
 function entityFriendlyName(hass, id) {
-  return hass?.states?.[id]?.attributes?.friendly_name || id;
+  if (!id) return '';
+  const state = hass?.states?.[id];
+  const ent = hass?.entities?.[id];
+  const device = ent?.device_id ? hass?.devices?.[ent.device_id] : undefined;
+  const deviceName = device?.name_by_user || device?.name || '';
+  const entityName = ent?.name || state?.attributes?.friendly_name || '';
+  if (deviceName) {
+    return combineDeviceEntityName(deviceName, entityName, id);
+  }
+  if (typeof hass?.formatEntityName === 'function' && state) {
+    try {
+      const formatted = hass.formatEntityName(state, [{ type: 'device' }, { type: 'entity' }]);
+      if (formatted && String(formatted).trim()) return String(formatted).trim();
+    } catch (_err) {
+      /* Ingress shim / older HA */
+    }
+  }
+  return combineDeviceEntityName('', entityName, id);
 }
 
 /** True when ``id`` looks like a Home Assistant entity_id for one of ``domains``. */
@@ -242,7 +269,7 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
     .filter(([id]) => domains.some((d) => id.startsWith(d + '.')))
     .map(([id, s]) => ({
       id,
-      name: s.attributes?.friendly_name || id,
+      name: entityFriendlyName(hass, id),
       state: s.state,
       unit: s.attributes?.unit_of_measurement || '',
     }))
@@ -449,6 +476,7 @@ export {
   prettify,
   loadingNode,
   fmt,
+  combineDeviceEntityName,
   entityFriendlyName,
   isValidEntityId,
   openEntityPicker,
