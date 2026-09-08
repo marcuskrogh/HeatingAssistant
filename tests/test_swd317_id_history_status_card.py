@@ -92,8 +92,8 @@ async def test_runtime_exposes_id_history_without_changing_overall(
     )
     await runtime.start()
     try:
-        before = runtime.system_health()["quality"]
         runtime.update_tag("living_temp", MqttTagPayload(value=21.0, status="GOOD"))
+        before = runtime.system_health()["quality"]
         stamp = time.time() - 2000.0
         runtime._id_history_last_ts = stamp
         runtime._id_history_disk_last_ts = stamp
