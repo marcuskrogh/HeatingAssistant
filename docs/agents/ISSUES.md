@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-510 | Task | [Bug] Overview health warns on sensors that are no longer configured | To Do | — | docs/agents/PLAN-sensor-health-config-cycle.md | `/architect SWD-510` |
-| SWD-511 | Sub-task | Rebuild configured-sensor health each cycle | To Do | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
-| SWD-512 | Sub-task | Tests, CalVer, changelog, App sync for sensor health | To Do | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
+| SWD-510 | Task | [Bug] Overview health warns on sensors that are no longer configured | In Progress | — | docs/agents/PLAN-sensor-health-config-cycle.md | `/test SWD-510` |
+| SWD-511 | Sub-task | Rebuild configured-sensor health each cycle | Done | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
+| SWD-512 | Sub-task | Tests, CalVer, changelog, App sync for sensor health | Done | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |
 | SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |

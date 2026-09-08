@@ -100,4 +100,5 @@
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-510` — Shape the configured-sensor set and cycle reset on this branch
+`/test SWD-510` — Adversarial testing pass on the same PR
+

@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.14
+
+- Overview health now reflects only the sensors currently configured. Removed
+  sensors no longer keep a leftover warning after they are taken out of the
+  setup.
+
 # 2026.09.13
 
 - The Heating Assistant panel loads again after the last progress-popup
