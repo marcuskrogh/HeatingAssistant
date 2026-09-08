@@ -81,9 +81,9 @@
 - Task: SWD-516
 - Sub-tasks: SWD-517, SWD-518
 - Branch: swd-516-unique-config-sensor-labels
-- PR: (draft on first push)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/669
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/ship SWD-516` — Remaining: review then closeout (implement/test/restructure in this ship run)
+`/ship SWD-516` — Closeout merge after CLEAN review

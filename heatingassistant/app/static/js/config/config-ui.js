@@ -217,7 +217,7 @@ function entityFriendlyName(hass, id) {
   const device = ent?.device_id ? hass?.devices?.[ent.device_id] : undefined;
   const deviceName = device?.name_by_user || device?.name || '';
   const entityName = ent?.name || state?.attributes?.friendly_name || '';
-  if (deviceName || entityName) {
+  if (deviceName) {
     return combineDeviceEntityName(deviceName, entityName, id);
   }
   if (typeof hass?.formatEntityName === 'function' && state) {
@@ -228,7 +228,7 @@ function entityFriendlyName(hass, id) {
       /* Ingress shim / older HA */
     }
   }
-  return id;
+  return combineDeviceEntityName('', entityName, id);
 }
 
 /** True when ``id`` looks like a Home Assistant entity_id for one of ``domains``. */

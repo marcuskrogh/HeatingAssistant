@@ -66,6 +66,12 @@ assert(entityFriendlyName({
 }, living) === 'Living Room Window TempPV',
   'Ingress catalog friendly_name is used when registries are absent');
 
+assert(entityFriendlyName({
+  states: { [living]: { attributes: { friendly_name: 'TempPV' } } },
+  formatEntityName() { return 'Living Room Window TempPV'; },
+}, living) === 'Living Room Window TempPV',
+  'HA formatEntityName wins when device registry is absent');
+
 assert(entityFriendlyName({}, 'sensor.orphan') === 'sensor.orphan',
   'unknown entity falls back to entity id');
 
