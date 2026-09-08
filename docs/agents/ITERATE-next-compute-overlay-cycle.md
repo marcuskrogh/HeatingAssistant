@@ -41,6 +41,7 @@
 - Relates: [SWD-494](https://marcusknielsen.atlassian.net/browse/SWD-494)
 - Sub-tasks: [SWD-514](https://marcusknielsen.atlassian.net/browse/SWD-514), [SWD-515](https://marcusknielsen.atlassian.net/browse/SWD-515)
 - Branch: `swd-513-next-compute-overlay-cycle`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/670
 
 ## Next
 `/review-fix SWD-513` — Review and auto-fix on the new delivery PR
