@@ -234,7 +234,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-08 — `/define` SWD-510: Overview health from current configured sensors only; Sub-tasks SWD-511/SWD-512; branch `swd-510-sensor-health-config-cycle`; Next `/architect SWD-510`.
+- 2026-09-08 — `/define` SWD-510: Overview health from current configured sensors only; Sub-tasks SWD-511/SWD-512; branch `swd-510-sensor-health-config-cycle`; draft PR https://github.com/marcuskrogh/HeatingAssistant/pull/668; Next `/architect SWD-510`.
 - 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.
 - 2026-09-06 — `/sandbox` SWD-503 iteration 1 (post-merge after SWD-481): single N-step MLE matches production η/θ with 99 vs 432 evals. Next operator verdict (`/implement` or delta).

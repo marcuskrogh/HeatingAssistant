@@ -95,7 +95,7 @@
 - Task: SWD-510
 - Sub-tasks: SWD-511, SWD-512
 - Branch: swd-510-sensor-health-config-cycle
-- PR: (draft — pending push)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/668
 - Classification: bug
 - Workflow: fix-fast
 
