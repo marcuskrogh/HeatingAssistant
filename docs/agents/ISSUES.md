@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | In Review | — | docs/agents/PLAN-unique-config-sensor-labels.md | `/ship SWD-516` closeout |
-| SWD-517 | Sub-task | Unique display-name helper and catalog names | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
-| SWD-518 | Sub-task | Tests, CalVer, changelog, App sync for unique sensor labels | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
+| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | Done | — | docs/agents/PLAN-unique-config-sensor-labels.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/669 (`8170dd4d`) |
+| SWD-517 | Sub-task | Unique display-name helper and catalog names | Done | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
+| SWD-518 | Sub-task | Tests, CalVer, changelog, App sync for unique sensor labels | Done | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |
 | SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |
@@ -234,7 +234,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-08 — `/ship` SWD-516: unique config sensor labels on PR https://github.com/marcuskrogh/HeatingAssistant/pull/669. Review CLEAN (focused sequential). Next closeout merge.
+- 2026-09-08 — `/ship` SWD-516: merged #669 as `8170dd4d`. Task Done. Changelog `# 2026.09.14`.
 - 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.
 - 2026-09-06 — `/sandbox` SWD-503 iteration 1 (post-merge after SWD-481): single N-step MLE matches production η/θ with 99 vs 432 evals. Next operator verdict (`/implement` or delta).
