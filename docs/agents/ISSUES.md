@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-513 | Task | [Iterate] Next compute overlay toggles while computing is no | In Review | — | docs/agents/ITERATE-next-compute-overlay-cycle.md | `/review-fix SWD-513` |
+| SWD-513 | Task | [Iterate] Next compute overlay toggles while computing is no | In Review | — | docs/agents/ITERATE-next-compute-overlay-cycle.md | `/ship SWD-513` |
 | SWD-514 | Sub-task | Stop wrap overlay fighting computing flags | Done | SWD-513 | docs/agents/ITERATE-next-compute-overlay-cycle.md | — |
 | SWD-515 | Sub-task | Tests, CalVer, changelog, App sync for overlay cycle | Done | SWD-513 | docs/agents/ITERATE-next-compute-overlay-cycle.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |
@@ -234,6 +234,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-08 — `/review-fix` SWD-513 CLEAN (focused Core+Integration). COMMENT on PR #670 (self-review cannot REQUEST_CHANGES). Harness now locks CONTROL wrap cap and flag. Next closeout merge.
 - 2026-09-08 — `/iterate` SWD-513 In Review: wrap overlay no longer fights idle computing flags; PR https://github.com/marcuskrogh/HeatingAssistant/pull/670. Next `/review-fix SWD-513`.
 - 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.

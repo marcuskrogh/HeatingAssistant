@@ -44,4 +44,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/670
 
 ## Next
-`/review-fix SWD-513` — Review and auto-fix on the new delivery PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/670
