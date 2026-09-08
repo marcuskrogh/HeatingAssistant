@@ -4,7 +4,7 @@ import {
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
   loadingNode,
-} from './config-ui.js?v=134';
+} from './config-ui.js?v=160';
 
 function renderAdvanced(container, connection, hass) {
   const { body } = configPageShell(container, {
