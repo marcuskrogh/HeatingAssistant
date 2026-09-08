@@ -44,4 +44,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/670
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/670 (CalVer 2026.09.16 after main 14/15)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/670 (`16319e7d`)
