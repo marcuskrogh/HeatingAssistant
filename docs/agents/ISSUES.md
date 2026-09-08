@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | In Review | — | docs/agents/PLAN-unique-config-sensor-labels.md | `/ship SWD-516` |
+| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | In Review | — | docs/agents/PLAN-unique-config-sensor-labels.md | `/ship SWD-516` closeout |
 | SWD-517 | Sub-task | Unique display-name helper and catalog names | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
 | SWD-518 | Sub-task | Tests, CalVer, changelog, App sync for unique sensor labels | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |

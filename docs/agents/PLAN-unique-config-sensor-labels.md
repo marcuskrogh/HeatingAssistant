@@ -86,4 +86,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/ship SWD-516` — Closeout merge after CLEAN review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/669
