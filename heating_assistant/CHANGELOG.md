@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.14
+
+- Config pages show the device and entity name on each sensor chip, so sensors
+  that share a short name like TempPV can be told apart.
+
 # 2026.09.13
 
 - The Heating Assistant panel loads again after the last progress-popup

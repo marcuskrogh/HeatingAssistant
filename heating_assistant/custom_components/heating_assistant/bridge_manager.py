@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
 import logging
+import sys
 import time
 from collections.abc import Mapping
 from datetime import timedelta
@@ -42,6 +44,76 @@ _LOGGER = logging.getLogger(__name__)
 
 # Debounce catalog republish when many entities appear at once (startup / reload).
 _CATALOG_DEBOUNCE_S = 2.0
+
+
+def combine_device_entity_name(
+    device_name: str, entity_name: str, fallback_id: str
+) -> str:
+    """Just enough unique label: device + entity, without duplicating the device."""
+    device = (device_name or "").strip()
+    entity = (entity_name or "").strip()
+    if device and entity:
+        if entity.casefold().startswith(device.casefold()):
+            return entity
+        return f"{device} {entity}"
+    return entity or fallback_id
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _registry_module(name: str) -> Any:
+    """Load a HA registry helper; prefer an already-patched sys.modules entry."""
+    existing = sys.modules.get(name)
+    if existing is not None and callable(getattr(existing, "async_get", None)):
+        return existing
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
+
+
+def _entity_and_device_names(hass: HomeAssistant, entity_id: str) -> tuple[str, str]:
+    """Look up registry names; empty strings when registries are unavailable."""
+    er = _registry_module("homeassistant.helpers.entity_registry")
+    dr = _registry_module("homeassistant.helpers.device_registry")
+    if er is None or dr is None:
+        return "", ""
+    try:
+        ent_reg = er.async_get(hass)
+        entry = ent_reg.async_get(entity_id) if ent_reg is not None else None
+    except Exception:  # noqa: BLE001 — registries are optional on mocked hass
+        return "", ""
+    if entry is None:
+        return "", ""
+    entity_name = _text(getattr(entry, "name", None)) or _text(
+        getattr(entry, "original_name", None)
+    )
+    device_id = getattr(entry, "device_id", None)
+    if not isinstance(device_id, str) or not device_id:
+        return "", entity_name
+    try:
+        device = dr.async_get(hass).async_get(device_id)
+    except Exception:  # noqa: BLE001
+        return "", entity_name
+    if device is None:
+        return "", entity_name
+    device_name = _text(getattr(device, "name_by_user", None)) or _text(
+        getattr(device, "name", None)
+    )
+    return device_name, entity_name
+
+
+def entity_catalog_display_name(hass: HomeAssistant, state: State) -> str:
+    """Unique catalog label: device + entity when a device exists."""
+    entity_id = getattr(state, "entity_id", "")
+    if not isinstance(entity_id, str) or not entity_id:
+        return ""
+    state_name = _text(getattr(state, "name", None))
+    device_name, registry_entity_name = _entity_and_device_names(hass, entity_id)
+    entity_name = registry_entity_name or state_name
+    return combine_device_entity_name(device_name, entity_name, entity_id)
 
 
 class _BridgeManager:
@@ -201,7 +273,7 @@ class _BridgeManager:
             domain = entity_id.split(".", 1)[0]
             if domain not in PICKER_DOMAINS:
                 continue
-            name = state.name or entity_id
+            name = entity_catalog_display_name(self.hass, state)
             display_state = str(state.state)
             if domain == "weather":
                 temp = state.attributes.get("temperature")
