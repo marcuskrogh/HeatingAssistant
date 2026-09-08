@@ -26,30 +26,19 @@ def test_countdown_computing_css_and_export() -> None:
         assert "kpi-shimmer" not in css
 
 
-def test_overview_and_room_wire_flags_to_matching_rings() -> None:
+def test_overview_and_room_use_countdown_computing_decision() -> None:
     for static in _TREES:
         overview = _read(static, "js", "pages", "overview.js")
         room = _read(static, "js", "pages", "room-detail.js")
         for source in (overview, room):
-            assert "setCountdownComputing" in source
-            assert "nmpc_computing" in source
-            assert "control_computing" in source
+            assert "setCountdownComputing" not in source
             assert "setGaugeComputing" not in source
-            nmpc_idx = source.index("nmpc_computing")
-            control_idx = source.index("control_computing")
-            nmpc_call = source.rfind("setCountdownComputing", 0, nmpc_idx)
-            control_call = source.rfind("setCountdownComputing", 0, control_idx)
-            assert nmpc_call != -1
-            assert control_call != -1
-            nmpc_target = source[nmpc_call:nmpc_idx]
-            control_target = source[control_call:control_idx]
-            assert "nmpcCountdown" in nmpc_target
-            assert "countdown.element" in control_target
+            assert "updateCountdown" in source
 
 
 def test_panel_entry_cache_bust_matches_dashboard_fallback() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=159" in index
-        assert "return '159'" in dashboard
+        assert "industrial-dashboard.js?v=160" in index
+        assert "return '160'" in dashboard

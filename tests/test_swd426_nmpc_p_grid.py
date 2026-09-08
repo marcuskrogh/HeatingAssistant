@@ -253,13 +253,13 @@ def test_panel_wires_shared_epoch_and_computing_overlay() -> None:
     assert "export function setCountdownComputing" in countdown
     assert "countdown--computing" in css
     assert "isComputeInProgress" in utils
-    assert "setCountdownComputing" in overview
-    assert "setCountdownComputing" in room
-    assert "paintCountdownLoading" in room
-    assert "nmpc_computing" in overview
-    assert "control_computing" in overview
-    assert "nmpc_computing" in room
-    assert "control_computing" in room
+    assert "setCountdownComputing" not in overview
+    assert "setCountdownComputing" not in room
+    assert "paintCountdownLoading" not in room
+    assert "updateCountdown" in overview
+    assert "updateCountdown" in room
+    assert "nmpc_computing" in countdown
+    assert "control_computing" in countdown
     assert "setGaugeComputing" not in overview
     assert "setGaugeComputing" not in room
     assert "nmpc_result_ts" in room
