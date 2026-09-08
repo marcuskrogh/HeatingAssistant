@@ -237,7 +237,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: 280px;
 }
 .entity-chip__remove {
   flex: 0 0 auto;

@@ -119,7 +119,10 @@ async def test_stale_retained_bad_is_ignored_after_catalog(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "20.5"},
+        states={
+            "sensor.living_room_temperature": "20.5",
+            "sensor.living_room_temperature_2": "20.7",
+        },
     )
     assert runtime.tag_statuses["living_room_temp_1"] == "GOOD"
 
@@ -145,7 +148,10 @@ async def test_retained_null_ts_bad_is_ignored_after_catalog(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "20.5"},
+        states={
+            "sensor.living_room_temperature": "20.5",
+            "sensor.living_room_temperature_2": "20.7",
+        },
     )
 
     await publish_tag_in(
@@ -169,7 +175,10 @@ async def test_live_null_ts_bad_still_warns_after_catalog(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "20.5"},
+        states={
+            "sensor.living_room_temperature": "20.5",
+            "sensor.living_room_temperature_2": "20.7",
+        },
     )
 
     await publish_tag_in(
@@ -193,7 +202,10 @@ async def test_equal_timestamp_unavailable_bad_is_ignored(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "20.5"},
+        states={
+            "sensor.living_room_temperature": "20.5",
+            "sensor.living_room_temperature_2": "20.7",
+        },
     )
 
     await publish_tag_in(
@@ -217,7 +229,10 @@ async def test_later_unavailable_bad_still_warns(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "20.5"},
+        states={
+            "sensor.living_room_temperature": "20.5",
+            "sensor.living_room_temperature_2": "20.7",
+        },
     )
 
     await publish_tag_in(
@@ -253,7 +268,10 @@ async def test_unbound_leftover_bad_does_not_affect_health(tmp_path) -> None:
     await _publish_catalog(
         runtime,
         ts=100.0,
-        states={"sensor.living_room_temperature": "21.0"},
+        states={
+            "sensor.living_room_temperature": "21.0",
+            "sensor.living_room_temperature_2": "21.2",
+        },
     )
     health = runtime.system_health()
     assert "retired_temp" not in runtime.tag_statuses

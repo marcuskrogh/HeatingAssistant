@@ -677,6 +677,7 @@ class HeatingRuntime(
         try:
             self._control_computing = True
             started = time.time()
+            self._refresh_configured_sensor_quality()
             self._sync_p_fast_index(started)
             self._recompute_room_temperatures()
             outdoor = self._outdoor_temperature()
@@ -1470,7 +1471,8 @@ class HeatingRuntime(
         update_interval = float(
             self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
         )
-        inbound = self._inbound_tag_names()
+        self._refresh_configured_sensor_quality()
+        configured = self._configured_sensor_tags()
         return evaluate_system_health(
             mqtt_connected=self._mqtt_connected(),
             mqtt_last_error=self._mqtt_last_error(),
@@ -1479,7 +1481,7 @@ class HeatingRuntime(
             tag_statuses={
                 tag: status
                 for tag, status in self.tag_statuses.items()
-                if tag in inbound
+                if tag in configured
             },
             control_mode=self.control_engine.mode,
             fallback_reason=self.control_engine.fallback_reason,
@@ -2521,10 +2523,10 @@ class HeatingRuntime(
                 return None
         return None
 
-    def _inbound_tag_names(self) -> set[str]:
-        """Return tags that represent live inbound HA telemetry."""
+    def _configured_sensor_tags(self) -> set[str]:
+        """Return inbound tags named in this cycle's room and environment config."""
 
-        tags = {binding.tag for binding in self.bindings if binding.direction == "in"}
+        tags: set[str] = set()
         for room in self._rooms():
             tags.update(self._room_temp_tags(room))
             tags.update(self._string_list(room.get("window_tags")))
@@ -2539,11 +2541,47 @@ class HeatingRuntime(
                 tags.add(value)
         return tags
 
-    def _prune_unbound_tag_quality(self) -> None:
-        """Drop quality rows for tags that are no longer wired."""
+    def _inbound_tag_names(self) -> set[str]:
+        """Return tags that represent live inbound HA telemetry."""
 
-        keep = self._inbound_tag_names()
-        keep.update(binding.tag for binding in self.bindings)
+        return self._configured_sensor_tags()
+
+    def _configured_tag_is_usable(self, tag: str) -> bool:
+        """Return True when this cycle has a usable live value for the tag.
+
+        Catalog overlay already copied usable HA states into ``tag_values``
+        when they should win. Do not re-read the catalog here — a later live
+        BAD must stay BAD even if the catalog snapshot is still a number.
+        """
+
+        value = self.tag_values.get(tag)
+        if isinstance(value, bool):
+            return True
+        return self._usable_catalog_value(value) is not None
+
+    def _refresh_configured_sensor_quality(self) -> None:
+        """Rebuild tag quality from the current config and live values.
+
+        Historical BAD rows for tags that are not configured this cycle are
+        dropped. Configured tags with a usable catalog or tag value become
+        GOOD; configured tags with no usable value become BAD.
+        """
+
+        self._apply_catalog_to_inbound_tags()
+        self._prune_unbound_tag_quality()
+        for tag in self._configured_sensor_tags():
+            if self._configured_tag_is_usable(tag):
+                self.tag_statuses[tag] = "GOOD"
+            else:
+                self.tag_statuses[tag] = "BAD"
+                # Do not invent a wall-clock timestamp for a missing value.
+                # A synthetic now() would outrank a later catalog snapshot
+                # whose HA timestamp is older than wall clock.
+
+    def _prune_unbound_tag_quality(self) -> None:
+        """Drop quality rows for tags that are not in the current config."""
+
+        keep = self._configured_sensor_tags()
         self.tag_statuses = {
             tag: status for tag, status in self.tag_statuses.items() if tag in keep
         }

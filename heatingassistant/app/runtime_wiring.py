@@ -212,10 +212,13 @@ class WiringMixin:
             "energy_price",
         }
 
-        # Keep any leftover explicit bindings (e.g. set via /api/bindings) that
-        # were not regenerated from entity fields.
+        # Keep leftover *outbound* bindings (e.g. set via /api/bindings). Never
+        # keep leftover inbound tags — health and averaging must follow this
+        # cycle's room/environment config, not a historical sensor.
         for (entity_id, direction), tag in previous.items():
             if any(item["entity_id"] == entity_id and item["direction"] == direction for item in bindings):
+                continue
+            if direction == "in":
                 continue
             if tag in regenerated_system_tags and tag not in used_tags:
                 continue

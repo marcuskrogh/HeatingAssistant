@@ -4,11 +4,22 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.14
+# 2026.09.16
 
 - Next Control and Next NMPC rings no longer flash a computing overlay when
   the solver is idle after a countdown wrap. The spin still appears as soon
   as a compute starts, including in the first seconds after the timer resets.
+
+# 2026.09.15
+
+- Overview health now reflects only the sensors currently configured. Removed
+  sensors no longer keep a leftover warning after they are taken out of the
+  setup.
+
+# 2026.09.14
+
+- Config pages show the device and entity name on each sensor chip, so sensors
+  that share a short name like TempPV can be told apart.
 
 # 2026.09.13
 

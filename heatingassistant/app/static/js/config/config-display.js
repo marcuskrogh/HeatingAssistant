@@ -1,7 +1,7 @@
 import { updateUiSettings } from '../ha-services.js?v=124';
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid, loadingNode,
-} from './config-ui.js?v=124';
+} from './config-ui.js?v=160';
 
 // Display settings
 // ---------------------------------------------------------------------------
