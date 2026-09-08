@@ -23,4 +23,4 @@
 - Branch: swd-510-sensor-health-config-cycle
 
 ## Next
-`/test SWD-510` — Adversarial testing pass on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/668

@@ -100,5 +100,5 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-510` — Adversarial testing pass on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/668
 
