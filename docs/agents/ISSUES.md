@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-510 | Task | [Bug] Overview health warns on sensors that are no longer configured | To Do | — | docs/agents/PLAN-sensor-health-config-cycle.md | `/architect SWD-510` |
+| SWD-511 | Sub-task | Rebuild configured-sensor health each cycle | To Do | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
+| SWD-512 | Sub-task | Tests, CalVer, changelog, App sync for sensor health | To Do | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |
 | SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |
@@ -231,6 +234,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-08 — `/define` SWD-510: Overview health from current configured sensors only; Sub-tasks SWD-511/SWD-512; branch `swd-510-sensor-health-config-cycle`; Next `/architect SWD-510`.
 - 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.
 - 2026-09-06 — `/sandbox` SWD-503 iteration 1 (post-merge after SWD-481): single N-step MLE matches production η/θ with 99 vs 432 evals. Next operator verdict (`/implement` or delta).
