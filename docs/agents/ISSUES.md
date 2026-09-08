@@ -7,9 +7,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-510 | Task | [Bug] Overview health warns on sensors that are no longer configured | Done | — | docs/agents/PLAN-sensor-health-config-cycle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/668 |
 | SWD-511 | Sub-task | Rebuild configured-sensor health each cycle | Done | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
 | SWD-512 | Sub-task | Tests, CalVer, changelog, App sync for sensor health | Done | SWD-510 | docs/agents/PLAN-sensor-health-config-cycle.md | — |
-| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | In Review | — | docs/agents/PLAN-unique-config-sensor-labels.md | `/ship SWD-516` closeout |
-| SWD-517 | Sub-task | Unique display-name helper and catalog names | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
-| SWD-518 | Sub-task | Tests, CalVer, changelog, App sync for unique sensor labels | In Review | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
+| SWD-516 | Task | [Tweak] Unique device+entity names on config sensor chips | Done | — | docs/agents/PLAN-unique-config-sensor-labels.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/669 (`8170dd4d`) |
+| SWD-517 | Sub-task | Unique display-name helper and catalog names | Done | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
+| SWD-518 | Sub-task | Tests, CalVer, changelog, App sync for unique sensor labels | Done | SWD-516 | docs/agents/PLAN-unique-config-sensor-labels.md | — |
 | SWD-507 | Task | [Iterate] Ingress LOAD ERROR: try without catch/finally after PE popup close | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`) |
 | SWD-508 | Sub-task | Fix waitForPeJob try without catch/finally | Done | SWD-507 | docs/agents/ITERATE.md | — |
 | SWD-509 | Sub-task | Tests, CalVer, changelog, App sync for PE panel parse fix | Done | SWD-507 | docs/agents/ITERATE.md | — |
@@ -237,11 +237,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-<<<<<<< HEAD
+- 2026-09-08 — `/ship` SWD-510: Overview health from current configured sensors only on PR https://github.com/marcuskrogh/HeatingAssistant/pull/668. Changelog `# 2026.09.15`.
 - 2026-09-08 — `/define` SWD-510: Overview health from current configured sensors only; Sub-tasks SWD-511/SWD-512; branch `swd-510-sensor-health-config-cycle`; draft PR https://github.com/marcuskrogh/HeatingAssistant/pull/668; Next `/architect SWD-510`.
-=======
-- 2026-09-08 — `/ship` SWD-516: unique config sensor labels on PR https://github.com/marcuskrogh/HeatingAssistant/pull/669. Review CLEAN (focused sequential). Next closeout merge.
->>>>>>> origin/main
+- 2026-09-08 — `/ship` SWD-516: merged #669 as `8170dd4d`. Task Done. Changelog `# 2026.09.14`.
 - 2026-09-07 — `/ship` SWD-503: merged #665 as `083cbe3`. Task Done. Changelog `# 2026.09.11`.
 - 2026-09-07 — `/review` SWD-503 CLEAN (focused sequential). GitHub blocked self-APPROVE; COMMENT on PR #665. Next closeout merge.
 - 2026-09-06 — `/sandbox` SWD-503 iteration 1 (post-merge after SWD-481): single N-step MLE matches production η/θ with 99 vs 432 evals. Next operator verdict (`/implement` or delta).
