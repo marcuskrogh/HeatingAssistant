@@ -32,8 +32,10 @@ from ..const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_U_REF_GATE,
+    MPC_MODE_LINEAR,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
+    coerce_mpc_mode,
 )
 from ..heat_sources import HeatSource
 from ..nmpc_ocp import (
@@ -193,8 +195,10 @@ class HeatingMPCController:
         p_deadband: float = DEFAULT_P_DEADBAND,
         u_ref_gate: float = DEFAULT_U_REF_GATE,
         solar_gain_smoothing_tau_s: Optional[float] = None,
+        mpc_mode: str = "nmpc",
     ) -> None:
         self._sources = heat_sources
+        self._mpc_mode = coerce_mpc_mode(mpc_mode)
         if (
             nmpc_period is not None
             or nmpc_fast_substeps is not None
@@ -217,8 +221,12 @@ class HeatingMPCController:
         self._albedo = float(albedo)
 
         # solver/derivative args accepted for API compat; SLSQP is the NLP.
-        self._solver_requested = "nmpc"
-        self._solver_active = "slsqp"
+        if self._mpc_mode == MPC_MODE_LINEAR:
+            self._solver_requested = "linear"
+            self._solver_active = "qp"
+        else:
+            self._solver_requested = "nmpc"
+            self._solver_active = "slsqp"
         self._use_analytic_derivatives = True
 
         if tracking_weight < 0.0:
@@ -729,6 +737,15 @@ class HeatingMPCController:
         return x[:n].copy()
 
     @property
+    def mpc_mode(self) -> str:
+        """Active planner: ``linear`` or ``nmpc``."""
+        return self._mpc_mode
+
+    @property
+    def is_linear_mpc(self) -> bool:
+        return self._mpc_mode == MPC_MODE_LINEAR
+
+    @property
     def timing(self) -> NmpcTiming:
         """Derived two-rate grid."""
         return self._timing
@@ -740,7 +757,7 @@ class HeatingMPCController:
         The two-hour cadence is a wall-clock grid on the runtime, not
         ``_nmpc_k >= M``. Fast-step count only indexes the installed plan.
         """
-        if self._nmpc_busy:
+        if self.is_linear_mpc or self._nmpc_busy:
             return False
         with self._nmpc_lock:
             if self._nmpc_U is None:
@@ -1249,6 +1266,143 @@ class HeatingMPCController:
             return np.zeros((n_fast, n_u), dtype=float)
         return remaining
 
+    def _compute_linear_qp(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        N: int,
+        n_rooms: int,
+        room_list: List[str],
+        outdoor_temp: float,
+        outdoor_seq: List[float],
+        solar_seq: List[Dict[str, float]],
+        wind_seq: Optional[List[float]],
+        control_trajectory: Optional[Any],
+        disabled_sources: Optional[Set[str]],
+        u_min_seq: Optional[np.ndarray],
+        u_max_seq: Optional[np.ndarray],
+        clamp_mask: Optional[np.ndarray],
+        price_forecast: Optional[List[float]],
+    ) -> Dict[str, float]:
+        """Receding-horizon successive-linearisation QP (linear MPC mode)."""
+
+        D_forecast = np.array(
+            [
+                self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
+                for k in range(N)
+            ],
+            dtype=float,
+        )
+        n_x = self._control_system.nx
+        x_ref_abs = np.zeros(n_x)
+        x_ref_abs[:n_rooms] = [
+            self._system._model.rooms[name].setpoint for name in room_list
+        ]
+        self._mpc.x_ref = x_ref_abs
+
+        if control_trajectory is not None:
+            x_ref_abs_seq = np.zeros((N, n_rooms), dtype=float)
+            offset_seq = np.zeros((N, n_rooms), dtype=float)
+            q_scale_seq = np.ones((N, n_rooms), dtype=float)
+            r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
+            for i, name in enumerate(room_list):
+                x_ref_abs_seq[:, i] = control_trajectory.setpoints[name]
+                offset_seq[:, i] = control_trajectory.comfort_offsets[name]
+                q_scale_seq[:, i] = control_trajectory.q_scales[name]
+            for j, src in enumerate(self._sources):
+                r_scale_seq[:, j] = control_trajectory.r_scales[src.room]
+        else:
+            x_ref_abs_seq = None
+            offset_seq = None
+            q_scale_seq = None
+            r_scale_seq = None
+
+        price_seq_np: Optional[np.ndarray] = None
+        if (
+            price_forecast is not None
+            and len(price_forecast) > 0
+            and self._energy_price_weight > 0.0
+        ):
+            raw = np.asarray(price_forecast, dtype=float)
+            if len(raw) >= N:
+                price_seq_np = raw[:N]
+            else:
+                price_seq_np = np.concatenate([raw, np.full(N - len(raw), raw[-1])])
+
+        _t0 = time.perf_counter()
+        u_abs, U_abs, X_abs = self._mpc.step(
+            y,
+            d,
+            p,
+            0.0,
+            D_forecast=D_forecast,
+            x_ref_abs_seq=x_ref_abs_seq,
+            offset_seq=offset_seq,
+            q_scale_seq=q_scale_seq,
+            r_scale_seq=r_scale_seq,
+            u_min_seq=u_min_seq,
+            u_max_seq=u_max_seq,
+            price_seq=price_seq_np,
+            elec_heat=self._elec_heat,
+            elec_cool=self._elec_cool,
+            bid_mask=self._bid_mask,
+            price_weight=self._energy_price_weight,
+            dt_h=self._dt_h,
+        )
+        self._solve_times.append(time.perf_counter() - _t0)
+        self._total_computes += 1
+        self._last_innovation = self._ekf.last_innovation
+        self._mpc_actions = {
+            src.name: float(np.clip(u_abs[j], src.u_min, src.u_max))
+            for j, src in enumerate(self._sources)
+        }
+        if disabled_sources:
+            for j, src in enumerate(self._sources):
+                if src.name not in disabled_sources:
+                    continue
+                if clamp_mask is None:
+                    u_abs[j] = 0.0
+                    U_abs[:, j] = 0.0
+                else:
+                    col = clamp_mask[:, j]
+                    if not col[0]:
+                        u_abs[j] = 0.0
+                    U_abs[~col, j] = 0.0
+
+        _nx_phys = self._system._nx_phys
+        _x_hat = self._ekf.x_hat
+        _filter_idx = self._system._filter_idx_for_source
+        actions: Dict[str, float] = {}
+        for j, src in enumerate(self._sources):
+            frac = float(np.clip(u_abs[j], src.u_min, src.u_max))
+            actions[src.name] = frac
+            k = int(_filter_idx[j])
+            eff_frac = (
+                float(np.clip(_x_hat[_nx_phys + k], src.u_min, src.u_max))
+                if k >= 0
+                else frac
+            )
+            if src.can_cool:
+                src._current_power = src.display_smooth_thermal_power(
+                    eff_frac, outdoor_temp, self._system._k_sigmoid,
+                )
+            else:
+                src.set_power(eff_frac, outdoor_temp)
+        self._u_prev = u_abs.copy()
+        self._mpc._u_prev = u_abs.copy()
+        self._predictions = self._compute_nonlinear_predictions(
+            U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
+        )
+        self._linearised_predictions = self._extract_linearised_predictions(
+            X_abs, room_list, n_rooms
+        )
+        self._heating_schedule = [
+            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
+            for k in range(N)
+        ]
+        return actions
+
     def _forecast_T(self, n_fast: int) -> Optional[np.ndarray]:
         """Remaining accept-time T_ref from the current plan index, padded.
 
@@ -1473,6 +1627,26 @@ class HeatingMPCController:
                     clamp_mask[k, j] = True
             if not clamp_mask.any():
                 u_min_seq = u_max_seq = clamp_mask = None
+
+        if self.is_linear_mpc:
+            return self._compute_linear_qp(
+                y,
+                d,
+                p,
+                N,
+                n_rooms,
+                room_list,
+                outdoor_temp,
+                outdoor_seq,
+                solar_seq,
+                wind_seq,
+                control_trajectory,
+                disabled_sources,
+                u_min_seq,
+                u_max_seq,
+                clamp_mask,
+                price_forecast,
+            )
 
         # ── EKF then P (no linearised QP on the happy path) ──────────────
         self._mpc.estimate_only(y, d, p, 0.0)

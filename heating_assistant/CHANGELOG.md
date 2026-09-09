@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.18
+
+- Controller Tuning lets you choose linear or nonlinear model predictive
+  control. Shared weights stay in place when you switch, and each planner
+  keeps its own timing settings.
+
 # 2026.09.17
 
 - Next Control and Next NMPC rings stay in the computing overlay for the

@@ -1001,6 +1001,9 @@ class HeatingRuntime(
                 "power_scale": float(getattr(source, "power_scale", 1.0)),
             }
         config = {
+            const.CONF_MPC_MODE: const.coerce_mpc_mode(
+                self.options.get(const.CONF_MPC_MODE, const.DEFAULT_MPC_MODE)
+            ),
             "comfort_offset": float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)),
             "tracking_weight": float(self.options.get("tracking_weight", 1.0)),
             "energy_weight": float(self.options.get("energy_weight", 1.0)),
@@ -1019,8 +1022,10 @@ class HeatingRuntime(
                 self.options.get("soft_constraint_linear_weight", 0.0)
             ),
             "terminal_weight": float(self.options.get("terminal_weight", 1.0)),
-            "horizon": int(self.control_engine._derived_horizon(self.options)),
-            "update_interval": int(self.control_engine._derived_dt(self.options)),
+            "horizon": int(self.options.get("horizon", const.DEFAULT_HORIZON)),
+            "update_interval": int(
+                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+            ),
             const.CONF_NMPC_PERIOD: float(
                 self.options.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
             ),

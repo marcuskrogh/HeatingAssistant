@@ -19,6 +19,8 @@ class NmpcMixin:
     def _schedule_nmpc_worker(self) -> None:
         """Start a slow NLP thread when due; never block the control cycle."""
 
+        if const.coerce_mpc_mode(self.options.get(const.CONF_MPC_MODE)) == const.MPC_MODE_LINEAR:
+            return
         thread = getattr(self, "_nmpc_thread", None)
         if thread is not None and thread.is_alive():
             return

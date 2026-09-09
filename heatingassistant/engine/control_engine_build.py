@@ -125,5 +125,6 @@ class BuildMixin:
                     const.SOLAR_GAIN_SMOOTHING_TAU_S,
                 )
             ),
+            mpc_mode=const.coerce_mpc_mode(config.get(const.CONF_MPC_MODE)),
         )
         return build_mpc_controller(build_config)

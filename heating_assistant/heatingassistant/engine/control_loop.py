@@ -133,14 +133,35 @@ class ControlEngine(BuildMixin, PreviewMixin):
         """Rebuild model/controller state from an App config dictionary."""
 
         reject_negative_p_gating_knobs(config)
-        self.config = dict(config)
+        incoming = dict(config)
+        mode = const.coerce_mpc_mode(incoming.get(const.CONF_MPC_MODE))
+        incoming[const.CONF_MPC_MODE] = mode
+        linear_dt = incoming.get(
+            const.CONF_UPDATE_INTERVAL, const.DEFAULT_UPDATE_INTERVAL
+        )
+        linear_horizon = incoming.get(const.CONF_HORIZON, const.DEFAULT_HORIZON)
+        nmpc_period = incoming.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
+        nmpc_substeps = incoming.get(
+            const.CONF_NMPC_FAST_SUBSTEPS, const.DEFAULT_NMPC_FAST_SUBSTEPS
+        )
+        nmpc_horizon_h = incoming.get(
+            const.CONF_NMPC_HORIZON_H, const.DEFAULT_NMPC_HORIZON_H
+        )
+        self.config = incoming
         try:
             timing = self._nmpc_timing(self.config)
-            self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
-            self.config[const.CONF_HORIZON] = timing.n_fast
-            self.config[const.CONF_NMPC_PERIOD] = timing.period_s
-            self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
-            self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
+            if mode == const.MPC_MODE_LINEAR:
+                self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
+                self.config[const.CONF_HORIZON] = timing.n_fast
+                self.config[const.CONF_NMPC_PERIOD] = nmpc_period
+                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = nmpc_substeps
+                self.config[const.CONF_NMPC_HORIZON_H] = nmpc_horizon_h
+            else:
+                self.config[const.CONF_UPDATE_INTERVAL] = linear_dt
+                self.config[const.CONF_HORIZON] = linear_horizon
+                self.config[const.CONF_NMPC_PERIOD] = timing.period_s
+                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
+                self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
         except ValueError:
             _LOGGER.warning("Invalid NMPC timing triple in config; controller build may fail")
         self.model = _build_house_model(_list_of_mappings(self.config.get("rooms")))

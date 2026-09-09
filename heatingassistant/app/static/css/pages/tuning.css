@@ -1,5 +1,53 @@
-/* Tuning Page */
-.tuning-controls__row {
+.tuning-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.tuning-mode-card {
+  text-align: left;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.tuning-mode-card:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.tuning-mode-card--active {
+  border-color: var(--accent);
+  background: rgba(79, 195, 247, 0.1);
+  color: var(--text-primary);
+}
+
+.tuning-mode-card__title {
+  font-size: var(--type-kicker);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.tuning-mode-card__body {
+  margin: 0;
+  font-size: var(--type-ui);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 720px) {
+  .tuning-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
   display: flex;
   align-items: center;
   gap: 16px;

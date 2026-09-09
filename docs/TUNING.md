@@ -146,9 +146,10 @@ consider more history or a re-run with problematic parameters locked.
 
 ## MPC controller tuning
 
-The MPC controller solves a quadratic program at each update cycle. Adjust weights
-and horizons on the panel **Tuning** page. Use **Preview** to overlay planned
-temperature and power trajectories before **Apply Changes**.
+Open **Tuning** and choose **linear** or **nonlinear** model predictive control.
+Shared penalty weights keep their values when you switch. Linear mode solves a
+quadratic program each sample interval. Nonlinear mode uses the slower NMPC
+planner plus the fast P tracker. Use **Preview** before **Apply Changes**.
 
 Live penalty weights take effect on the next planning cycle. Changing **Sample
 interval** or **Prediction horizon** rebuilds the MPC problem.
@@ -157,6 +158,7 @@ interval** or **Prediction horizon** rebuilds the MPC problem.
 
 | Parameter | Config key | Default | Effect |
 |-----------|-----------|---------|--------|
+| **Planner** | `mpc_mode` | `nmpc` | `linear` (QP, lower compute, linearisation error) or `nmpc` (nonlinear planner + P tracker) |
 | **Comfort offset** | `comfort_offset` | `2.0 °C` | Half-width of the soft comfort band around the setpoint |
 | **Tracking weight** | `tracking_weight` | `0` | Setpoint tracking strength; `0` = band-only (zone) control |
 | **Energy weight** | `energy_weight` | `0.01` | Penalises heater output — higher = more conservative heating |
