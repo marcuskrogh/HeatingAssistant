@@ -1,6 +1,6 @@
 // System Status page — MQTT / API / module health / MPC operational detail.
 import { systemEntity, entityAttr, entityValue, formatNumber } from '../utils.js?v=124';
-import { mpcLoadPercent } from '../kpi-engine.js?v=124';
+import { mpcLoadPercent } from '../kpi-engine.js?v=149';
 
 const QUALITY_LABEL = {
   healthy: 'HEALTHY',
@@ -64,8 +64,8 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const lastDuration = entityValue(s, systemEntity('mpc_performance'));
     const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_control_ran_ts');
     const dt = entityAttr(s, systemEntity('mpc_performance'), 'dt_s');
-    const lastNmpc = entityAttr(s, systemEntity('mpc_performance'), 'last_nmpc_ts');
-    const nmpcPeriod = entityAttr(s, systemEntity('mpc_performance'), 'nmpc_period_s');
+    const lastPlanner = entityAttr(s, systemEntity('mpc_performance'), 'last_planner_duration_s');
+    const mpcMode = entityAttr(s, systemEntity('mpc_performance'), 'mpc_mode');
     const meanErr = entityAttr(s, systemEntity('mpc_performance'), 'mean_tracking_error');
     const hassCount = Object.keys(hass?.states || s || {}).length;
 
@@ -95,16 +95,15 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
           ${row('Rooms configured', String((rooms || []).length))}
         </section>
         <section class="system-status__card">
-          <div class="system-status__card-title">MPC / CONTROL</div>
+          <div class="system-status__card-title">MPC</div>
+          ${row('Planner', mpcMode || '—')}
           ${row('Mode', controlMode || '—')}
           ${row('Fallback', fallback || 'none', fallback ? 'warning' : 'healthy')}
           ${row('MPC load', mpcLoad == null ? '—' : `${formatNumber(mpcLoad, 0)}%`)}
-          ${row('Last solve', lastDuration == null ? '—' : `${formatNumber(Number(lastDuration), 2)} s`)}
-          ${row('Control interval', dt == null ? '—' : `${formatNumber(Number(dt), 0)} s`)}
-          ${row('NMPC interval', nmpcPeriod == null ? '—' : `${formatNumber(Number(nmpcPeriod), 0)} s`)}
+          ${row('Last solve', (lastPlanner ?? lastDuration) == null ? '—' : `${formatNumber(Number(lastPlanner ?? lastDuration), 2)} s`)}
+          ${row('Sample interval', dt == null ? '—' : `${formatNumber(Number(dt), 0)} s`)}
           ${row('Mean tracking err', meanErr == null ? '—' : formatNumber(Number(meanErr), 2))}
-          ${row('Last control ts', lastRun == null ? '—' : String(lastRun))}
-          ${row('Last NMPC ts', lastNmpc == null ? '—' : String(lastNmpc))}
+          ${row('Last compute ts', lastRun == null ? '—' : String(lastRun))}
         </section>
         <section class="system-status__card">
           <div class="system-status__card-title">ID HISTORY</div>

@@ -2,7 +2,7 @@ import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '
 import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=155';
+import { createCountdown, updateCountdown } from '../components/countdown.js?v=156';
 import { bindKpiExpandSection } from '../components/kpi-expand.js?v=149';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=124';
 import { getRoomScheduleData } from '../schedule-utils.js?v=124';
@@ -16,17 +16,16 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=148';
+} from '../kpi-engine.js?v=149';
 import {
   energyPriceDetail,
   heatLossDetail,
-  nextControlDetail,
-  nextNmpcDetail,
+  nextComputeDetail,
   roomModelFitDetail,
   roomPowerDetail,
   solarGainDetail,
   timeInRangeDetail,
-} from '../kpi-detail-catalog.js?v=148';
+} from '../kpi-detail-catalog.js?v=149';
 import { setPanelHash } from '../panel-hash.js?v=124';
 import {
   setRoomComfortOffset,
@@ -258,13 +257,8 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const countdown = createCountdown(state, true);
   kpiExpand.register(countdown.element, {
-    key: 'next-control',
-    detail: nextControlDetail,
-  });
-  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: true });
-  kpiExpand.register(nmpcCountdown.element, {
-    key: 'next-nmpc',
-    detail: nextNmpcDetail,
+    key: 'next-compute',
+    detail: nextComputeDetail,
   });
 
   function paintTimeInRangeGauge(s) {
@@ -508,7 +502,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const countdownInterval = setInterval(() => {
     countdown.tick(latestState);
-    nmpcCountdown.tick(latestState);
   }, 1000);
 
   return {
@@ -537,7 +530,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       paintModelFitGauge(newState);
       kpiExpand.paint(newState);
       updateCountdown(countdown, newState);
-      updateCountdown(nmpcCountdown, newState);
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.

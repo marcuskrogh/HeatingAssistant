@@ -45,15 +45,15 @@ def test_panel_countdown_computing_harness() -> None:
 
 def test_calver_and_cache_bust_for_computing_overlay() -> None:
     init = (_ROOT / "heatingassistant" / "__init__.py").read_text(encoding="utf-8")
-    assert '__version__ = "2026.09.20"' in init
+    assert '__version__ = "2026.09.21"' in init
     changelog = (_ROOT / "heating_assistant" / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "# 2026.09.17" in changelog
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=167" in index
-        assert "return '167'" in dashboard
+        assert "industrial-dashboard.js?v=168" in index
+        assert "return '168'" in dashboard
         overview = _read(static, "js", "pages", "overview.js")
         room = _read(static, "js", "pages", "room-detail.js")
-        assert "countdown.js?v=155" in overview
-        assert "countdown.js?v=155" in room
+        assert "countdown.js?v=156" in overview
+        assert "countdown.js?v=156" in room

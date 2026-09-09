@@ -152,7 +152,7 @@ def test_concurrent_runtime_state_saves_do_not_raise(tmp_path: Path) -> None:
     assert (tmp_path / "state.json").is_file()
 
 
-def test_panel_js_wires_dual_countdown_rings() -> None:
+def test_panel_js_wires_single_compute_countdown() -> None:
     countdown = (_STATIC / "js" / "components" / "countdown.js").read_text(
         encoding="utf-8"
     )
@@ -161,13 +161,14 @@ def test_panel_js_wires_dual_countdown_rings() -> None:
     status = (_STATIC / "js" / "pages" / "system-status.js").read_text(
         encoding="utf-8"
     )
-    assert "NEXT CONTROL" in countdown
-    assert "NEXT NMPC" in countdown
+    assert "NEXT COMPUTE" in countdown
+    assert "NEXT CONTROL" not in countdown
+    assert "NEXT NMPC" not in countdown
     assert "last_nmpc_ts" in countdown
-    assert countdown.count("lastRunAttr: 'last_nmpc_ts'") >= 2
-    assert "nmpc_period_s" in countdown
-    assert "COUNTDOWN_NMPC" in overview
-    assert "COUNTDOWN_NMPC" in room
-    assert "nmpc_period_s" in status
-    assert "last_nmpc_ts" in status
-    assert "NMPC interval" in status
+    assert "next-compute" in overview
+    assert "nextComputeDetail" in overview
+    assert "next-compute" in room
+    assert "nmpcCountdown" not in overview
+    assert "nmpcCountdown" not in room
+    assert "Sample interval" in status
+    assert "NMPC interval" not in status

@@ -1,6 +1,6 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createRoomClimateTile } from '../components/room-climate-tile.js?v=124';
-import { createCountdown, updateCountdown, COUNTDOWN_NMPC } from '../components/countdown.js?v=155';
+import { createCountdown, updateCountdown } from '../components/countdown.js?v=156';
 import { bindKpiExpandSection } from '../components/kpi-expand.js?v=149';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=124';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=124';
@@ -13,20 +13,19 @@ import {
   houseEffectiveCop,
   houseMeanTrackingError,
   houseModelFit,
-  nmpcLoadPercent,
-} from '../kpi-engine.js?v=148';
+  mpcLoadPercent,
+} from '../kpi-engine.js?v=149';
 import {
   comfortDetail,
   dailyEnergyDetail,
   heatingPowerDetail,
   houseModelFitDetail,
-  nextControlDetail,
-  nextNmpcDetail,
-  nmpcLoadDetail,
+  nextComputeDetail,
+  mpcLoadDetail,
   overallHealthDetail,
   systemCopDetail,
   trackingErrorDetail,
-} from '../kpi-detail-catalog.js?v=148';
+} from '../kpi-detail-catalog.js?v=149';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue, entityAttr,
@@ -62,13 +61,8 @@ export function renderOverview(container, rooms, state, connection, hass) {
 
   const countdown = createCountdown(state, false);
   controllerExpand.register(countdown.element, {
-    key: 'next-control',
-    detail: nextControlDetail,
-  });
-  const nmpcCountdown = createCountdown(state, { ...COUNTDOWN_NMPC, small: false });
-  controllerExpand.register(nmpcCountdown.element, {
-    key: 'next-nmpc',
-    detail: nextNmpcDetail,
+    key: 'next-compute',
+    detail: nextComputeDetail,
   });
   controllerExpand.paint(state);
 
@@ -95,7 +89,6 @@ export function renderOverview(container, rooms, state, connection, hass) {
   let latestExperiments = null;
   const countdownInterval = setInterval(() => {
     countdown.tick(latestState);
-    nmpcCountdown.tick(latestState);
   }, 1000);
 
   // Fetch fresh schedule data via WebSocket (bypasses entity-state cache) and
@@ -146,7 +139,6 @@ export function renderOverview(container, rooms, state, connection, hass) {
       controllerExpand.paint(newState);
       tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
-      updateCountdown(nmpcCountdown, newState);
       // Re-fetch schedules so the badge and period list reflect any toggle or
       // save that triggered this state update. Debounced to coalesce bursts.
       refreshSchedules();
@@ -188,20 +180,20 @@ function buildSystemStatusGauges(state) {
     },
   });
 
-  const nmpcGauge = createGauge({
-    value: nmpcLoadPercent(state) ?? 0,
+  const mpcGauge = createGauge({
+    value: mpcLoadPercent(state) ?? 0,
     min: 0,
     max: 100,
-    label: 'NMPC LOAD',
+    label: 'MPC LOAD',
     format: (v) => `${formatNumber(v, 0)}%`,
     severity: KPI_SEVERITY.mpcLoad,
   });
   gauges.push({
-    key: 'nmpc-load',
-    detail: nmpcLoadDetail,
-    element: nmpcGauge,
-    updater: (s) => updateGauge(nmpcGauge, {
-      value: nmpcLoadPercent(s) ?? 0, min: 0, max: 100,
+    key: 'mpc-load',
+    detail: mpcLoadDetail,
+    element: mpcGauge,
+    updater: (s) => updateGauge(mpcGauge, {
+      value: mpcLoadPercent(s) ?? 0, min: 0, max: 100,
       format: (v) => `${formatNumber(v, 0)}%`,
       severity: KPI_SEVERITY.mpcLoad,
     }),

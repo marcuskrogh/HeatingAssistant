@@ -166,15 +166,15 @@ assert(approx(kpi.houseHeatingPowerGaugeMax(null), 10000), 'invalid live power m
 
 // ---- MPC load ---------------------------------------------------------------------
 {
-  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('1.0') }), 50), '1.0 s solve of 2.0 s budget must be 50%');
-  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('5.0') }), 100), 'over-budget solves must cap at 100%');
-  assert(kpi.mpcLoadPercent({}) === 0, 'missing mpc_performance must read as 0% load');
+  const nmpcState = { [MPC]: ent('0.18', { last_planner_duration_s: 24.7, dt_s: 7200, mpc_mode: 'nmpc' }) };
+  assert(approx(kpi.mpcLoadBudgetS(7200), 720), 'budget must be 10% of the sample interval');
+  assert(approx(kpi.mpcLoadPercent(nmpcState), (24.7 / 720) * 100), '24.7 s of 720 s budget must be about 3% load');
+  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('0.18', { last_planner_duration_s: 800, dt_s: 7200 }) }), 100), 'load must clamp at 100%');
+  assert(kpi.mpcLoadPercent({}) === null, 'missing planner duration must hide load');
+  const linear = { [MPC]: ent('1.8', { mpc_mode: 'linear', dt_s: 900 }) };
+  assert(approx(kpi.mpcLoadPercent(linear), (1.8 / 90) * 100), 'Linear load uses control-cycle duration vs 10% of dt');
   assert(kpi.regulatorLoadPercent === undefined, 'two-layer regulator load KPI must be gone');
-  const nmpcState = { [MPC]: ent('0.18', { last_nmpc_duration_s: 24.7, nmpc_period_s: 7200 }) };
-  assert(approx(kpi.nmpcLoadBudgetS(7200), 720), 'NMPC budget must be 10% of the period');
-  assert(approx(kpi.nmpcLoadPercent(nmpcState), (24.7 / 720) * 100), '24.7 s of 720 s budget must be about 3% NMPC load');
-  assert(approx(kpi.nmpcLoadPercent({ [MPC]: ent('0.18', { last_nmpc_duration_s: 800, nmpc_period_s: 7200 }) }), 100), 'NMPC load must clamp at 100%');
-  assert(kpi.nmpcLoadPercent({}) === null, 'missing NMPC duration must hide NMPC load');
+  assert(kpi.nmpcLoadPercent === kpi.mpcLoadPercent, 'nmpcLoadPercent must alias mpcLoadPercent');
 }
 
 // ---- room comfort deviation --------------------------------------------------------

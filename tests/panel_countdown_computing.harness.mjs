@@ -1,5 +1,5 @@
 /**
- * Wrap vs flag overlay for NEXT CONTROL / NEXT NMPC.
+ * Wrap vs flag overlay for the shared Next Compute ring.
  * Run: node tests/panel_countdown_computing.harness.mjs
  */
 import { dirname, join } from 'node:path';
@@ -20,7 +20,6 @@ function assert(cond, msg) {
 const MPC = 'sensor.heating_assistant_mpc_performance';
 const SUMMARY = 'sensor.heating_assistant_system_summary';
 const epoch = 1_700_000_000;
-const period = 3600;
 const dt = 900;
 
 function state(attrs, enabled = true) {
@@ -30,7 +29,8 @@ function state(attrs, enabled = true) {
       state: '0.2',
       attributes: {
         dt_s: dt,
-        nmpc_period_s: period,
+        nmpc_period_s: dt,
+        mpc_mode: 'nmpc',
         last_nmpc_ts: epoch,
         nmpc_computing: false,
         control_computing: false,
@@ -43,101 +43,70 @@ function state(attrs, enabled = true) {
   };
 }
 
-const nmpc = countdown.COUNTDOWN_NMPC;
-const control = countdown.COUNTDOWN_CONTROL;
+const spec = countdown.COUNTDOWN_COMPUTE;
 
 assert(
-  countdown.countdownIsComputing(state({ nmpc_computing: true }), nmpc, (epoch + 100) * 1000),
+  countdown.countdownIsComputing(state({ nmpc_computing: true }), spec, (epoch + 100) * 1000),
   'nmpc_computing flag must show overlay',
 );
 assert(
-  !countdown.countdownIsComputing(state({ nmpc_computing: true }), control, (epoch + 100) * 1000),
-  'NMPC flag must not force CONTROL overlay',
-);
-assert(
-  countdown.countdownIsComputing(state({ control_computing: true }), control, (epoch + 100) * 1000),
+  countdown.countdownIsComputing(state({ control_computing: true }), spec, (epoch + 100) * 1000),
   'control_computing flag must show overlay',
 );
 
 const justWrapped = (epoch + 1) * 1000;
 assert(
-  countdown.countdownIsComputing(state({}), nmpc, justWrapped),
-  'NMPC wrap with stale nmpc_result_ts must show overlay without a poll',
-);
-assert(
-  countdown.countdownIsComputing(state({}), control, justWrapped),
-  'CONTROL wrap with stale last_control_ran_ts must show overlay',
+  countdown.countdownIsComputing(state({}), spec, justWrapped),
+  'wrap with stale result stamp must show overlay without a poll',
 );
 
 const threeSecondsIn = (epoch + 3) * 1000;
 assert(
-  countdown.countdownIsComputing(state({}), nmpc, threeSecondsIn),
-  'NMPC overlay must still show a few seconds after wrap (poll not required)',
-);
-assert(
-  !countdown.countdownIsComputing(state({}), control, threeSecondsIn),
-  'CONTROL wrap overlay must clear after the short P cap',
+  countdown.countdownIsComputing(state({}), spec, threeSecondsIn),
+  'overlay must still show a few seconds after wrap (poll not required)',
 );
 
 const fifteenSecondsIn = (epoch + 15) * 1000;
 assert(
-  !countdown.countdownIsComputing(state({}), nmpc, fifteenSecondsIn),
-  'NMPC wrap overlay must clear after the poll-gap cap when computing is false',
+  !countdown.countdownIsComputing(state({}), spec, fifteenSecondsIn),
+  'wrap overlay must clear after the poll-gap cap when computing is false',
 );
 assert(
   countdown.countdownIsComputing(
     state({ nmpc_computing: true }),
-    nmpc,
+    spec,
     fifteenSecondsIn,
   ),
-  'NMPC flag must keep overlay after wrap catch-up',
+  'nmpc flag must keep overlay after wrap catch-up',
 );
 assert(
   countdown.countdownIsComputing(
     state({ control_computing: true }),
-    control,
+    spec,
     fifteenSecondsIn,
   ),
-  'CONTROL flag must keep overlay after wrap catch-up',
-);
-assert(
-  !countdown.countdownIsComputing(state({}), control, fifteenSecondsIn),
-  'CONTROL wrap overlay must clear after the short P cap',
-);
-
-assert(
-  !countdown.countdownIsComputing(
-    state({ nmpc_result_ts: undefined }),
-    nmpc,
-    fifteenSecondsIn,
-  ),
-  'missing nmpc_result_ts must not keep overlay after catch-up',
+  'control flag must keep overlay after wrap catch-up',
 );
 
 assert(
   !countdown.countdownIsComputing(
     state({ nmpc_result_ts: epoch + 0.2 }),
-    nmpc,
+    spec,
     justWrapped,
   ),
-  'NMPC overlay clears when result stamp is in the current slot',
+  'Nonlinear overlay clears when nmpc_result_ts is in the current slot',
 );
 assert(
   !countdown.countdownIsComputing(
-    state({ last_control_ran_ts: epoch + 0.2 }),
-    control,
+    state({ mpc_mode: 'linear', last_control_ran_ts: epoch + 0.2 }),
+    spec,
     justWrapped,
   ),
-  'CONTROL overlay clears when last_control_ran_ts is in the current slot',
+  'Linear overlay clears when last_control_ran_ts is in the current slot',
 );
 
 assert(
-  !countdown.countdownIsComputing(state({}), nmpc, (epoch + 700) * 1000),
-  'NMPC wrap overlay must not stick past the poll-gap cap',
-);
-
-assert(
-  !countdown.countdownIsComputing(state({ nmpc_computing: true }, false), nmpc, justWrapped),
+  !countdown.countdownIsComputing(state({ nmpc_computing: true }, false), spec, justWrapped),
   'stopped system must not show overlay',
 );
 

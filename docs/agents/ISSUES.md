@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-536 | Task | [Iterate] Mode-general Next Compute and MPC Load KPIs | In Review | — | docs/agents/ITERATE-kpi-mpc-general.md | `/ship SWD-536` closeout — https://github.com/marcuskrogh/HeatingAssistant/pull/678 |
+| SWD-537 | Sub-task | Unify Next Compute ring and MPC Load KPIs | In Review | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
+| SWD-538 | Sub-task | Tests, CalVer, changelog, App sync for KPI copy | In Review | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
 | SWD-532 | Task | [Iterate] Nonlinear MPC on the same sample grid as Linear | Done | — | docs/agents/ITERATE-nmpc-equiv-lmpc.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/676 (`b07c39d8`) |
 | SWD-533 | Sub-task | Single-rate NMPC equivalent to Linear | Done | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
 | SWD-534 | Sub-task | Tests, TUNING.md, CalVer, App sync | Done | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
@@ -253,6 +256,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-09 — `/review-fix` SWD-536 CLEAN (focused): 0 blockers / 0 should-fix. pytest-fast leftover SWD-426/513 source locks updated. Next closeout merge PR #678.
 - 2026-09-09 — `/iterate` SWD-526 from SWD-522: mode-card design, Apply-to-switch, operator timing knobs. Next `/review-fix SWD-526`.
 - 2026-09-09 — `/ship` SWD-522 via PR #672 (`4cc5a506`): exclusive linear vs nonlinear MPC; NMPC holds `U*` (ZOH); two-layer P and heater P gain gone; inner climate setpoint mapping stays. Review CLEAN (focused). Changelog `heating_assistant/CHANGELOG.md` `# 2026.09.18`. Next: Done.
 - 2026-09-09 — `/review-fix` SWD-522 CLEAN (focused): 0 blockers / 0 should-fix. Next `/ship SWD-522`.

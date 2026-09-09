@@ -11,8 +11,8 @@ import {
   houseEffectiveCop,
   houseMeanTrackingError,
   houseModelFit,
-  nmpcLoadPercent,
-  nmpcLoadBudgetS,
+  mpcLoadPercent,
+  mpcLoadBudgetS,
   NMPC_LOAD_FRACTION,
   roomTimeInRangePct,
   roomHeatLoss,
@@ -20,7 +20,7 @@ import {
   solarGainGaugeMax,
   roomModelFit,
   houseComfortBreakdown,
-} from './kpi-engine.js?v=148';
+} from './kpi-engine.js?v=149';
 import {
   formatEnergy,
   formatPercent,
@@ -33,7 +33,7 @@ import {
   entityAttr,
   systemEntity,
 } from './utils.js?v=127';
-import { COUNTDOWN_CONTROL, COUNTDOWN_NMPC, countdownRemaining } from './components/countdown.js?v=155';
+import { COUNTDOWN_COMPUTE, countdownRemaining } from './components/countdown.js?v=156';
 
 function dash(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -78,27 +78,34 @@ export function overallHealthDetail(state) {
   };
 }
 
-function nmpcRows(state) {
+function mpcLoadRows(state) {
   const entity = systemEntity('mpc_performance');
-  const load = nmpcLoadPercent(state);
-  const budget = nmpcLoadBudgetS(entityAttr(state, entity, 'nmpc_period_s'));
+  const load = mpcLoadPercent(state);
+  const interval = entityAttr(state, entity, 'dt_s') ?? entityAttr(state, entity, 'nmpc_period_s');
+  const budget = mpcLoadBudgetS(interval);
+  const duration = entityAttr(state, entity, 'last_planner_duration_s')
+    ?? entityAttr(state, entity, 'last_nmpc_duration_s');
   return [
     { label: 'Load', value: load == null ? '—' : formatPercent(load) },
-    { label: 'Last NMPC solve', value: formatSeconds(entityAttr(state, entity, 'last_nmpc_duration_s')) },
-    { label: 'Load budget', value: budget == null ? '—' : `${formatNumber(budget, 0)} s (${formatNumber(NMPC_LOAD_FRACTION * 100, 0)}% of period)` },
-    { label: 'NMPC computing', value: yesNo(entityAttr(state, entity, 'nmpc_computing')) },
-    { label: 'NMPC period', value: formatSeconds(entityAttr(state, entity, 'nmpc_period_s')) },
-    { label: 'Last NMPC result', value: formatUnix(entityAttr(state, entity, 'nmpc_result_ts')) },
+    { label: 'Last solve', value: formatSeconds(duration ?? entityValue(state, entity)) },
+    { label: 'Load budget', value: budget == null ? '—' : `${formatNumber(budget, 0)} s (${formatNumber(NMPC_LOAD_FRACTION * 100, 0)}% of sample)` },
+    { label: 'Computing', value: yesNo(entityAttr(state, entity, 'nmpc_computing') || entityAttr(state, entity, 'control_computing')) },
+    { label: 'Sample interval', value: formatSeconds(interval) },
+    { label: 'Last result', value: formatUnix(entityAttr(state, entity, 'nmpc_result_ts') || entityAttr(state, entity, 'last_control_ran_ts')) },
   ];
 }
 
-export function nmpcLoadDetail(state) {
+export function mpcLoadDetail(state) {
   return {
     description:
-      'Share of the NMPC load budget used by the last NMPC solve. '
-      + 'The budget is 10% of the NMPC period. This card is NMPC only.',
-    sections: [{ title: 'NMPC', rows: nmpcRows(state) }],
+      'Share of the sample-interval load budget used by the last planner solve. '
+      + 'The budget is 10% of the sample interval. Linear and Nonlinear share this card.',
+    rows: mpcLoadRows(state),
   };
+}
+
+export function nmpcLoadDetail(state) {
+  return mpcLoadDetail(state);
 }
 
 export function comfortDetail(state, rooms) {
@@ -249,30 +256,24 @@ export function roomModelFitDetail(state, room) {
   };
 }
 
-export function nextControlDetail(state) {
+export function nextComputeDetail(state) {
   const entity = systemEntity('mpc_performance');
-  const remaining = countdownRemaining(state, COUNTDOWN_CONTROL);
+  const remaining = countdownRemaining(state, COUNTDOWN_COMPUTE);
   return {
-    description: 'Time until the next control sample on the shared Start epoch.',
+    description: 'Time until the next planner sample on the shared Start epoch.',
     rows: [
       { label: 'Remaining', value: remaining == null ? '—' : formatCountdown(remaining) },
       { label: 'Interval', value: formatSeconds(entityAttr(state, entity, 'dt_s')) },
-      { label: 'Computing', value: yesNo(entityAttr(state, entity, 'control_computing')) },
+      { label: 'Computing', value: yesNo(entityAttr(state, entity, 'nmpc_computing') || entityAttr(state, entity, 'control_computing')) },
       { label: 'Last ran', value: formatUnix(entityAttr(state, entity, 'last_control_ran_ts')) },
     ],
   };
 }
 
+export function nextControlDetail(state) {
+  return nextComputeDetail(state);
+}
+
 export function nextNmpcDetail(state) {
-  const entity = systemEntity('mpc_performance');
-  const remaining = countdownRemaining(state, COUNTDOWN_NMPC);
-  return {
-    description: 'Time until the next NMPC slot on the shared Start epoch.',
-    rows: [
-      { label: 'Remaining', value: remaining == null ? '—' : formatCountdown(remaining) },
-      { label: 'Period', value: formatSeconds(entityAttr(state, entity, 'nmpc_period_s')) },
-      { label: 'Computing', value: yesNo(entityAttr(state, entity, 'nmpc_computing')) },
-      { label: 'Last NMPC', value: formatUnix(entityAttr(state, entity, 'last_nmpc_ts')) },
-    ],
-  };
+  return nextComputeDetail(state);
 }

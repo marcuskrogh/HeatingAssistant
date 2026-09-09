@@ -48,20 +48,21 @@ def test_overview_nmpc_and_room_regulator_load() -> None:
         room = _read(static, "js", "pages", "room-detail.js")
         engine = _read(static, "js", "kpi-engine.js")
         catalog = _read(static, "js", "kpi-detail-catalog.js")
-        assert "NMPC LOAD" in overview
-        assert "nmpcLoadPercent" in overview
-        assert "nmpcLoadDetail" in overview
-        assert "label: 'MPC LOAD'" not in overview
-        assert "nmpcLoadDetail" in overview
-        assert not any(token == "mpcLoadDetail" for token in overview.replace(",", " ").replace(";", " ").split())
+        assert "MPC LOAD" in overview
+        assert "mpcLoadPercent" in overview
+        assert "mpcLoadDetail" in overview
+        assert "label: 'NMPC LOAD'" not in overview
+        assert "nmpcCountdown" not in overview
         assert "REGULATOR LOAD" not in room
         assert "regulatorLoadPercent" not in room
         assert "regulatorLoadDetail" not in room
         assert "NMPC_LOAD_FRACTION = 0.1" in engine
-        assert "export function nmpcLoadPercent" in engine
+        assert "export function mpcLoadPercent" in engine
+        assert "nmpcLoadPercent" in engine
         assert "export function regulatorLoadPercent" not in engine
-        assert "title: 'NMPC'" in catalog
+        assert "title: 'NMPC'" not in catalog
         assert "title: 'Regulator'" not in catalog
+        assert "export function mpcLoadDetail" in catalog
         assert "export function nmpcLoadDetail" in catalog
         assert "export function regulatorLoadDetail" not in catalog
 
@@ -70,8 +71,8 @@ def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=167" in index
-        assert "return '167'" in dashboard
+        assert "industrial-dashboard.js?v=168" in index
+        assert "return '168'" in dashboard
 
 
 def test_load_catalog_harness() -> None:

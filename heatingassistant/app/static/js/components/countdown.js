@@ -1,22 +1,18 @@
 import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=127';
 
-export const COUNTDOWN_CONTROL = {
+export const COUNTDOWN_COMPUTE = {
   dtAttr: 'dt_s',
   lastRunAttr: 'last_nmpc_ts',
-  label: 'NEXT CONTROL',
+  label: 'NEXT COMPUTE',
   defaultDt: 900,
   useEntityLastUpdated: false,
   missingRemaining: 'period',
 };
 
-export const COUNTDOWN_NMPC = {
-  dtAttr: 'nmpc_period_s',
-  lastRunAttr: 'last_nmpc_ts',
-  label: 'NEXT NMPC',
-  defaultDt: 900,
-  useEntityLastUpdated: false,
-  missingRemaining: 'due',
-};
+/** @deprecated Use COUNTDOWN_COMPUTE. Kept so older imports keep working. */
+export const COUNTDOWN_CONTROL = COUNTDOWN_COMPUTE;
+/** @deprecated Use COUNTDOWN_COMPUTE. Kept so older imports keep working. */
+export const COUNTDOWN_NMPC = COUNTDOWN_COMPUTE;
 
 export function createCountdown(state, options = false) {
   const spec = resolveSpec(options);
@@ -43,7 +39,7 @@ export function createCountdown(state, options = false) {
 }
 
 export function updateCountdown(countdown, state) {
-  const spec = countdown._spec || COUNTDOWN_CONTROL;
+  const spec = countdown._spec || COUNTDOWN_COMPUTE;
   countdown._dtS = getDtSeconds(state, spec);
   setCountdownComputing(countdown.element, countdownIsComputing(state, spec));
 }
@@ -68,8 +64,9 @@ export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
   const resolved = resolveSpec(spec);
   if (isSystemStopped(state)) return false;
   const entity = systemEntity('mpc_performance');
-  const flagName = resolved.dtAttr === 'nmpc_period_s' ? 'nmpc_computing' : 'control_computing';
-  if (entityAttr(state, entity, flagName)) return true;
+  if (entityAttr(state, entity, 'nmpc_computing') || entityAttr(state, entity, 'control_computing')) {
+    return true;
+  }
 
   const dtS = getDtSeconds(state, resolved);
   const lastRunTs = parseFloat(entityAttr(state, entity, resolved.lastRunAttr));
@@ -80,11 +77,11 @@ export function countdownIsComputing(state, spec = false, nowMs = Date.now()) {
   if (elapsed < 0) return false;
   const intoSlot = elapsed % dtS;
   const slotStart = nowS - intoSlot;
-  const resultAttr = resolved.dtAttr === 'nmpc_period_s' ? 'nmpc_result_ts' : 'last_control_ran_ts';
+  const resultAttr = plannerResultAttr(entityAttr(state, entity, 'mpc_mode'));
   const resultTs = parseFloat(entityAttr(state, entity, resultAttr));
   if (Number.isFinite(resultTs) && resultTs >= slotStart - 0.05) return false;
 
-  return intoSlot < wrapOverlayCapS(resolved);
+  return intoSlot < wrapOverlayCapS();
 }
 
 export function countdownRemaining(state, options = false) {
@@ -103,15 +100,19 @@ function isSystemStopped(state) {
 }
 
 /** Seconds to keep wrap overlay before a skipped worker is treated as idle. */
-function wrapOverlayCapS(resolved) {
-  return resolved.dtAttr === 'nmpc_period_s' ? 8 : 2.5;
+function wrapOverlayCapS() {
+  return 8;
+}
+
+function plannerResultAttr(mode) {
+  return String(mode || '').toLowerCase() === 'linear' ? 'last_control_ran_ts' : 'nmpc_result_ts';
 }
 
 function resolveSpec(options) {
   if (options === true || options === false) {
-    return { ...COUNTDOWN_CONTROL, small: !!options };
+    return { ...COUNTDOWN_COMPUTE, small: !!options };
   }
-  return { ...COUNTDOWN_CONTROL, ...options };
+  return { ...COUNTDOWN_COMPUTE, ...options };
 }
 
 function getDtSeconds(state, spec) {
@@ -121,7 +122,7 @@ function getDtSeconds(state, spec) {
 
 function computeRemaining(state, dtS, spec) {
   // Prefer the explicit timestamp the coordinator publishes: it is anchored to
-  // the shared Start epoch so both rings stay on the same substepping grid.
+  // the shared Start epoch so Linear and Nonlinear share one sample grid.
   const lastRunTs = entityAttr(state, systemEntity('mpc_performance'), spec.lastRunAttr);
   let lastRunMs = null;
   if (lastRunTs != null) {
