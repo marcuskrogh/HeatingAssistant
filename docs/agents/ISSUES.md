@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-532 | Task | [Iterate] Nonlinear MPC on the same sample grid as Linear | In Progress | — | docs/agents/ITERATE-nmpc-equiv-lmpc.md | `/review-fix SWD-532` |
-| SWD-533 | Sub-task | Single-rate NMPC equivalent to Linear | In Progress | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
-| SWD-534 | Sub-task | Tests, TUNING.md, CalVer, App sync | In Progress | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
+| SWD-532 | Task | [Iterate] Nonlinear MPC on the same sample grid as Linear | In Review | — | docs/agents/ITERATE-nmpc-equiv-lmpc.md | `/ship SWD-532` — https://github.com/marcuskrogh/HeatingAssistant/pull/676 |
+| SWD-533 | Sub-task | Single-rate NMPC equivalent to Linear | In Review | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
+| SWD-534 | Sub-task | Tests, TUNING.md, CalVer, App sync | In Review | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
 | SWD-526 | Task | [Iterate] Tuning mode cards, Apply gate, and solver knobs | Done | — | docs/agents/ITERATE-tuning-mode-cards.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/673 (`257d7c4b`) |
 | SWD-527 | Sub-task | Tuning mode cards and Apply-to-switch | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |
 | SWD-528 | Sub-task | Solver knobs, copy, tests, CalVer | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |

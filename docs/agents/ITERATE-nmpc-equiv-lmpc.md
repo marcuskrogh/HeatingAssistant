@@ -44,5 +44,8 @@
 - Relates: SWD-522, SWD-526
 - Sub-tasks: SWD-533, SWD-534
 
+- Branch: `cursor/swd-532-nmpc-equiv-lmpc-58e6`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/676
+
 ## Next
-`/review-fix SWD-532` — Review and auto-fix (single pass)
+`/ship SWD-532` — Closeout after CI (review-fix CLEAN)
