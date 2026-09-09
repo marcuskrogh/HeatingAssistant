@@ -118,4 +118,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/review-fix SWD-522` — Review the delivery PR, then ship
+Done
