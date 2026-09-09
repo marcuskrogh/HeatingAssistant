@@ -126,4 +126,5 @@ async def test_runtime_skips_bad_sensor_in_multi_sensor_average(tmp_path) -> Non
     await publish_tag_in(runtime, "living_temp_2", 99.0, status="BAD", reason="stale")
     await publish_tag_in(runtime, "living_temp_3", 21.0)
 
+    assert runtime.tag_statuses["living_temp_2"] == "BAD"
     assert runtime.room_temperature("living") == pytest.approx(20.0)

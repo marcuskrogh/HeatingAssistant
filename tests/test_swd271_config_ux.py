@@ -74,6 +74,12 @@ async def test_binding_stub_alone_is_not_marked_as_catalog(tmp_path: Path) -> No
         tmp_path,
         options={
             "instance_id": "haos",
+            "rooms": [
+                {
+                    "name": "living",
+                    "temp_sensors": ["sensor.living_room_temperature"],
+                }
+            ],
             "bindings": [
                 {
                     "tag": "living_temp",

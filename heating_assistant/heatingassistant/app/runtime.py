@@ -2565,15 +2565,18 @@ class HeatingRuntime(
         """Rebuild tag quality from the current config and live values.
 
         Historical BAD rows for tags that are not configured this cycle are
-        dropped. Configured tags with a usable catalog or tag value become
-        GOOD; configured tags with no usable value become BAD.
+        dropped. Configured tags with no usable value become BAD. Catalog
+        overlay may mark a newer HA snapshot GOOD via update_tag. Do not
+        promote a live MQTT BAD/UNCERTAIN just because a number is stored —
+        averaging and health must keep skipping that sensor.
         """
 
         self._apply_catalog_to_inbound_tags()
         self._prune_unbound_tag_quality()
         for tag in self._configured_sensor_tags():
             if self._configured_tag_is_usable(tag):
-                self.tag_statuses[tag] = "GOOD"
+                if self.tag_statuses.get(tag) not in {"BAD", "UNCERTAIN"}:
+                    self.tag_statuses[tag] = "GOOD"
             else:
                 self.tag_statuses[tag] = "BAD"
                 # Do not invent a wall-clock timestamp for a missing value.
