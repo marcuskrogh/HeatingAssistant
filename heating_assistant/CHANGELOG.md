@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.17
+
+- Next Control and Next NMPC rings stay in the computing overlay for the
+  whole solver run, and load values, optimal trajectories, and plots refresh
+  as soon as that solver finishes instead of waiting for the next dashboard
+  cycle.
+
 # 2026.09.16
 
 - Next Control and Next NMPC rings no longer flash a computing overlay when

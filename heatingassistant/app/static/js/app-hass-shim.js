@@ -210,6 +210,7 @@
       this.services = {};
       this.config = {};
       this._listeners = new Set();
+      this._idlePollIntervalMs = pollIntervalMs;
       this._pollIntervalMs = pollIntervalMs;
       this._pollTimer = null;
       this._statusElement = statusElement;
@@ -257,9 +258,31 @@
       }
       this.mqttSource = stateSnapshot.mqtt_source || null;
       this._emitStateChanges(previous, this.states);
+      this._syncPollInterval();
       // SWD-300: connection/entity diagnostics live on System Status page.
       hideIngressStatusPill(this._statusElement);
       return this.states;
+    }
+
+    _solverBusy() {
+      const attrs = this.states['sensor.heating_assistant_mpc_performance']?.attributes || {};
+      return Boolean(attrs.nmpc_computing) || Boolean(attrs.control_computing);
+    }
+
+    _syncPollInterval() {
+      const ms = this._solverBusy() ? 1000 : this._idlePollIntervalMs;
+      if (ms === this._pollIntervalMs && this._pollTimer) return;
+      this._pollIntervalMs = ms;
+      if (!this._pollTimer) return;
+      window.clearInterval(this._pollTimer);
+      this._pollTimer = window.setInterval(() => {
+        this.refresh().catch((err) => {
+          if (this._statusElement) {
+            this._statusElement.style.display = '';
+            this._setStatus(`API error: ${err.message}`, true);
+          }
+        });
+      }, this._pollIntervalMs);
     }
 
     async callWS(msg) {

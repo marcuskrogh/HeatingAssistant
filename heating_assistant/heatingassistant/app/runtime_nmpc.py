@@ -42,6 +42,8 @@ class NmpcMixin:
         self._mark_nmpc_slot_started()
         self._nmpc_computing = True
         self.control_engine.mark_nmpc_busy()
+        # Publish before start so a fast worker cannot idle-publish first.
+        self._publish_compute_status()
         self._nmpc_thread = threading.Thread(
             target=self._nmpc_worker_thread,
             name="heatingassistant-nmpc",
@@ -51,20 +53,21 @@ class NmpcMixin:
 
     def _nmpc_worker_thread(self) -> None:
         started = time.time()
+        applied = False
         try:
             result = self.control_engine.solve_nmpc_blocking()
             self._last_nmpc_duration_s = max(0.0, time.time() - started)
             stamp = time.time()
-            applied = self.control_engine.apply_nmpc_result(
-                result,
-                plan_epoch=self._slow_slot_start(stamp),
-                now=stamp,
+            applied = bool(
+                self.control_engine.apply_nmpc_result(
+                    result,
+                    plan_epoch=self._slow_slot_start(stamp),
+                    now=stamp,
+                )
             )
             note = self.control_engine.consume_watchdog_notification()
             if note:
                 self._emit_nmpc_notify(note)
-            if applied:
-                self._install_nmpc_p_command()
         except Exception:
             self._last_nmpc_duration_s = max(0.0, time.time() - started)
             _logger.exception("NMPC worker failed")
@@ -79,6 +82,22 @@ class NmpcMixin:
             self._nmpc_result_ts = time.time()
             self._nmpc_computing = False
             self._note_nmpc_cycle_complete()
+            self._publish_compute_status()
+        if applied:
+            self._install_nmpc_p_command()
+
+    def _publish_compute_status(self) -> None:
+        """Push computing flags and result stamps without waiting for a P tick."""
+
+        loop = getattr(self, "_nmpc_loop", None)
+        coro = self._best_effort_mqtt(self.publish_status(), "compute status")
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+        try:
+            asyncio.run(coro)
+        except Exception:
+            _logger.exception("Failed to publish compute status")
 
     def _note_nmpc_cycle_complete(self) -> None:
         """Persist runtime state after a slow solve without moving the epoch.
