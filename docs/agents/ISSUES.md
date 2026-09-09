@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-519 | Task | [Iterate] Compute overlay and KPIs lag after NMPC/P finish | In Review | — | docs/agents/ITERATE-compute-refresh.md | Closeout — https://github.com/marcuskrogh/HeatingAssistant/pull/671 |
+| SWD-519 | Task | [Iterate] Compute overlay and KPIs lag after NMPC/P finish | Done | — | docs/agents/ITERATE-compute-refresh.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/671 (`ee376de5`) |
 | SWD-520 | Sub-task | Publish compute status at NMPC start/end; refresh UI on finish | Done | SWD-519 | docs/agents/ITERATE-compute-refresh.md | — |
 | SWD-521 | Sub-task | Tests, CalVer, changelog, App sync for compute refresh | Done | SWD-519 | docs/agents/ITERATE-compute-refresh.md | — |
 | SWD-513 | Task | [Iterate] Next compute overlay toggles while computing is no | Done | — | docs/agents/ITERATE-next-compute-overlay-cycle.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/670 (`16319e7d`) |
