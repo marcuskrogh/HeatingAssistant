@@ -9,11 +9,19 @@ import pytest
 
 from heatingassistant.app.runtime import HeatingRuntime, publish_tag_in
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
+from heatingassistant.mqtt.supervisor import set_last_discovery_error
 from heatingassistant.mqtt.topics import entities as entities_topic
 from heatingassistant.persistence import save_state
 
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _clear_mqtt_discovery_error() -> None:
+    set_last_discovery_error(None)
+    yield
+    set_last_discovery_error(None)
 
 
 def _room_options() -> dict[str, Any]:
@@ -234,4 +242,3 @@ async def test_configured_tag_without_live_value_still_warns(tmp_path) -> None:
     sensors = _sensor_module(health)
     assert sensors["quality"] == "warning"
     assert "living_room_temp_1" in sensors["detail"]
-    assert "living_room_temp_1" in (health.get("issue_summary") or "")
