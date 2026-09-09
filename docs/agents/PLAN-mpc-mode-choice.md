@@ -105,9 +105,9 @@
 - Task: SWD-522
 - Sub-tasks: SWD-523 (engine), SWD-524 (UI), SWD-525 (tests/CalVer)
 - Branch: `cursor/swd-522-mpc-mode-choice-58e6`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/672
 - Classification: feature
 - Workflow: feature-standard
 
 ## Next
-`/implement SWD-522` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-522` — Review the delivery PR, then ship

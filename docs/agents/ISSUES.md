@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-522 | Task | [Feature] Choose linear or nonlinear MPC on Controller Tuning | In Progress | — | docs/agents/PLAN-mpc-mode-choice.md | `/review-fix SWD-522` |
+| SWD-522 | Task | [Feature] Choose linear or nonlinear MPC on Controller Tuning | In Review | — | docs/agents/PLAN-mpc-mode-choice.md | `/review-fix SWD-522` |
 | SWD-523 | Sub-task | Engine: exclusive linear vs nonlinear MPC | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
 | SWD-524 | Sub-task | UI: Tuning mode cards and mode-specific params | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
 | SWD-525 | Sub-task | Tests, CalVer, changelog, App sync | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
