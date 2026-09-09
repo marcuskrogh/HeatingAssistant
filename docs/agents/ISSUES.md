@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-526 | Task | [Iterate] Tuning mode cards, Apply gate, and solver knobs | In Review | — | docs/agents/ITERATE-tuning-mode-cards.md | `/review-fix SWD-526` — https://github.com/marcuskrogh/HeatingAssistant/pull/673 |
+| SWD-526 | Task | [Iterate] Tuning mode cards, Apply gate, and solver knobs | In Review | — | docs/agents/ITERATE-tuning-mode-cards.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/673 |
 | SWD-527 | Sub-task | Tuning mode cards and Apply-to-switch | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |
 | SWD-528 | Sub-task | Solver knobs, copy, tests, CalVer | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |
 | SWD-522 | Task | [Feature] Choose linear or nonlinear MPC on Controller Tuning | Done | — | docs/agents/PLAN-mpc-mode-choice.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/672 (`4cc5a506`) |
