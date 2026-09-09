@@ -16,7 +16,6 @@ from heatingassistant.engine.const import (
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
-    DEFAULT_P_GAIN,
     NMPC_WATCHDOG_MESSAGE,
     NMPC_WATCHDOG_NOTIFICATION_ID,
     NMPC_WATCHDOG_S,
@@ -269,12 +268,9 @@ def test_compute_copies_applied_u_into_ekf_prev():
     assert ctrl._mpc._u_prev[0] == pytest.approx(actions["h"])
 
 
-def test_heat_source_default_p_gain():
+def test_heat_source_ignores_legacy_p_gain_config():
     heater = ElectricHeater("h", "living_room", max_power=2000.0)
-    assert heater.p_gain == pytest.approx(DEFAULT_P_GAIN)
-
-
-def test_control_engine_reads_p_gain():
+    assert not hasattr(heater, "p_gain")
     engine = ControlEngine(
         {
             "update_interval": 900,
@@ -291,7 +287,7 @@ def test_control_engine_reads_p_gain():
             ],
         }
     )
-    assert engine.heat_sources[0].p_gain == pytest.approx(0.25)
+    assert not hasattr(engine.heat_sources[0], "p_gain")
     assert engine._controller is not None
     assert engine._controller.horizon == 2
 
@@ -449,7 +445,9 @@ def test_tuning_ui_exposes_nmpc_triple():
         / "config"
         / "config-source-editor.js"
     ).read_text(encoding="utf-8")
-    assert "p_gain" in source_editor
+    assert "numberField(src, 'p_gain'" not in source_editor
+    assert "P gain" not in source_editor
+    assert "max_temp_offset" in source_editor
 
 
 def test_plan_roll_survives_expired_nlp_deadline():

@@ -11,8 +11,9 @@ must be the exact calendar version on its own line.
   keeps its own timing settings.
 - Nonlinear control holds the planned heater command between NMPC solves.
   The extra tracking loop on the planned temperature is gone, and the room
-  Regulator Load card is removed. Per-heater P gain on each heating unit
-  is unchanged.
+  Regulator Load card is removed. Heating units still map that command to a
+  climate setpoint from the unit's internal temperature. The old heater
+  P-gain field for the two-layer tracker is gone.
 
 # 2026.09.17
 

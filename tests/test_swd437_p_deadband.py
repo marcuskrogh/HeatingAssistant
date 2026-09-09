@@ -81,7 +81,7 @@ def test_tuning_ui_has_no_two_layer_tracker_knobs() -> None:
         assert "Nonlinear tracker" not in source
 
 
-def test_heater_p_gain_editor_remains() -> None:
+def test_heater_p_gain_editor_removed() -> None:
     source = (
         _ROOT
         / "heatingassistant"
@@ -91,7 +91,9 @@ def test_heater_p_gain_editor_remains() -> None:
         / "config"
         / "config-source-editor.js"
     ).read_text(encoding="utf-8")
-    assert "p_gain" in source
+    assert "numberField(src, 'p_gain'" not in source
+    assert "P gain" not in source
+    assert "max_temp_offset" in source
 
 
 def test_controller_config_omits_tracker_knobs(tmp_path: Path) -> None:

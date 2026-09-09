@@ -623,7 +623,6 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
             "power_scale": _as_float(source_cfg.get("power_scale"), 1.0),
             "emitter_time_constant": emitter_tau,
         }
-        p_gain = _as_float(source_cfg.get(const.CONF_P_GAIN), const.DEFAULT_P_GAIN)
         try:
             if source_type == const.SOURCE_TYPE_HEAT_PUMP:
                 sources.append(
@@ -680,8 +679,6 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
                 )
         except (TypeError, ValueError) as exc:
             _LOGGER.warning("Skipping invalid heat source %r: %s", source_cfg, exc)
-        else:
-            sources[-1].p_gain = p_gain
     return sources
 
 

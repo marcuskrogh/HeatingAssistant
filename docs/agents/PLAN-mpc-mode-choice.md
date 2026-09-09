@@ -23,8 +23,10 @@
   independent knobs (`update_interval`, `horizon`).
 - Nonlinear: SciPy NMPC worker applies remaining planned ``U*`` as
   zero-order hold (plus clamps / disabled sources / watchdog ``u = 0``).
-  No two-layer P/PID on ``T_ref``. Per-heater ``p_gain`` on heat-source
-  config stays.
+  No two-layer P/PID on ``T_ref``. Heat-source ``p_gain`` (that tracker)
+  is removed. Inner climate actuation stays: commanded fraction maps to
+  a heater setpoint relative to the unit's internal temperature
+  (``target_temperature`` / ``max_temp_offset``).
 - Persist both timing sets. Apply rebuilds the controller when mode or
   restart knobs change.
 - Preview uses the selected mode.
@@ -37,7 +39,7 @@
 - Linear QP as a silent fallback while NMPC is selected.
 - CasADi / IPOPT.
 - Changing parameter estimation.
-- Removing per-heater ``p_gain`` on heating-unit config.
+- Changing inner heater setpoint-vs-internal-temperature actuation.
 
 **Decisions**
 - Class is **feature**: new operator-facing mode plus a restored linear
@@ -95,7 +97,7 @@
 6. Preview overlay uses the selected mode.
 7. Missing `mpc_mode` on disk behaves as `nmpc`.
 8. Room Regulator Load KPI and two-layer tracker Tuning knobs are gone.
-   Per-heater P gain remains on the heating-unit editor.
+   Heat-source ``p_gain`` is gone. Inner heater setpoint mapping stays.
 
 ## Work packages
 1. Engine: `mpc_mode`, timing isolation, linear QP vs NMPC worker.

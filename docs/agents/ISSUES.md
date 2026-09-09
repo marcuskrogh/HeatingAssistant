@@ -247,7 +247,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-09 — `/implement` SWD-522: dropped two-layer NMPC tracker (ZOH of `U*`); removed Regulator Load KPI; heater `p_gain` kept. Next `/review-fix SWD-522`.
+- 2026-09-09 — `/implement` SWD-522: two-layer NMPC P gone; heat-source `p_gain` removed; inner climate setpoint-vs-internal-temp stays. Next `/review-fix SWD-522`.
 - 2026-09-09 — `/define` SWD-522: exclusive linear vs NMPC on Tuning; Sub-tasks SWD-523/524/525; branch `cursor/swd-522-mpc-mode-choice-58e6`. Next `/implement SWD-522`.
 - 2026-09-08 — `/ship` SWD-513: merged #670 as `16319e7d`. Task Done. Changelog `# 2026.09.16`.
 - 2026-09-08 — `/review-fix` SWD-513 CLEAN (focused Core+Integration). COMMENT on PR #670 (self-review cannot REQUEST_CHANGES). Harness now locks CONTROL wrap cap and flag. Next closeout merge.
