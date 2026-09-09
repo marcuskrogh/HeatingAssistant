@@ -16,14 +16,12 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-  regulatorLoadPercent,
 } from '../kpi-engine.js?v=148';
 import {
   energyPriceDetail,
   heatLossDetail,
   nextControlDetail,
   nextNmpcDetail,
-  regulatorLoadDetail,
   roomModelFitDetail,
   roomPowerDetail,
   solarGainDetail,
@@ -168,22 +166,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   // KPIs use the same gauge design as the overview page (label + value +
   // severity bar). At room level these are the *current system values for this
-  // room* — regulator load, time in range, heater power, energy price, solar
+  // room* — time in range, heater power, energy price, solar
   // gain, heat loss, and model fit — since indoor temperature / setpoint /
   // comfort band already live on the climate card above.
   const powerBounds = { min: 0, max: DEFAULT_MAX_POWER };
 
   const priceEntity = systemEntity('electricity_price');
   const solarEntity = room.entities['solar_gain_measured'];
-
-  const regulatorGauge = createGauge({
-    value: regulatorLoadPercent(state) ?? 0,
-    min: 0,
-    max: 100,
-    label: 'REGULATOR LOAD',
-    format: (v) => `${formatNumber(v, 0)}%`,
-    severity: KPI_SEVERITY.mpcLoad,
-  });
 
   const timeInRangeGauge = createGauge({
     value: 0,
@@ -242,10 +231,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     severity: KPI_SEVERITY.modelFit,
   });
 
-  kpiExpand.register(regulatorGauge, {
-    key: 'regulator-load',
-    detail: regulatorLoadDetail,
-  });
   kpiExpand.register(timeInRangeGauge, {
     key: 'time-in-range',
     detail: (s) => timeInRangeDetail(s, room, isRoomActive(s, roomSlug)),
@@ -281,16 +266,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     key: 'next-nmpc',
     detail: nextNmpcDetail,
   });
-
-  function paintRegulatorGauge(s) {
-    updateGauge(regulatorGauge, {
-      value: regulatorLoadPercent(s) ?? 0,
-      min: 0,
-      max: 100,
-      format: (v) => `${formatNumber(v, 0)}%`,
-      severity: KPI_SEVERITY.mpcLoad,
-    });
-  }
 
   function paintTimeInRangeGauge(s) {
     const lower = entityValue(s, room.entities['constraint_lower']);
@@ -371,7 +346,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     });
   }
 
-  paintRegulatorGauge(state);
   paintTimeInRangeGauge(state);
   paintPowerGauge(powerVal, offVal);
   paintPriceGauge(entityValue(state, priceEntity));
@@ -555,7 +529,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         off,
         experiment: activeExperiment,
       });
-      paintRegulatorGauge(newState);
       paintTimeInRangeGauge(newState);
       paintPowerGauge(pv, off);
       paintPriceGauge(entityValue(newState, priceEntity));

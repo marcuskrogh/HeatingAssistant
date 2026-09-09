@@ -43,11 +43,4 @@ assert(nmpcLoad.value === '3%', '24.7 s of a 720 s NMPC budget must paint 3%');
 const nmpcBudget = nmpc.sections[0].rows.find((row) => row.label === 'Load budget');
 assert(nmpcBudget.value.includes('720'), 'NMPC budget row must show 10% of the period');
 
-const regulator = catalog.regulatorLoadDetail(state);
-assert(regulator.description.includes('P-cycle'), 'Regulator expand copy must describe the P-cycle');
-assert(regulator.sections.map((section) => section.title).join(',') === 'Regulator,NMPC', 'Regulator expand must list Regulator then NMPC');
-const regLoad = regulator.sections[0].rows.find((row) => row.label === 'Load');
-assert(regLoad.value === '9%', '0.18 s of a 2 s regulator budget must paint 9%');
-assert(regulator.sections[1].title === 'NMPC', 'Regulator expand must still list NMPC figures');
-
 console.log('panel_kpi_load_catalog.harness.mjs: ok');

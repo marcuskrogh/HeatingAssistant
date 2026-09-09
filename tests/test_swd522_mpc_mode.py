@@ -113,7 +113,7 @@ def test_nmpc_compute_does_not_call_qp_step():
         np.full((ctrl.horizon, 1), 21.0),
     )
     actions = ctrl.compute(outdoor_temp=0.0, now=_NOW)
-    assert actions["h"] == pytest.approx(0.3, abs=0.5)
+    assert actions["h"] == pytest.approx(0.3)
 
 
 def test_engine_preserves_linear_knobs_in_nmpc_mode():
@@ -159,3 +159,5 @@ def test_tuning_page_has_exclusive_mode_cards():
     assert "linearisation error" in source
     assert "mpc_mode: selectedMode" in source
     assert "tuning-mode-card" in source
+    assert "p_deadband" not in source
+    assert "u_ref_gate" not in source

@@ -40,5 +40,5 @@ def test_panel_entry_cache_bust_matches_dashboard_fallback() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=162" in index
-        assert "return '162'" in dashboard
+        assert "industrial-dashboard.js?v=163" in index
+        assert "return '163'" in dashboard

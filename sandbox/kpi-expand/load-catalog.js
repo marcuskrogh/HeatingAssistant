@@ -61,12 +61,6 @@ export function nmpcLoadPercent(state) {
   return Math.min(100, (duration / budget) * 100);
 }
 
-export function regulatorLoadPercent(state) {
-  const duration = parseFloat(mpcEntity(state).state);
-  if (!Number.isFinite(duration)) return null;
-  return Math.min(100, (duration / REGULATOR_BUDGET_S) * 100);
-}
-
 function nmpcRows(state) {
   const entity = mpcEntity(state);
   const load = nmpcLoadPercent(state);
@@ -81,37 +75,12 @@ function nmpcRows(state) {
   ];
 }
 
-function regulatorRows(state) {
-  const entity = mpcEntity(state);
-  const load = regulatorLoadPercent(state);
-  return [
-    { label: 'Load', value: load == null ? '—' : formatPercent(load) },
-    { label: 'Last P cycle', value: formatSeconds(entity.state) },
-    { label: 'Load budget', value: `${formatNumber(REGULATOR_BUDGET_S, 0)} s` },
-    { label: 'P computing', value: yesNo(entity.attributes?.control_computing) },
-    { label: 'Control interval', value: formatSeconds(entity.attributes?.dt_s) },
-    { label: 'Last ran', value: formatUnix(entity.attributes?.last_control_ran_ts) },
-  ];
-}
-
 export function nmpcLoadDetail(state) {
   return {
     description:
       'Share of the NMPC load budget used by the last NMPC solve. '
       + 'The budget is 10% of the NMPC period. This card is NMPC only.',
     sections: [{ title: 'NMPC', rows: nmpcRows(state) }],
-  };
-}
-
-export function regulatorLoadDetail(state) {
-  return {
-    description:
-      `Share of the ${formatNumber(REGULATOR_BUDGET_S, 0)} s load budget used by the last room-level P-cycle. `
-      + 'NMPC wall-clock time is listed below and does not change this percent.',
-    sections: [
-      { title: 'Regulator', rows: regulatorRows(state) },
-      { title: 'NMPC', rows: nmpcRows(state) },
-    ],
   };
 }
 

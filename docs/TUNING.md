@@ -158,14 +158,12 @@ interval** or **Prediction horizon** rebuilds the MPC problem.
 
 | Parameter | Config key | Default | Effect |
 |-----------|-----------|---------|--------|
-| **Planner** | `mpc_mode` | `nmpc` | `linear` (QP, lower compute, linearisation error) or `nmpc` (nonlinear planner + P tracker) |
+| **Planner** | `mpc_mode` | `nmpc` | `linear` (QP, lower compute, linearisation error) or `nmpc` (nonlinear planner; holds the planned heater command) |
 | **Comfort offset** | `comfort_offset` | `2.0 °C` | Half-width of the soft comfort band around the setpoint |
 | **Tracking weight** | `tracking_weight` | `0` | Setpoint tracking strength; `0` = band-only (zone) control |
 | **Energy weight** | `energy_weight` | `0.01` | Penalises heater output — higher = more conservative heating |
 | **Price sensitivity** | `energy_price_weight` | `1.0` | Scales electricity-price cost when a price sensor is configured |
 | **Output smoothing** | `smoothing_weight` | `0.1` | Penalises changing heater output step-to-step — raise to damp oscillations |
-| **P deadband (NMPC off)** | `p_deadband` | `1.0 °C` | Fast tracker stays off while the planner command is near zero and air is within this of the planned temperature |
-| **NMPC-off gate** | `u_ref_gate` | `0.02` | Planner command (heater fraction) below this is treated as off; small preheat above the gate is tracked as usual |
 | **Comfort band penalty (quadratic)** | `soft_constraint_weight` | `1000` | Quadratic penalty for leaving the comfort zone |
 | **Comfort band penalty (linear)** | `soft_constraint_linear_weight` | `0` | Linear comfort-band penalty (`0` = disabled) |
 | **Terminal weight** | `terminal_weight` | `100` | End-of-horizon tracking multiplier; raise (200–500) if the plan misses setpoint |

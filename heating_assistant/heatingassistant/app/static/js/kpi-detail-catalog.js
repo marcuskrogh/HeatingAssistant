@@ -13,9 +13,7 @@ import {
   houseModelFit,
   nmpcLoadPercent,
   nmpcLoadBudgetS,
-  regulatorLoadPercent,
   NMPC_LOAD_FRACTION,
-  REGULATOR_BUDGET_S,
   roomTimeInRangePct,
   roomHeatLoss,
   heatLossGaugeMax,
@@ -94,37 +92,12 @@ function nmpcRows(state) {
   ];
 }
 
-function regulatorRows(state) {
-  const entity = systemEntity('mpc_performance');
-  const load = regulatorLoadPercent(state);
-  return [
-    { label: 'Load', value: load == null ? '—' : formatPercent(load) },
-    { label: 'Last P cycle', value: formatSeconds(entityValue(state, entity)) },
-    { label: 'Load budget', value: `${formatNumber(REGULATOR_BUDGET_S, 0)} s` },
-    { label: 'P computing', value: yesNo(entityAttr(state, entity, 'control_computing')) },
-    { label: 'Control interval', value: formatSeconds(entityAttr(state, entity, 'dt_s')) },
-    { label: 'Last ran', value: formatUnix(entityAttr(state, entity, 'last_control_ran_ts')) },
-  ];
-}
-
 export function nmpcLoadDetail(state) {
   return {
     description:
       'Share of the NMPC load budget used by the last NMPC solve. '
       + 'The budget is 10% of the NMPC period. This card is NMPC only.',
     sections: [{ title: 'NMPC', rows: nmpcRows(state) }],
-  };
-}
-
-export function regulatorLoadDetail(state) {
-  return {
-    description:
-      `Share of the ${formatNumber(REGULATOR_BUDGET_S, 0)} s load budget used by the last room-level P-cycle. `
-      + 'NMPC wall-clock time is listed below and does not change this percent.',
-    sections: [
-      { title: 'Regulator', rows: regulatorRows(state) },
-      { title: 'NMPC', rows: nmpcRows(state) },
-    ],
   };
 }
 
@@ -280,7 +253,7 @@ export function nextControlDetail(state) {
   const entity = systemEntity('mpc_performance');
   const remaining = countdownRemaining(state, COUNTDOWN_CONTROL);
   return {
-    description: 'Time until the next P tick on the shared Start epoch.',
+    description: 'Time until the next control sample on the shared Start epoch.',
     rows: [
       { label: 'Remaining', value: remaining == null ? '—' : formatCountdown(remaining) },
       { label: 'Interval', value: formatSeconds(entityAttr(state, entity, 'dt_s')) },

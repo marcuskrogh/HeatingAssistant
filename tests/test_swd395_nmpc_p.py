@@ -27,7 +27,6 @@ from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from heatingassistant.engine.nmpc_accept import accept_plan
 from heatingassistant.engine.nmpc_ocp import MeanOcp
-from heatingassistant.engine.nmpc_p import comfort_fallback_command, p_command
 from heatingassistant.engine.nmpc_timing import (
     derive_nmpc_timing,
     timing_from_dt_horizon,
@@ -63,19 +62,6 @@ def test_timing_rejects_non_dividing_horizon():
         derive_nmpc_timing(7200.0, 8, 35.0)
 
 
-def test_p_command_clips():
-    assert p_command(0.2, 21.0, 18.0, 0.1, 0.0, 1.0) == pytest.approx(0.5)
-    assert p_command(0.0, 21.0, 18.0, 10.0, 0.0, 1.0) == 1.0
-    assert p_command(0.0, 18.0, 21.0, 10.0, 0.0, 1.0) == 0.0
-
-
-def test_comfort_fallback_only_outside_band():
-    assert comfort_fallback_command(21.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
-    assert comfort_fallback_command(18.0, 21.0, 2.0, 0.1, 0.0, 1.0) == pytest.approx(0.3)
-    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, -1.0, 1.0) == pytest.approx(-0.7)
-    assert comfort_fallback_command(28.0, 21.0, 2.0, 0.1, 0.0, 1.0) == 0.0
-
-
 def test_accept_in_band_vs_zero_heat():
     lo = np.array([0.0])
     hi = np.array([1.0])
@@ -102,7 +88,7 @@ def test_compute_does_not_call_qp_step():
     assert "h" in actions
 
 
-def test_p_tracks_seeded_reference():
+def test_seeded_plan_holds_u_star():
     ctrl = _tiny_ctrl()
     n_fast = ctrl.horizon
     n_slow = ctrl.timing.n_slow
@@ -110,24 +96,23 @@ def test_p_tracks_seeded_reference():
     u_star = np.zeros((n_slow, 1))
     ctrl.set_accepted_path(u_star, t_ref)
     actions = ctrl.compute(outdoor_temp=-5.0, now=_NOW)
-    # T_hat starts near 18 °C, T_ref=21, K_p=0.1 → 0.3
-    assert actions["h"] == pytest.approx(0.3, abs=0.15)
+    assert actions["h"] == pytest.approx(0.0)
 
 
-def test_no_path_heats_when_below_band():
+def test_no_path_holds_zero_below_band():
     ctrl = _tiny_ctrl()
     actions = ctrl.compute(outdoor_temp=-10.0, now=_NOW)
-    assert actions["h"] > 0.05
+    assert actions["h"] == pytest.approx(0.0)
 
 
-def test_no_path_cools_when_above_band():
+def test_no_path_holds_zero_above_band():
     hp = HeatPump("hp", "living_room", max_power=4000.0, hvac_mode="heat_cool")
     room = Room(
         "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
     )
     ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=2, dt=900.0)
     actions = ctrl.compute(outdoor_temp=30.0, now=_NOW)
-    assert actions["hp"] < -0.05
+    assert actions["hp"] == pytest.approx(0.0)
 
 
 def test_no_path_idle_inside_band():

@@ -35,7 +35,7 @@ def test_app_loads_candidate_not_production_host() -> None:
     assert "from './kpi-expand.js'" in app
     assert "from './load-catalog.js'" in app
     assert "NMPC LOAD" in app
-    assert "REGULATOR LOAD" in app
+    assert "REGULATOR LOAD" not in app
     assert "from '/ha-industrial-panel/js/kpi-detail-catalog.js'" in app
     assert "{ mpcLoadDetail" not in app
     assert " mpcLoadDetail" not in app
@@ -46,6 +46,6 @@ def test_split_load_catalog_is_sandbox_only() -> None:
     assert "NMPC_LOAD_FRACTION = 0.1" in catalog
     assert "REGULATOR_BUDGET_S = 2" in catalog
     assert "export function nmpcLoadDetail" in catalog
-    assert "export function regulatorLoadDetail" in catalog
-    assert "title: 'Regulator'" in catalog
+    assert "export function regulatorLoadDetail" not in catalog
+    assert "title: 'Regulator'" not in catalog
     assert "title: 'NMPC'" in catalog

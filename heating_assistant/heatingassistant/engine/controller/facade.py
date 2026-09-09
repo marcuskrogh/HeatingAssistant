@@ -1,9 +1,10 @@
 """
-Application facade for house-heating NMPC + P tracking.
+Application facade for house-heating MPC.
 
-HeatingMPCController builds HouseThermalSDE + _InnovationEKF (CD-EKF) +
-a two-rate NMPC + P tracker. The linearised QP is kept only as EKF glue
-and is not solved on the happy path.
+HeatingMPCController builds HouseThermalSDE + _InnovationEKF (CD-EKF) and
+either the linear QP each sample or a two-rate NMPC planner whose remaining
+``U*`` is held as zero-order hold. The linearised QP is EKF glue on the
+nonlinear path and is not solved there.
 
 Public API:
     controller = HeatingMPCController(model, heat_sources, ...)
@@ -28,10 +29,8 @@ from ..const import (
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
-    DEFAULT_P_DEADBAND,
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
-    DEFAULT_U_REF_GATE,
     MPC_MODE_LINEAR,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
@@ -50,7 +49,6 @@ from ..nmpc_ocp import (
     shift_slow_plan,
     solve_mean_ocp,
 )
-from ..nmpc_p import comfort_fallback_command, p_command, require_non_negative_p_gating
 from ..nmpc_timing import (
     NmpcTiming,
     derive_nmpc_timing,
@@ -161,8 +159,8 @@ class HeatingMPCController:
     solver            : accepted for API compatibility, ignored (SLSQP used).
     solver_options    : accepted for API compatibility, ignored.
     use_analytic_derivatives : accepted for API compatibility, ignored.
-    p_deadband        : temperature deadband [K] around T_ref while NMPC is off.
-    u_ref_gate        : |u_ref| below this (heater fraction) is NMPC-off.
+    p_deadband        : ignored (legacy two-layer tracker knob).
+    u_ref_gate        : ignored (legacy two-layer tracker knob).
     """
 
     def __init__(
@@ -192,8 +190,8 @@ class HeatingMPCController:
         nmpc_period: Optional[float] = None,
         nmpc_fast_substeps: Optional[int] = None,
         nmpc_horizon_h: Optional[float] = None,
-        p_deadband: float = DEFAULT_P_DEADBAND,
-        u_ref_gate: float = DEFAULT_U_REF_GATE,
+        p_deadband: float = 1.0,
+        u_ref_gate: float = 0.02,
         solar_gain_smoothing_tau_s: Optional[float] = None,
         mpc_mode: str = "nmpc",
     ) -> None:
@@ -237,7 +235,8 @@ class HeatingMPCController:
             raise ValueError(
                 f"smoothing_weight must be >= 0; got {smoothing_weight}"
             )
-        require_non_negative_p_gating(p_deadband, u_ref_gate)
+        # p_deadband / u_ref_gate accepted for API compatibility; unused.
+        _ = (p_deadband, u_ref_gate)
         if terminal_weight < 1.0:
             raise ValueError(
                 f"terminal_weight must be at least 1.0; got {terminal_weight}"
@@ -399,8 +398,6 @@ class HeatingMPCController:
         self._nmpc_warm: Optional[np.ndarray] = None
         self._rho = float(rho)
         self._smoothing_weight = float(smoothing_weight)
-        self._p_deadband = float(p_deadband)
-        self._u_ref_gate = float(u_ref_gate)
         self._n_int_steps = int(n_int_steps)
         self._reject_since: Optional[float] = None
         self._watchdog_tripped: bool = False
@@ -1170,55 +1167,27 @@ class HeatingMPCController:
         u_min_seq: Optional[np.ndarray],
         u_max_seq: Optional[np.ndarray],
     ) -> np.ndarray:
+        """Hold the remaining planned ``U*`` (ZOH), clipped to each source.
+
+        With no accepted plan, or after the NMPC watchdog, return zeros so
+        the plant coasts until the next accepted trajectory.
+        """
+
         n_u = self._system.nu
-        room_list = self._system._room_list
-        room_index = {name: i for i, name in enumerate(room_list)}
-        x_hat = self._ekf.x_hat
         u_abs = np.zeros(n_u, dtype=float)
         watchdog = self._watchdog_tripped
         with self._nmpc_lock:
             U = self._nmpc_U
-            T_ref = self._nmpc_T_ref
             k = self._nmpc_k
             n_fast = self._timing.n_fast
             m = self._timing.m
             n_slow = self._timing.n_slow
-            if not watchdog and U is not None and T_ref is not None:
+            if not watchdog and U is not None:
                 idx = min(max(k, 0), n_fast - 1)
                 n = min(idx // m, n_slow - 1)
                 u_ref = U[n]
-                # Accept-time OCP air trajectory on the fast grid (same T_ref as Forecast).
-                t_ref_row = T_ref[idx]
                 for j, src in enumerate(self._sources):
-                    ri = room_index.get(src.room, 0)
-                    kp = float(getattr(src, "p_gain", 0.1))
-                    t_hat = float(x_hat[ri])
-                    u_abs[j] = p_command(
-                        float(u_ref[j]),
-                        float(t_ref_row[ri]),
-                        t_hat,
-                        kp,
-                        float(src.u_min),
-                        float(src.u_max),
-                        u_ref_gate=self._u_ref_gate,
-                        p_deadband=self._p_deadband,
-                    )
-            elif not watchdog:
-                rooms = self._system._model.rooms
-                for j, src in enumerate(self._sources):
-                    ri = room_index.get(src.room, 0)
-                    room = rooms.get(src.room)
-                    if room is None:
-                        continue
-                    kp = float(getattr(src, "p_gain", 0.1))
-                    u_abs[j] = comfort_fallback_command(
-                        float(x_hat[ri]),
-                        float(room.setpoint),
-                        float(getattr(room, "comfort_offset", 2.0) or 2.0),
-                        kp,
-                        float(src.u_min),
-                        float(src.u_max),
-                    )
+                    u_abs[j] = float(np.clip(float(u_ref[j]), src.u_min, src.u_max))
         if u_min_seq is not None and u_max_seq is not None and clamp_mask is not None:
             for j, src in enumerate(self._sources):
                 if clamp_mask[0, j]:
@@ -1226,10 +1195,10 @@ class HeatingMPCController:
         return u_abs
 
     def refresh_p_command(self) -> Dict[str, float]:
-        """Apply P with the installed ``u_ref`` without advancing the EKF.
+        """Apply the held plan command without advancing the EKF.
 
-        Used when a slow plan is accepted mid-interval so the feedforward
-        bias takes effect immediately. The next ``compute()`` still runs the
+        Used when a slow plan is accepted mid-interval so the new ``U*``
+        takes effect immediately. The next ``compute()`` still runs the
         EKF over elapsed ``T_s``.
         """
 
@@ -1648,7 +1617,7 @@ class HeatingMPCController:
                 price_forecast,
             )
 
-        # ── EKF then P (no linearised QP on the happy path) ──────────────
+        # ── EKF then hold remaining U* (no linearised QP on the happy path) ──
         self._mpc.estimate_only(y, d, p, 0.0)
         self._last_innovation = self._ekf.last_innovation
         self._total_computes += 1

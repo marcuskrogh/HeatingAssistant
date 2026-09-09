@@ -17,12 +17,14 @@
      short copy.
   2. Existing Apply Changes / Reset bar.
   3. Shared live weights (always visible).
-  4. Mode-specific timing / tracker knobs for the active card.
+  4. Mode-specific timing knobs for the active card.
 - Linear: successive-linearisation QP (`HeatingLinearisedMPC.step`) each
   sample interval. No NMPC worker. Sample interval and step horizon are
   independent knobs (`update_interval`, `horizon`).
-- Nonlinear: existing SciPy NMPC worker + P tracker, NMPC triple, live
-  P deadband / NMPC-off gate.
+- Nonlinear: SciPy NMPC worker applies remaining planned ``U*`` as
+  zero-order hold (plus clamps / disabled sources / watchdog ``u = 0``).
+  No two-layer P/PID on ``T_ref``. Per-heater ``p_gain`` on heat-source
+  config stays.
 - Persist both timing sets. Apply rebuilds the controller when mode or
   restart knobs change.
 - Preview uses the selected mode.
@@ -35,7 +37,7 @@
 - Linear QP as a silent fallback while NMPC is selected.
 - CasADi / IPOPT.
 - Changing parameter estimation.
-- Redesigning Overview KPIs beyond using the active planner’s solve.
+- Removing per-heater ``p_gain`` on heating-unit config.
 
 **Decisions**
 - Class is **feature**: new operator-facing mode plus a restored linear
@@ -45,7 +47,7 @@
   window-detection knobs.
 - Linear-only: sample interval, prediction horizon (steps).
 - NMPC-only: period, fast substeps, look-ahead hours, derived sample
-  interval, P deadband, NMPC-off gate.
+  interval. No Tuning knobs for a two-layer tracker.
 - Default `nmpc` so existing installs keep the nonlinear planner.
 - Do not overwrite stored linear interval/horizon with derived NMPC
   `T_s` / `n_fast`.
@@ -75,10 +77,10 @@
 
 ## Inputs
 - Research: none
-- Model: `docs/agents/MODEL-nmpc-p-ff.md` (NMPC+P remains the nonlinear
-  mode)
-- Prior: SWD-395 hierarchical NMPC+P; SWD-238 dual-mode (removed by
-  SWD-254 because NMPC ran on Core — compute stays in the App)
+- Model: `docs/agents/MODEL-nmpc-p-ff.md` (historical two-layer tracker;
+  nonlinear mode now holds ``U*`` without the P law)
+- Prior: SWD-395 hierarchical NMPC+P (tracker removed); SWD-238 dual-mode
+  (removed by SWD-254 because NMPC ran on Core — compute stays in the App)
 
 ## Acceptance criteria
 1. Tuning shows two exclusive cards: linear (lower compute, linearization
@@ -87,9 +89,13 @@
 3. Shared weights keep their values across a mode switch without retune.
 4. Linear mode solves the QP each sample and does not start the NMPC
    worker.
-5. Nonlinear mode keeps NMPC+P, worker, accept/reject, and watchdog.
+5. Nonlinear mode keeps the NMPC worker, accept/reject, and watchdog.
+   Commands follow remaining ``U*`` (ZOH), not ``u_ref + K_p (T_ref − T)``.
+   With no accepted plan, heaters stay at ``u = 0``.
 6. Preview overlay uses the selected mode.
 7. Missing `mpc_mode` on disk behaves as `nmpc`.
+8. Room Regulator Load KPI and two-layer tracker Tuning knobs are gone.
+   Per-heater P gain remains on the heating-unit editor.
 
 ## Work packages
 1. Engine: `mpc_mode`, timing isolation, linear QP vs NMPC worker.
@@ -97,7 +103,7 @@
 3. Tests, CalVer, changelog, App sync.
 
 ## Open items
-- None deferred; P remains on the nonlinear path only.
+- None. Two-layer NMPC tracker and its KPIs are in scope of this Task.
 
 ## Tracker
 - Provider: jira

@@ -54,24 +54,24 @@ def test_overview_nmpc_and_room_regulator_load() -> None:
         assert "label: 'MPC LOAD'" not in overview
         assert "nmpcLoadDetail" in overview
         assert not any(token == "mpcLoadDetail" for token in overview.replace(",", " ").replace(";", " ").split())
-        assert "REGULATOR LOAD" in room
-        assert "regulatorLoadPercent" in room
-        assert "regulatorLoadDetail" in room
+        assert "REGULATOR LOAD" not in room
+        assert "regulatorLoadPercent" not in room
+        assert "regulatorLoadDetail" not in room
         assert "NMPC_LOAD_FRACTION = 0.1" in engine
         assert "export function nmpcLoadPercent" in engine
-        assert "export function regulatorLoadPercent" in engine
+        assert "export function regulatorLoadPercent" not in engine
         assert "title: 'NMPC'" in catalog
-        assert "title: 'Regulator'" in catalog
+        assert "title: 'Regulator'" not in catalog
         assert "export function nmpcLoadDetail" in catalog
-        assert "export function regulatorLoadDetail" in catalog
+        assert "export function regulatorLoadDetail" not in catalog
 
 
 def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=162" in index
-        assert "return '162'" in dashboard
+        assert "industrial-dashboard.js?v=163" in index
+        assert "return '163'" in dashboard
 
 
 def test_load_catalog_harness() -> None:

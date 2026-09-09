@@ -6,8 +6,6 @@ import {
   nmpcLoadDetail,
   nmpcLoadPercent,
   overallHealthDetail,
-  regulatorLoadDetail,
-  regulatorLoadPercent,
 } from './load-catalog.js';
 
 const NOW_S = Date.now() / 1000;
@@ -97,16 +95,6 @@ class HaKpiHost extends HTMLElement {
     systemExpand.register(nmpcGauge, { key: 'nmpc-load', detail: nmpcLoadDetail });
 
     const roomExpand = bindKpiExpandSection(roomGrid);
-    const regulator = regulatorLoadPercent(state) ?? 0;
-    const regulatorGauge = createGauge({
-      value: regulator,
-      min: 0,
-      max: 100,
-      label: 'REGULATOR LOAD',
-      format: (v) => `${v.toFixed(0)}%`,
-      severity: { good: 25, warning: 50, inverse: true },
-    });
-    roomExpand.register(regulatorGauge, { key: 'regulator-load', detail: regulatorLoadDetail });
     const range = createGauge({
       value: 96, min: 0, max: 100, label: 'TIME IN RANGE', format: (v) => `${v.toFixed(0)}%`,
     });

@@ -17,7 +17,6 @@ from .control_engine_preview import (  # noqa: F401
     _snapshot_from_controller,
 )
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
-from .nmpc_p import require_non_negative_p_gating
 from .nmpc_timing import timing_from_options
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
@@ -51,16 +50,12 @@ def _coerce_solar_forecast(raw: Any) -> list[dict[str, float]]:
 
 
 def reject_negative_p_gating_knobs(mapping: Mapping[str, Any]) -> None:
-    """Raise if live P-deadband or NMPC-off gate knobs are negative."""
+    """Raise if leftover two-layer tracker knobs in a persist payload are negative."""
 
-    require_non_negative_p_gating(
-        float(mapping[const.CONF_P_DEADBAND])
-        if const.CONF_P_DEADBAND in mapping
-        else 0.0,
-        float(mapping[const.CONF_U_REF_GATE])
-        if const.CONF_U_REF_GATE in mapping
-        else 0.0,
-    )
+    if const.CONF_P_DEADBAND in mapping and float(mapping[const.CONF_P_DEADBAND]) < 0.0:
+        raise ValueError(f"p_deadband must be >= 0; got {mapping[const.CONF_P_DEADBAND]}")
+    if const.CONF_U_REF_GATE in mapping and float(mapping[const.CONF_U_REF_GATE]) < 0.0:
+        raise ValueError(f"u_ref_gate must be >= 0; got {mapping[const.CONF_U_REF_GATE]}")
 
 
 class ControlEngine(BuildMixin, PreviewMixin):

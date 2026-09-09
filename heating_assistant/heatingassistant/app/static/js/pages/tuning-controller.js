@@ -44,11 +44,6 @@ const SHARED_LIVE_PARAM_DEFS = [
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
 ];
 
-const NMPC_LIVE_PARAM_DEFS = [
-  { key: 'p_deadband', label: 'P deadband (NMPC off)', unit: '°C', hint: 'Stay off while the planner is near zero and air is within this of the planned temperature. Default 1.0 °C.', step: 0.1, parse: parseFloat },
-  { key: 'u_ref_gate', label: 'NMPC-off gate', unit: '', hint: 'Planner command below this fraction is treated as off, so the P deadband applies. Small preheat stays unconstrained. Default 0.02.', step: 0.01, parse: parseFloat },
-];
-
 const LINEAR_RESTART_PARAM_DEFS = [
   { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'Re-planning cadence for the linear controller (default 900 s).', step: 60, parse: parseFloat },
   { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'Steps planned ahead (default 144 ≈ 36 h at 15 min). Rebuilds the QP.', step: 1, parse: parseInt },
@@ -56,11 +51,11 @@ const LINEAR_RESTART_PARAM_DEFS = [
 
 const NMPC_RESTART_PARAM_DEFS = [
   { key: 'nmpc_period', label: 'NMPC period', unit: 's', hint: 'Slow planner cadence (default 7200 = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
-  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then P ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
+  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then apply-plan ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
   { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'Planner look-ahead in hours (default 36). Must be an integer number of NMPC periods.', step: 1, parse: parseFloat },
 ];
 
-const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...NMPC_LIVE_PARAM_DEFS];
+const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS];
 const RESTART_PARAM_DEFS = [...LINEAR_RESTART_PARAM_DEFS, ...NMPC_RESTART_PARAM_DEFS];
 const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
@@ -77,8 +72,6 @@ const DEFAULTS = {
   energy_weight: 0.01,
   energy_price_weight: 1.0,
   smoothing_weight: 0.1,
-  p_deadband: 1.0,
-  u_ref_gate: 0.02,
   soft_constraint_weight: 10.0,
   soft_constraint_linear_weight: 0.0,
   terminal_weight: 100.0,
@@ -230,11 +223,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
     'Sample interval and prediction horizon rebuild the quadratic program.',
     LINEAR_RESTART_PARAM_DEFS,
   );
-  const nmpcLiveSubsection = appendParamSubsection(
-    'Nonlinear tracker',
-    'Fast P tracker knobs used only while nonlinear MPC is selected.',
-    NMPC_LIVE_PARAM_DEFS,
-  );
   const nmpcRestartSubsection = appendParamSubsection(
     'Nonlinear MPC timing',
     'NMPC period, fast substeps, and look-ahead rebuild the nonlinear planner. Sample interval is derived (period / substeps).',
@@ -245,7 +233,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   derivedGroup.innerHTML = `
     <label class="form-label" for="ctrl-nmpc_sample_interval">Sample interval</label>
     <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" value="" readonly>
-    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and P run at this cadence)</span>
+    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and plan apply at this cadence)</span>
   `;
   nmpcRestartSubsection.querySelector('.tuning-params-grid')?.appendChild(derivedGroup)
     || nmpcRestartSubsection.appendChild(derivedGroup);
@@ -255,7 +243,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
   function syncModeParamVisibility() {
     const linear = selectedMode === MPC_MODE_LINEAR;
     linearSubsection.hidden = !linear;
-    nmpcLiveSubsection.hidden = linear;
     nmpcRestartSubsection.hidden = linear;
   }
 

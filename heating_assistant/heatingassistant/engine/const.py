@@ -452,7 +452,7 @@ CONF_MPC_MODE = "mpc_mode"  # exclusive planner: "linear" | "nmpc"
 MPC_MODE_LINEAR = "linear"
 MPC_MODE_NMPC = "nmpc"
 CONF_NMPC_PERIOD = "nmpc_period"  # slow NMPC cadence [s]
-CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF+P ticks per slow interval
+CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF + plan-apply ticks per slow interval
 CONF_NMPC_HORIZON_H = "nmpc_horizon_h"  # look-ahead [hours]
 CONF_P_GAIN = "p_gain"  # heater P-law gain [1/K]
 CONF_P_DEADBAND = "p_deadband"  # P temperature deadband when NMPC is near zero [K]
@@ -511,7 +511,7 @@ DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFA
 DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
 DEFAULT_MPC_MODE = MPC_MODE_NMPC       # nonlinear planner is the default
 DEFAULT_NMPC_PERIOD = 7200.0           # 2 h slow NMPC cadence
-DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then P ticks per slow interval
+DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then plan-apply ticks per slow interval
 DEFAULT_NMPC_HORIZON_H = 36.0          # look-ahead hours
 DEFAULT_P_GAIN = 0.1                   # P-law gain [1/K]
 DEFAULT_P_DEADBAND = 1.0               # P tracking deadband around T_ref when NMPC is off [K]

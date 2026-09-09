@@ -9,6 +9,10 @@ must be the exact calendar version on its own line.
 - Controller Tuning lets you choose linear or nonlinear model predictive
   control. Shared weights stay in place when you switch, and each planner
   keeps its own timing settings.
+- Nonlinear control holds the planned heater command between NMPC solves.
+  The extra tracking loop on the planned temperature is gone, and the room
+  Regulator Load card is removed. Per-heater P gain on each heating unit
+  is unchanged.
 
 # 2026.09.17
 
