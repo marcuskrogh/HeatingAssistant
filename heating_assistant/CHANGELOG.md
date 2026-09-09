@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.19
+
+- Controller Tuning planner cards show Linear or Nonlinear, then model
+  predictive control, with a clearer in-use state. Switching the live
+  solver still requires Apply Changes. Nonlinear timing uses a sample
+  interval instead of a substep count.
+
 # 2026.09.18
 
 - Controller Tuning lets you choose linear or nonlinear model predictive

@@ -23,40 +23,47 @@ const MPC_MODE_NMPC = 'nmpc';
 const MODE_CARDS = [
   {
     key: MPC_MODE_LINEAR,
-    title: 'Linear model predictive control',
-    body: 'For systems that need a lower computational load. More computationally efficient, but suffers from linearisation error.',
+    name: 'Linear',
+    body: 'Updates heater commands on a lighter quadratic program each sample. Faster to solve; the house model is linearised, so strong nonlinearities are approximated.',
   },
   {
     key: MPC_MODE_NMPC,
-    title: 'Nonlinear model predictive control',
-    body: 'For systems that can handle a larger computational load. Takes longer to compute the solution.',
+    name: 'Nonlinear',
+    body: 'Computes a full nonlinear plan on a slower cycle, then holds that plan between solves. Heavier compute and longer solves; no linearisation of the dynamics.',
   },
 ];
 
 const SHARED_LIVE_PARAM_DEFS = [
-  { key: 'comfort_offset', label: 'Comfort Offset', unit: '°C', hint: 'Symmetric band around setpoint', step: 0.1, parse: parseFloat },
-  { key: 'tracking_weight', label: 'Tracking Weight', unit: '', hint: 'Setpoint tracking strength (0 = band only)', step: 0.1, parse: parseFloat },
-  { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, parse: parseFloat },
-  { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, parse: parseFloat },
-  { key: 'smoothing_weight', label: 'Output Smoothing', unit: '', hint: 'Penalises rapid output changes', step: 0.05, parse: parseFloat },
-  { key: 'soft_constraint_weight', label: 'Comfort Band Penalty (quadratic)', unit: '', hint: 'Quadratic penalty for leaving comfort zone', step: 1, parse: parseFloat },
-  { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, parse: parseFloat },
-  { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
+  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Allowed swing above and below the setpoint', step: 0.1, parse: parseFloat },
+  { key: 'tracking_weight', label: 'Tracking weight', unit: '', hint: 'How hard to pull toward the setpoint inside the band (0 = stay inside the band only)', step: 0.1, parse: parseFloat },
+  { key: 'energy_weight', label: 'Energy weight', unit: '', hint: 'Prefer using less heat', step: 0.01, parse: parseFloat },
+  { key: 'energy_price_weight', label: 'Price sensitivity', unit: '', hint: 'Use less electricity when the price is high', step: 0.1, parse: parseFloat },
+  { key: 'smoothing_weight', label: 'Output smoothing', unit: '', hint: 'Avoid abrupt heater changes', step: 0.05, parse: parseFloat },
+  { key: 'soft_constraint_weight', label: 'Comfort-band penalty (quadratic)', unit: '', hint: 'How hard leaving the comfort band is penalised', step: 1, parse: parseFloat },
+  { key: 'soft_constraint_linear_weight', label: 'Comfort-band penalty (linear)', unit: '', hint: 'Extra steadily growing penalty outside the band (0 = off)', step: 1, parse: parseFloat },
+  { key: 'terminal_weight', label: 'End-of-plan weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint', step: 1, parse: parseFloat },
 ];
 
 const LINEAR_RESTART_PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'Re-planning cadence for the linear controller (default 900 s).', step: 60, parse: parseFloat },
-  { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'Steps planned ahead (default 144 ≈ 36 h at 15 min). Rebuilds the QP.', step: 1, parse: parseInt },
+  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often the linear planner updates heater commands (default 900 s = 15 min).', step: 60, parse: parseFloat },
+  { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'How many sample intervals to plan ahead (default 144 ≈ 36 h at 15 min). Rebuilds the planner.', step: 1, parse: parseInt },
 ];
 
 const NMPC_RESTART_PARAM_DEFS = [
-  { key: 'nmpc_period', label: 'NMPC period', unit: 's', hint: 'Slow planner cadence (default 7200 = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
-  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then apply-plan ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
-  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'Planner look-ahead in hours (default 36). Must be an integer number of NMPC periods.', step: 1, parse: parseFloat },
+  { key: 'nmpc_period', label: 'Plan period', unit: 's', hint: 'How often a new nonlinear plan is computed (default 7200 s = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
+  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'How far the plan looks ahead (default 36 h). Must be a whole number of plan periods.', step: 1, parse: parseFloat },
+];
+
+const NMPC_HIDDEN_PARAM_DEFS = [
+  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: '', step: 1, parse: parseInt },
 ];
 
 const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS];
-const RESTART_PARAM_DEFS = [...LINEAR_RESTART_PARAM_DEFS, ...NMPC_RESTART_PARAM_DEFS];
+const RESTART_PARAM_DEFS = [
+  ...LINEAR_RESTART_PARAM_DEFS,
+  ...NMPC_RESTART_PARAM_DEFS,
+  ...NMPC_HIDDEN_PARAM_DEFS,
+];
 const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
@@ -116,24 +123,22 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Choose the planner, then adjust weights and timing. Shared weights keep their values when you switch between linear and nonlinear control.';
+  desc.textContent = 'Choose a planner, then Apply Changes to put it live. Shared weights keep their values when you switch. Timing knobs for the unused planner stay stored.';
   container.appendChild(desc);
 
   let selectedMode = MPC_MODE_NMPC;
+  let appliedConfig = null;
 
   const modeSection = document.createElement('div');
   modeSection.className = 'tuning-mode-grid';
+  modeSection.setAttribute('role', 'group');
+  modeSection.setAttribute('aria-label', 'Planner');
   const modeButtons = {};
   for (const card of MODE_CARDS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tuning-mode-card';
     btn.dataset.mode = card.key;
-    btn.setAttribute('aria-pressed', card.key === selectedMode ? 'true' : 'false');
-    btn.innerHTML = `
-      <div class="tuning-mode-card__title">${card.title}</div>
-      <p class="tuning-mode-card__body">${card.body}</p>
-    `;
     btn.addEventListener('click', () => {
       selectedMode = card.key;
       syncModeCards();
@@ -152,12 +157,39 @@ function renderTuningIndex(container, rooms, connection, hass) {
       : MPC_MODE_NMPC;
   }
 
+  function liveMode() {
+    return coerceMode(appliedConfig?.mpc_mode ?? DEFAULTS.mpc_mode);
+  }
+
   function syncModeCards() {
+    const applied = liveMode();
     for (const card of MODE_CARDS) {
       const btn = modeButtons[card.key];
-      const on = card.key === selectedMode;
-      btn.classList.toggle('tuning-mode-card--active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      const isLive = card.key === applied;
+      const isDraft = card.key === selectedMode;
+      btn.classList.toggle('tuning-mode-card--in-use', isLive);
+      btn.classList.toggle('tuning-mode-card--draft', isDraft && !isLive);
+      btn.setAttribute('aria-pressed', isDraft ? 'true' : 'false');
+      let badge = '';
+      let badgeClass = 'tuning-mode-card__badge';
+      if (isLive && isDraft) {
+        badge = 'In use';
+        badgeClass += ' tuning-mode-card__badge--in-use';
+      } else if (isLive) {
+        badge = 'In use';
+        badgeClass += ' tuning-mode-card__badge--in-use';
+      } else if (isDraft) {
+        badge = 'Apply to switch';
+        badgeClass += ' tuning-mode-card__badge--draft';
+      }
+      btn.innerHTML = `
+        <div class="tuning-mode-card__head">
+          <div class="tuning-mode-card__name">${card.name}</div>
+          <span class="${badgeClass}">${badge}</span>
+        </div>
+        <div class="tuning-mode-card__subtitle">model predictive control</div>
+        <p class="tuning-mode-card__body">${card.body}</p>
+      `;
     }
   }
 
@@ -215,29 +247,34 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   appendParamSubsection(
     'Shared live tuning',
-    'Penalty weights and comfort band — shared by both planners. Applied on the next planning cycle.',
+    'Penalty weights and comfort band — shared by both planners. Applied on the next planning cycle after you save.',
     SHARED_LIVE_PARAM_DEFS,
   );
   const linearSubsection = appendParamSubsection(
     'Linear MPC timing',
-    'Sample interval and prediction horizon rebuild the quadratic program.',
+    'Sample interval and prediction horizon. Changing these rebuilds the linear planner when you Apply Changes.',
     LINEAR_RESTART_PARAM_DEFS,
   );
   const nmpcRestartSubsection = appendParamSubsection(
     'Nonlinear MPC timing',
-    'NMPC period, fast substeps, and look-ahead rebuild the nonlinear planner. Sample interval is derived (period / substeps).',
+    'Plan period, sample interval, and look-ahead. Changing these rebuilds the nonlinear planner when you Apply Changes.',
     NMPC_RESTART_PARAM_DEFS,
   );
   const derivedGroup = document.createElement('div');
   derivedGroup.className = 'form-group';
   derivedGroup.innerHTML = `
     <label class="form-label" for="ctrl-nmpc_sample_interval">Sample interval</label>
-    <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" value="" readonly>
-    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and plan apply at this cadence)</span>
+    <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" step="60" value="">
+    <span class="form-hint">s — how often the current plan is applied (default 900 s). Must divide the plan period evenly.</span>
   `;
   nmpcRestartSubsection.querySelector('.tuning-params-grid')?.appendChild(derivedGroup)
     || nmpcRestartSubsection.appendChild(derivedGroup);
-  const nmpcDerivedInput = derivedGroup.querySelector('input');
+  const nmpcSampleInput = derivedGroup.querySelector('input');
+  const hiddenSubsteps = document.createElement('input');
+  hiddenSubsteps.type = 'hidden';
+  hiddenSubsteps.id = 'ctrl-nmpc_fast_substeps';
+  nmpcRestartSubsection.appendChild(hiddenSubsteps);
+  inputs.nmpc_fast_substeps = hiddenSubsteps;
   container.appendChild(formSection);
 
   function syncModeParamVisibility() {
@@ -288,8 +325,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
   previewSection.innerHTML = `
     <div class="tuning-section__title">Controller Preview</div>
     <p class="tuning-section__desc">
-      Run a one-off solve with the configured MPC parameters and review the predicted trajectories for each room.
-      The live controller is not affected.
+      Run a one-off solve with the values on this page, including a drafted planner.
+      Apply Changes is what switches the live solver.
     </p>
     <div class="tuning-actions">
       <button class="btn btn--accent tuning-actions__btn" id="btn-preview">Preview Controller Behaviour</button>
@@ -324,7 +361,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (type) previewStatusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  let appliedConfig = null;
   let previewPayload = null;
   let selectedPreviewRoom = rooms[0]?.slug ?? null;
   let plotSettings = { forecastHours: 0 };
@@ -354,6 +390,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   };
 
   function collectConfiguredConfig() {
+    syncSubstepsFromSampleInterval();
     const cfg = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) cfg[def.key] = def.parse(inputs[def.key].value);
     for (const def of WINDOW_DEFS) cfg[def.key] = def.parse(windowInputs[def.key].value);
@@ -361,6 +398,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function collectMpcParams() {
+    syncSubstepsFromSampleInterval();
     const mpcData = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) mpcData[def.key] = def.parse(inputs[def.key].value);
     return mpcData;
@@ -418,28 +456,53 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const applied = appliedConfig?.[def.key] ?? ALL_DEFAULTS[def.key];
       input.classList.toggle('form-input--modified', pending && !valuesEqual(configured, applied));
     }
+    if (nmpcSampleInput && appliedConfig) {
+      const period = Number(appliedConfig.nmpc_period ?? DEFAULTS.nmpc_period);
+      const substeps = Number(appliedConfig.nmpc_fast_substeps ?? DEFAULTS.nmpc_fast_substeps);
+      const appliedDt = substeps > 0 ? period / substeps : DEFAULTS.update_interval;
+      const sample = Number(nmpcSampleInput.value);
+      nmpcSampleInput.classList.toggle(
+        'form-input--modified',
+        pending && Number.isFinite(sample) && !valuesEqual(sample, appliedDt),
+      );
+    }
   }
 
-  function updateDerivedSampleInterval() {
+  function fillSampleFromSubsteps() {
     const period = Number(inputs.nmpc_period?.value);
     const substeps = Number(inputs.nmpc_fast_substeps?.value);
-    if (!nmpcDerivedInput) return;
+    if (!nmpcSampleInput) return;
     if (Number.isFinite(period) && Number.isFinite(substeps) && substeps > 0) {
-      nmpcDerivedInput.value = String(period / substeps);
+      nmpcSampleInput.value = String(period / substeps);
+    }
+  }
+
+  function syncSubstepsFromSampleInterval() {
+    const period = Number(inputs.nmpc_period?.value);
+    const sample = Number(nmpcSampleInput?.value);
+    if (!(period > 0) || !(sample > 0) || !inputs.nmpc_fast_substeps) return;
+    const ratio = period / sample;
+    const rounded = Math.round(ratio);
+    if (Math.abs(ratio - rounded) <= 1e-6 && rounded >= 1) {
+      inputs.nmpc_fast_substeps.value = String(rounded);
     }
   }
 
   function nmpcTimingError() {
     if (selectedMode !== MPC_MODE_NMPC) return null;
     const period = Number(inputs.nmpc_period?.value);
-    const substeps = Number(inputs.nmpc_fast_substeps?.value);
+    const sample = Number(nmpcSampleInput?.value);
     const horizonH = Number(inputs.nmpc_horizon_h?.value);
-    if (!(period > 0) || !(substeps >= 1) || !(horizonH > 0)) {
-      return 'NMPC period, fast substeps, and look-ahead must be positive.';
+    if (!(period > 0) || !(sample > 0) || !(horizonH > 0)) {
+      return 'Plan period, sample interval, and look-ahead must be positive.';
+    }
+    const substeps = period / sample;
+    if (Math.abs(substeps - Math.round(substeps)) > 1e-6 || Math.round(substeps) < 1) {
+      return 'Sample interval must divide the plan period evenly.';
     }
     const nSlow = horizonH * 3600 / period;
     if (Math.abs(nSlow - Math.round(nSlow)) > 1e-6) {
-      return 'Look-ahead must be an integer number of NMPC periods.';
+      return 'Look-ahead must be a whole number of plan periods.';
     }
     return null;
   }
@@ -456,7 +519,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
-    updateDerivedSampleInterval();
+    fillSampleFromSubsteps();
     updatePendingIndicators();
   }
 
@@ -466,7 +529,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     syncModeParamVisibility();
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    updateDerivedSampleInterval();
+    fillSampleFromSubsteps();
     updatePendingIndicators();
   }
 
@@ -510,13 +573,15 @@ function renderTuningIndex(container, rooms, connection, hass) {
   const allParamInputs = [
     ...Object.values(inputs),
     ...Object.values(windowInputs),
+    nmpcSampleInput,
   ];
 
   let userEditing = false;
   allParamInputs.forEach((inp) => {
+    if (!inp) return;
     inp.addEventListener('input', () => {
       userEditing = true;
-      updateDerivedSampleInterval();
+      syncSubstepsFromSampleInterval();
       updatePendingIndicators();
     });
   });

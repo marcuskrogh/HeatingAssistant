@@ -435,7 +435,8 @@ def test_tuning_ui_exposes_nmpc_triple():
     assert "nmpc_period" in source
     assert "nmpc_fast_substeps" in source
     assert "nmpc_horizon_h" in source
-    assert "readonly" in source
+    assert "ctrl-nmpc_sample_interval" in source
+    assert 'id="ctrl-nmpc_sample_interval" value="" readonly>' not in source
     source_editor = (
         Path(__file__).resolve().parents[1]
         / "heatingassistant"
