@@ -38,6 +38,7 @@
 - Relates: SWD-532
 - Sub-tasks: SWD-537, SWD-538
 - Branch: `cursor/swd-536-kpi-mpc-general-58e6`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/678
 
 ## Next
 `/review-fix SWD-536` — Review and auto-fix (single pass)

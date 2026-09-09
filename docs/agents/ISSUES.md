@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-536 | Task | [Iterate] Mode-general Next Compute and MPC Load KPIs | In Progress | — | docs/agents/ITERATE-kpi-mpc-general.md | `/review-fix SWD-536` |
-| SWD-537 | Sub-task | Unify Next Compute ring and MPC Load KPIs | In Progress | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
-| SWD-538 | Sub-task | Tests, CalVer, changelog, App sync for KPI copy | In Progress | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
+| SWD-536 | Task | [Iterate] Mode-general Next Compute and MPC Load KPIs | In Review | — | docs/agents/ITERATE-kpi-mpc-general.md | `/review-fix SWD-536` — https://github.com/marcuskrogh/HeatingAssistant/pull/678 |
+| SWD-537 | Sub-task | Unify Next Compute ring and MPC Load KPIs | In Review | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
+| SWD-538 | Sub-task | Tests, CalVer, changelog, App sync for KPI copy | In Review | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
 | SWD-532 | Task | [Iterate] Nonlinear MPC on the same sample grid as Linear | Done | — | docs/agents/ITERATE-nmpc-equiv-lmpc.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/676 (`b07c39d8`) |
 | SWD-533 | Sub-task | Single-rate NMPC equivalent to Linear | Done | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
 | SWD-534 | Sub-task | Tests, TUNING.md, CalVer, App sync | Done | SWD-532 | docs/agents/ITERATE-nmpc-equiv-lmpc.md | — |
