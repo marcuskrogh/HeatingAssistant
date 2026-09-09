@@ -510,39 +510,53 @@ def test_timed_out_plan_roll_is_rejected(monkeypatch):
     assert np.allclose(plan["t_ref"], 0.0)
 
 
-def test_analytic_jacobian_refreshes_M_each_fast_tick(monkeypatch):
-    counts = {"n": 0}
-    orig = MeanOcp._refresh_M
+def test_analytic_jacobian_refreshes_M_each_fast_tick():
+    """Linearisation M is rebuilt once per fast tick of a Jacobian roll.
 
-    def counted(self, x, u, d):
-        counts["n"] += 1
-        return orig(self, x, u, d)
-
-    monkeypatch.setattr(MeanOcp, "_refresh_M", counted)
-    ctrl = _tiny_ctrl()
-
-    class _Res:
-        def __init__(self, x):
-            self.x = x
-            self.fun = 1.0
-            self.success = True
-            self.nit = 1
-            self.message = "ok"
-
-    def fake_min(**kwargs):
-        jac = kwargs["jac"]
-        x0 = np.asarray(kwargs["x0"], dtype=float)
-        jac(x0)
-        return _Res(x0)
-
-    ctrl.solve_nmpc(
-        outdoor_temp=5.0,
-        now=_NOW,
-        minimize_fn=fake_min,
-        timeout_s=5.0,
+    Count on this OCP instance only. Patching ``MeanOcp._refresh_M`` on the
+    class also sees leftover NLP threads from other tests.
+    """
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=18.0, setpoint=21.0, comfort_offset=2.0
     )
-    assert counts["n"] >= ctrl.horizon
-    assert counts["n"] % ctrl.horizon == 0
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    ctrl = HeatingMPCController(
+        HouseModel([room]),
+        [heater],
+        nmpc_period=3600.0,
+        nmpc_fast_substeps=4,
+        nmpc_horizon_h=1.0,
+    )
+    timing = ctrl.timing
+    assert timing.fast_substeps == 4
+    sde = ctrl._control_system
+    d_fast = [
+        sde.disturbance_vector(5.0, {room.name: 0.0}) for _ in range(timing.n_fast)
+    ]
+    ocp = MeanOcp(
+        sde,
+        ctrl._sources,
+        timing,
+        ctrl._ekf.x_hat,
+        ctrl._u_prev,
+        d_fast,
+        t_min=np.array([room.setpoint - room.comfort_offset]),
+        t_max=np.array([room.setpoint + room.comfort_offset]),
+        rho=ctrl._rho,
+        s_rom=ctrl._smoothing_weight,
+        energy_price_weight=0.0,
+    )
+    counts = {"n": 0}
+    orig = ocp._refresh_M
+
+    def counted(x, u, d):
+        counts["n"] += 1
+        return orig(x, u, d)
+
+    ocp._refresh_M = counted  # type: ignore[method-assign]
+    ocp.jac(np.zeros(ocp.n * ocp.nu, dtype=float))
+    assert counts["n"] == timing.n_fast
+    assert counts["n"] == timing.n_slow * timing.fast_substeps
 
 
 def test_nmpc_worker_freezes_ekf_snapshot():
