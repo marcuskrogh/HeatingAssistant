@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.20
+
+- Controller Tuning uses the same names for the same timing knobs on Linear
+  and Nonlinear: Sample interval and Look-ahead. Nonlinear still has Plan
+  period for how often a new plan is solved.
+
 # 2026.09.19
 
 - Controller Tuning planner cards show Linear or Nonlinear, then model
