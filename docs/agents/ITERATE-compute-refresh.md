@@ -40,6 +40,8 @@
 - Task: [SWD-519](https://marcusknielsen.atlassian.net/browse/SWD-519)
 - Relates: [SWD-513](https://marcusknielsen.atlassian.net/browse/SWD-513)
 - Sub-tasks: [SWD-520](https://marcusknielsen.atlassian.net/browse/SWD-520), [SWD-521](https://marcusknielsen.atlassian.net/browse/SWD-521)
+- Branch: `cursor/swd-519-compute-refresh-b94a`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/671
 
 ## Next
 `/review-fix SWD-519` — Review and auto-fix (single pass)
