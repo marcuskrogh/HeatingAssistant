@@ -1,4 +1,4 @@
-"""Derive fast/slow NMPC grids from the substepping config triple."""
+"""Derive the receding-horizon sample grid (one decision per sample)."""
 
 from __future__ import annotations
 
@@ -7,21 +7,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .const import (
-    CONF_MPC_MODE,
-    DEFAULT_HORIZON,
-    DEFAULT_UPDATE_INTERVAL,
-    MPC_MODE_LINEAR,
-    coerce_mpc_mode,
-)
-
 
 _NMPC_KEYS = ("nmpc_period", "nmpc_fast_substeps", "nmpc_horizon_h")
 
 
 @dataclass(frozen=True)
 class NmpcTiming:
-    """Integer two-rate grid derived from period, fast substeps, and look-ahead."""
+    """Sample grid: ``period_s == dt_s`` and ``fast_substeps == 1`` in production.
+
+    ``derive_nmpc_timing`` still accepts ``M > 1`` for unit tests of the OCP
+    hold loop. Config loaders coerce that triple to one decision per sample.
+    """
 
     period_s: float
     fast_substeps: int
@@ -111,7 +107,7 @@ def derive_nmpc_timing(
     n_slow = horizon * 3600.0 / period
     if abs(n_slow - round(n_slow)) > 1e-6:
         raise ValueError(
-            "look-ahead must be an integer number of NMPC periods "
+            "look-ahead must be an integer number of sample intervals "
             f"(horizon_h={horizon}, period_s={period})"
         )
     n = int(round(n_slow))
@@ -128,14 +124,44 @@ def derive_nmpc_timing(
 
 
 def timing_from_dt_horizon(dt_s: float, horizon_steps: int) -> NmpcTiming:
-    """Legacy/test constructor: one slow interval spanning the full horizon."""
+    """One NLP/QP decision per sample over ``horizon_steps`` ticks."""
 
     dt = float(dt_s)
     n_fast = int(horizon_steps)
     if dt <= 0.0 or n_fast < 1:
         raise ValueError("dt and horizon must be positive")
-    period = dt * n_fast
-    return derive_nmpc_timing(period, n_fast, period / 3600.0)
+    return derive_nmpc_timing(dt, 1, n_fast * dt / 3600.0)
+
+
+def coerce_to_sample_grid(
+    period_s: float,
+    fast_substeps: int,
+    horizon_h: float,
+) -> NmpcTiming:
+    """Collapse a legacy two-rate triple to one decision per sample.
+
+    Keeps ``dt = period / M`` and look-ahead hours. Decision count becomes
+    the former fast-step count.
+    """
+
+    period = float(period_s)
+    m = int(fast_substeps)
+    if period <= 0.0:
+        raise ValueError(f"nmpc_period must be > 0; got {period}")
+    if m < 1:
+        raise ValueError(f"nmpc_fast_substeps must be >= 1; got {m}")
+    dt = period / float(m)
+    return derive_nmpc_timing(dt, 1, float(horizon_h))
+
+
+def persist_sample_timing(config: dict[str, Any], timing: NmpcTiming) -> None:
+    """Write the five timing keys so Linear and Nonlinear share one grid."""
+
+    config["update_interval"] = timing.dt_s
+    config["horizon"] = timing.n_fast
+    config["nmpc_period"] = timing.dt_s
+    config["nmpc_fast_substeps"] = 1
+    config["nmpc_horizon_h"] = timing.horizon_h
 
 
 def _filled(value: Any, default: Any) -> Any:
@@ -149,38 +175,41 @@ def timing_from_options(
     default_substeps: int,
     default_horizon_h: float,
 ) -> NmpcTiming:
-    """Build timing from config.
+    """Build a one-decision-per-sample grid from config.
 
-    Linear mode uses stored ``update_interval`` / ``horizon`` even when an
-    NMPC triple is also present.  Nonlinear mode uses the NMPC triple when
-    any of its keys is set.  Otherwise a present interval / horizon pair is
-    a one-interval grid (tests).  Empty config uses production NMPC defaults.
+    ``update_interval`` / ``horizon`` win when present (both planners). A
+    legacy two-rate NMPC triple is coerced, keeping ``dt = period / M`` and
+    look-ahead hours. Empty config uses production defaults.
     """
 
-    if coerce_mpc_mode(options.get(CONF_MPC_MODE)) == MPC_MODE_LINEAR:
-        dt_s = float(
-            _filled(options.get("update_interval"), DEFAULT_UPDATE_INTERVAL)
+    dt = options.get("update_interval")
+    horizon = options.get("horizon")
+    if dt is not None or horizon is not None:
+        if dt is not None:
+            dt_s = float(dt)
+        elif options.get("nmpc_period") is not None:
+            m = int(_filled(options.get("nmpc_fast_substeps"), default_substeps))
+            dt_s = float(options["nmpc_period"]) / float(max(m, 1))
+        else:
+            dt_s = float(default_period) / float(max(int(default_substeps), 1))
+        n_fast = int(
+            _filled(
+                horizon,
+                round(
+                    float(_filled(options.get("nmpc_horizon_h"), default_horizon_h))
+                    * 3600.0
+                    / dt_s
+                ),
+            )
         )
-        n_fast = int(_filled(options.get("horizon"), DEFAULT_HORIZON))
         return timing_from_dt_horizon(dt_s, n_fast)
     if any(options.get(key) is not None for key in _NMPC_KEYS):
-        return derive_nmpc_timing(
+        return coerce_to_sample_grid(
             float(_filled(options.get("nmpc_period"), default_period)),
             int(_filled(options.get("nmpc_fast_substeps"), default_substeps)),
             float(_filled(options.get("nmpc_horizon_h"), default_horizon_h)),
         )
-    dt = options.get("update_interval")
-    horizon = options.get("horizon")
-    if dt is not None or horizon is not None:
-        dt_s = float(_filled(dt, default_period / float(default_substeps)))
-        n_fast = int(
-            _filled(
-                horizon,
-                round(default_horizon_h * 3600.0 / dt_s),
-            )
-        )
-        return timing_from_dt_horizon(dt_s, n_fast)
-    return derive_nmpc_timing(default_period, default_substeps, default_horizon_h)
+    return coerce_to_sample_grid(default_period, default_substeps, default_horizon_h)
 
 
 def timing_from_preview_overrides(
@@ -191,33 +220,21 @@ def timing_from_preview_overrides(
     default_substeps: int,
     default_horizon_h: float,
 ) -> NmpcTiming:
-    """Resolve preview timing from draft knobs without ignoring a live triple.
+    """Resolve preview timing from draft knobs.
 
-    Draft NMPC keys win.  A draft ``horizon`` / ``update_interval`` still maps
-    to a one-interval grid so Tuning previews stay small.  Otherwise the live
-    config (including injected production defaults) is used.
+    A draft ``horizon`` / ``update_interval`` keeps Tuning previews small.
+    Draft NMPC keys coerce to the sample grid without a stale live
+    ``horizon`` overriding look-ahead. Otherwise the live config is used.
     """
 
     ov = dict(overrides or {})
     merged = {**dict(base), **ov}
-    if coerce_mpc_mode(merged.get(CONF_MPC_MODE)) == MPC_MODE_LINEAR:
-        dt_s = float(
-            _filled(merged.get("update_interval"), DEFAULT_UPDATE_INTERVAL)
-        )
-        n_fast = int(_filled(merged.get("horizon"), DEFAULT_HORIZON))
-        return timing_from_dt_horizon(dt_s, n_fast)
-    if any(ov.get(key) is not None for key in _NMPC_KEYS):
-        return timing_from_options(
-            merged,
-            default_period=default_period,
-            default_substeps=default_substeps,
-            default_horizon_h=default_horizon_h,
-        )
     if ov.get("horizon") is not None or ov.get("update_interval") is not None:
         dt_s = float(
             _filled(
                 ov.get("update_interval"),
-                merged.get("update_interval") or (default_period / float(default_substeps)),
+                merged.get("update_interval")
+                or (default_period / float(max(int(default_substeps), 1))),
             )
         )
         n_fast = int(
@@ -228,6 +245,22 @@ def timing_from_preview_overrides(
             )
         )
         return timing_from_dt_horizon(dt_s, n_fast)
+    if any(ov.get(key) is not None for key in _NMPC_KEYS):
+        return coerce_to_sample_grid(
+            float(_filled(ov.get("nmpc_period"), merged.get("nmpc_period") or default_period)),
+            int(
+                _filled(
+                    ov.get("nmpc_fast_substeps"),
+                    merged.get("nmpc_fast_substeps") or default_substeps,
+                )
+            ),
+            float(
+                _filled(
+                    ov.get("nmpc_horizon_h"),
+                    merged.get("nmpc_horizon_h") or default_horizon_h,
+                )
+            ),
+        )
     return timing_from_options(
         merged,
         default_period=default_period,

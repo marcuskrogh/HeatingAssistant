@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.20
+
+- Nonlinear model predictive control uses the same sample interval and
+  look-ahead as Linear. The old two-hour plan period and held-command
+  grid are gone; a new nonlinear plan is solved each sample (typically
+  tens of seconds of compute inside a 15 minute sample).
+
 # 2026.09.19
 
 - Controller Tuning planner cards show Linear or Nonlinear, then model

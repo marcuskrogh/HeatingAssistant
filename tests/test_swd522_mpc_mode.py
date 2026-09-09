@@ -69,7 +69,7 @@ def test_linear_timing_ignores_nmpc_triple():
     assert timing.n_fast == 8
 
 
-def test_nmpc_timing_keeps_triple_when_linear_knobs_present():
+def test_nmpc_timing_shares_sample_grid_when_linear_knobs_present():
     timing = timing_from_options(
         {
             CONF_MPC_MODE: MPC_MODE_NMPC,
@@ -83,9 +83,9 @@ def test_nmpc_timing_keeps_triple_when_linear_knobs_present():
         default_substeps=DEFAULT_NMPC_FAST_SUBSTEPS,
         default_horizon_h=DEFAULT_NMPC_HORIZON_H,
     )
-    assert timing.period_s == pytest.approx(1800.0)
-    assert timing.fast_substeps == 2
-    assert timing.n_fast == 4
+    assert timing.period_s == pytest.approx(600.0)
+    assert timing.fast_substeps == 1
+    assert timing.n_fast == 8
 
 
 def test_linear_compute_solves_qp_not_p():
@@ -116,7 +116,7 @@ def test_nmpc_compute_does_not_call_qp_step():
     assert actions["h"] == pytest.approx(0.3)
 
 
-def test_engine_preserves_linear_knobs_in_nmpc_mode():
+def test_engine_syncs_timing_keys_in_nmpc_mode():
     engine = ControlEngine(
         {
             "rooms": [
@@ -143,9 +143,11 @@ def test_engine_preserves_linear_knobs_in_nmpc_mode():
             "nmpc_horizon_h": 1.0,
         }
     )
-    assert engine.config["update_interval"] == 600
+    assert engine.config["update_interval"] == pytest.approx(600.0)
     assert engine.config["horizon"] == 12
-    assert engine.config["nmpc_period"] == pytest.approx(1800.0)
+    assert engine.config["nmpc_period"] == pytest.approx(600.0)
+    assert engine.config["nmpc_fast_substeps"] == 1
+    assert engine.config["nmpc_horizon_h"] == pytest.approx(2.0)
     assert engine._controller is not None
     assert engine._controller.mpc_mode == MPC_MODE_NMPC
 

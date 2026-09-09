@@ -154,4 +154,4 @@ def test_production_pe_grid_follows_nmpc_timing():
     assert est._n_horizon_steps == timing.n_fast
     assert est._origin_stride == timing.fast_substeps
     assert timing.n_fast == 144
-    assert timing.fast_substeps == 8
+    assert timing.fast_substeps == 1

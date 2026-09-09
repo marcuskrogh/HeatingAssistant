@@ -88,7 +88,7 @@ def test_hass_states_share_epoch_and_derived_dt(tmp_path: Path) -> None:
     assert attrs["last_nmpc_ts"] == pytest.approx(epoch)
     assert attrs["last_run_ts"] == pytest.approx(epoch)
     assert attrs["dt_s"] == pytest.approx(900.0)
-    assert attrs["nmpc_period_s"] == pytest.approx(1800.0)
+    assert attrs["nmpc_period_s"] == pytest.approx(900.0)
     assert attrs["nmpc_computing"] is False
     assert attrs["control_computing"] is False
     assert "nmpc_result_ts" in attrs

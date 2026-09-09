@@ -23,7 +23,7 @@ def test_mode_cards_split_name_and_subtitle() -> None:
     assert "Fast substeps" not in source.split("NMPC_HIDDEN_PARAM_DEFS", 1)[0]
     assert 'label: \'Fast substeps\'' not in source.split("NMPC_HIDDEN_PARAM_DEFS", 1)[0]
     assert "form-label\" for=\"ctrl-nmpc_fast_substeps\"" not in source
-    assert "Plan period" in source
+    assert "Plan period" not in source
     assert "LINEAR_LIVE_PARAM_DEFS" in source
     assert "Setpoint pull" in source
     assert "Heater-effort penalty" in source
@@ -47,4 +47,4 @@ def test_card_click_does_not_call_apply() -> None:
     apply_body = source.split("btnApply.addEventListener('click'", 1)[1]
     assert "updateControllerTuning" in apply_body
     assert "nmpc_fast_substeps" in source
-    assert "Must divide the plan period" in source
+    assert "Look-ahead must be a whole number of sample intervals" in source

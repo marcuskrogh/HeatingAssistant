@@ -147,28 +147,29 @@ consider more history or a re-run with problematic parameters locked.
 ## MPC controller tuning
 
 Open **Tuning** and choose **linear** or **nonlinear** model predictive control.
-Shared penalty weights keep their values when you switch. Linear mode solves a
-quadratic program each sample interval. Nonlinear mode uses the slower NMPC
-planner plus the fast P tracker. Use **Preview** before **Apply Changes**.
+Shared penalty weights keep their values when you switch. Both planners use the
+same sample interval and look-ahead. Linear solves a quadratic program each
+sample. Nonlinear solves the same receding-horizon problem on the nonlinear
+house model (heavier compute). Use **Preview** before **Apply Changes**.
 
 Live penalty weights take effect on the next planning cycle. Changing **Sample
-interval** or **Prediction horizon** rebuilds the MPC problem.
+interval** or **Look-ahead** rebuilds the planner.
 
 ### Tunable parameters
 
 | Parameter | Config key | Default | Effect |
 |-----------|-----------|---------|--------|
-| **Planner** | `mpc_mode` | `nmpc` | `linear` (QP, lower compute, linearisation error) or `nmpc` (nonlinear planner; holds the planned heater command) |
+| **Planner** | `mpc_mode` | `nmpc` | `linear` (QP, lower compute, linearisation error) or `nmpc` (nonlinear program, same sample grid) |
 | **Comfort offset** | `comfort_offset` | `2.0 °C` | Half-width of the soft comfort band around the setpoint |
-| **Tracking weight** | `tracking_weight` | `0` | Setpoint tracking strength; `0` = band-only (zone) control |
-| **Energy weight** | `energy_weight` | `0.01` | Penalises heater output — higher = more conservative heating |
+| **Tracking weight** | `tracking_weight` | `0` | Linear only — setpoint pull inside the band; `0` = band-only |
+| **Energy weight** | `energy_weight` | `0.01` | Linear only — penalises heater output |
 | **Price sensitivity** | `energy_price_weight` | `1.0` | Scales electricity-price cost when a price sensor is configured |
 | **Output smoothing** | `smoothing_weight` | `0.1` | Penalises changing heater output step-to-step — raise to damp oscillations |
-| **Comfort band penalty (quadratic)** | `soft_constraint_weight` | `1000` | Quadratic penalty for leaving the comfort zone |
-| **Comfort band penalty (linear)** | `soft_constraint_linear_weight` | `0` | Linear comfort-band penalty (`0` = disabled) |
-| **Terminal weight** | `terminal_weight` | `100` | End-of-horizon tracking multiplier; raise (200–500) if the plan misses setpoint |
-| **Sample interval** | `update_interval` | `900 s` | Re-planning cadence (rebuilds controller when changed) |
-| **Prediction horizon** | `horizon` | `100` steps | Steps planned ahead (~25 h at 15 min); longer horizons see thermal lag |
+| **Comfort-band penalty** | `soft_constraint_weight` | `10` | Penalty for leaving the comfort zone |
+| **Outside-band linear penalty** | `soft_constraint_linear_weight` | `0` | Linear-only extra comfort-band term (`0` = disabled) |
+| **End-of-horizon weight** | `terminal_weight` | `100` | Linear only — end-of-plan tracking multiplier |
+| **Sample interval** | `update_interval` | `900 s` | How often heater commands are applied (both planners) |
+| **Look-ahead** | `horizon` / `nmpc_horizon_h` | `36 h` | How far the plan covers |
 | **EKF process noise** | `sigma_w` | `0.1` | On **Parameter estimation** — faster reaction to unmodelled disturbances when higher |
 | **EKF measurement noise** | `sigma_v` | `0.5` | On **Parameter estimation** — higher trusts sensors less |
 
@@ -177,9 +178,9 @@ interval** or **Prediction horizon** rebuilds the MPC problem.
 Oscillations appear as repeated undershoot/overshoot around the setpoint. Common
 causes and fixes:
 
-**Prediction horizon too short** — With only 30–60 minutes of lookahead (e.g. 2–4
-steps at 15 min), the controller overshoots then cuts off, repeating the cycle.
-Increase `horizon` if you have shortened it below roughly 8 steps (~2 h).
+**Look-ahead too short** — With only 30–60 minutes of look-ahead, the controller
+overshoots then cuts off, repeating the cycle. Increase **Look-ahead** if you have
+shortened it below roughly 2 h.
 
 **Smoothing weight too low** — The controller can swing output between 0 and 1 each
 step. Increase `smoothing_weight` (try `0.5` → `1.0` → `2.0`).

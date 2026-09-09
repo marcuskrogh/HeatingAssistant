@@ -47,13 +47,15 @@ def _tiny_ctrl() -> HeatingMPCController:
     return HeatingMPCController(model, [heater], horizon=2, dt=900.0)
 
 
-def test_default_timing_triple_divides():
+def test_default_timing_is_one_decision_per_sample():
     timing = derive_nmpc_timing(
         DEFAULT_NMPC_PERIOD, DEFAULT_NMPC_FAST_SUBSTEPS, DEFAULT_NMPC_HORIZON_H
     )
     assert timing.dt_s == pytest.approx(900.0)
-    assert timing.n_slow == 18
+    assert timing.fast_substeps == 1
+    assert timing.n_slow == 144
     assert timing.n_fast == 144
+    assert timing.period_s == pytest.approx(900.0)
 
 
 def test_timing_rejects_non_dividing_horizon():
@@ -179,11 +181,11 @@ def test_injected_minimize_timeout_can_still_accept():
     assert "accepted" in plan
 
 
-def test_legacy_horizon_is_one_slow_interval():
+def test_legacy_horizon_is_one_decision_per_sample():
     timing = timing_from_dt_horizon(900.0, 2)
-    assert timing.n_slow == 1
+    assert timing.n_slow == 2
     assert timing.n_fast == 2
-    assert timing.fast_substeps == 2
+    assert timing.fast_substeps == 1
 
 
 def test_nmpc_worker_runs_off_asyncio_loop():
@@ -216,8 +218,9 @@ def test_timing_from_options_uses_legacy_horizon_when_triple_absent():
         default_horizon_h=DEFAULT_NMPC_HORIZON_H,
     )
     assert timing.n_fast == 4
-    assert timing.n_slow == 1
+    assert timing.n_slow == 4
     assert timing.dt_s == pytest.approx(900.0)
+    assert timing.fast_substeps == 1
 
 
 def test_timing_from_options_triple_wins_over_horizon():
@@ -233,9 +236,9 @@ def test_timing_from_options_triple_wins_over_horizon():
         default_substeps=DEFAULT_NMPC_FAST_SUBSTEPS,
         default_horizon_h=DEFAULT_NMPC_HORIZON_H,
     )
-    assert timing.period_s == pytest.approx(1800.0)
-    assert timing.fast_substeps == 2
-    assert timing.n_slow == 2
+    assert timing.period_s == pytest.approx(900.0)
+    assert timing.fast_substeps == 1
+    assert timing.n_slow == 4
     assert timing.n_fast == 4
 
 
@@ -255,7 +258,7 @@ def test_preview_overrides_horizon_keep_small_grid():
         default_horizon_h=DEFAULT_NMPC_HORIZON_H,
     )
     assert timing.n_fast == 2
-    assert timing.n_slow == 1
+    assert timing.n_slow == 2
 
 
 def test_compute_copies_applied_u_into_ekf_prev():
@@ -309,7 +312,7 @@ def test_preview_rejects_non_dividing_nmpc_triple():
         }
     )
     result = engine.preview_tuning_forecast(
-        {"nmpc_period": 7200, "nmpc_fast_substeps": 8, "nmpc_horizon_h": 35},
+        {"nmpc_period": 900, "nmpc_fast_substeps": 1, "nmpc_horizon_h": 35.1},
         {"Living Room": 21.0},
         5.0,
         {"Living Room": 21.0},
@@ -435,8 +438,8 @@ def test_tuning_ui_exposes_nmpc_triple():
     assert "nmpc_period" in source
     assert "nmpc_fast_substeps" in source
     assert "nmpc_horizon_h" in source
-    assert "ctrl-nmpc_sample_interval" in source
-    assert 'id="ctrl-nmpc_sample_interval" value="" readonly>' not in source
+    assert 'id="ctrl-look_ahead_h"' in source
+    assert "ctrl-nmpc_sample_interval" not in source
     source_editor = (
         Path(__file__).resolve().parents[1]
         / "heatingassistant"
@@ -507,39 +510,53 @@ def test_timed_out_plan_roll_is_rejected(monkeypatch):
     assert np.allclose(plan["t_ref"], 0.0)
 
 
-def test_analytic_jacobian_refreshes_M_each_fast_tick(monkeypatch):
-    counts = {"n": 0}
-    orig = MeanOcp._refresh_M
+def test_analytic_jacobian_refreshes_M_each_fast_tick():
+    """Linearisation M is rebuilt once per fast tick of a Jacobian roll.
 
-    def counted(self, x, u, d):
-        counts["n"] += 1
-        return orig(self, x, u, d)
-
-    monkeypatch.setattr(MeanOcp, "_refresh_M", counted)
-    ctrl = _tiny_ctrl()
-
-    class _Res:
-        def __init__(self, x):
-            self.x = x
-            self.fun = 1.0
-            self.success = True
-            self.nit = 1
-            self.message = "ok"
-
-    def fake_min(**kwargs):
-        jac = kwargs["jac"]
-        x0 = np.asarray(kwargs["x0"], dtype=float)
-        jac(x0)
-        return _Res(x0)
-
-    ctrl.solve_nmpc(
-        outdoor_temp=5.0,
-        now=_NOW,
-        minimize_fn=fake_min,
-        timeout_s=5.0,
+    Count on this OCP instance only. Patching ``MeanOcp._refresh_M`` on the
+    class also sees leftover NLP threads from other tests.
+    """
+    room = Room(
+        "living_room", 5e6, 0.05, temperature=18.0, setpoint=21.0, comfort_offset=2.0
     )
-    assert counts["n"] >= ctrl.horizon
-    assert counts["n"] % ctrl.horizon == 0
+    heater = ElectricHeater("h", "living_room", max_power=2000.0)
+    ctrl = HeatingMPCController(
+        HouseModel([room]),
+        [heater],
+        nmpc_period=3600.0,
+        nmpc_fast_substeps=4,
+        nmpc_horizon_h=1.0,
+    )
+    timing = ctrl.timing
+    assert timing.fast_substeps == 4
+    sde = ctrl._control_system
+    d_fast = [
+        sde.disturbance_vector(5.0, {room.name: 0.0}) for _ in range(timing.n_fast)
+    ]
+    ocp = MeanOcp(
+        sde,
+        ctrl._sources,
+        timing,
+        ctrl._ekf.x_hat,
+        ctrl._u_prev,
+        d_fast,
+        t_min=np.array([room.setpoint - room.comfort_offset]),
+        t_max=np.array([room.setpoint + room.comfort_offset]),
+        rho=ctrl._rho,
+        s_rom=ctrl._smoothing_weight,
+        energy_price_weight=0.0,
+    )
+    counts = {"n": 0}
+    orig = ocp._refresh_M
+
+    def counted(x, u, d):
+        counts["n"] += 1
+        return orig(x, u, d)
+
+    ocp._refresh_M = counted  # type: ignore[method-assign]
+    ocp.jac(np.zeros(ocp.n * ocp.nu, dtype=float))
+    assert counts["n"] == timing.n_fast
+    assert counts["n"] == timing.n_slow * timing.fast_substeps
 
 
 def test_nmpc_worker_freezes_ekf_snapshot():
@@ -716,7 +733,13 @@ def test_signed_probe_cools_when_slsqp_returns_zero():
     room = Room(
         "living_room", 5e6, 0.05, temperature=28.0, setpoint=21.0, comfort_offset=2.0
     )
-    ctrl = HeatingMPCController(HouseModel([room]), [hp], horizon=4, dt=900.0)
+    ctrl = HeatingMPCController(
+        HouseModel([room]),
+        [hp],
+        nmpc_period=3600.0,
+        nmpc_fast_substeps=4,
+        nmpc_horizon_h=1.0,
+    )
 
     class _Res:
         def __init__(self, x):

@@ -17,7 +17,7 @@ from .control_engine_preview import (  # noqa: F401
     _snapshot_from_controller,
 )
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
-from .nmpc_timing import timing_from_options
+from .nmpc_timing import persist_sample_timing, timing_from_options
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
@@ -145,20 +145,14 @@ class ControlEngine(BuildMixin, PreviewMixin):
         self.config = incoming
         try:
             timing = self._nmpc_timing(self.config)
-            if mode == const.MPC_MODE_LINEAR:
-                self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
-                self.config[const.CONF_HORIZON] = timing.n_fast
-                self.config[const.CONF_NMPC_PERIOD] = nmpc_period
-                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = nmpc_substeps
-                self.config[const.CONF_NMPC_HORIZON_H] = nmpc_horizon_h
-            else:
-                self.config[const.CONF_UPDATE_INTERVAL] = linear_dt
-                self.config[const.CONF_HORIZON] = linear_horizon
-                self.config[const.CONF_NMPC_PERIOD] = timing.period_s
-                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
-                self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
+            persist_sample_timing(self.config, timing)
         except ValueError:
             _LOGGER.warning("Invalid NMPC timing triple in config; controller build may fail")
+            self.config[const.CONF_UPDATE_INTERVAL] = linear_dt
+            self.config[const.CONF_HORIZON] = linear_horizon
+            self.config[const.CONF_NMPC_PERIOD] = nmpc_period
+            self.config[const.CONF_NMPC_FAST_SUBSTEPS] = nmpc_substeps
+            self.config[const.CONF_NMPC_HORIZON_H] = nmpc_horizon_h
         self.model = _build_house_model(_list_of_mappings(self.config.get("rooms")))
         self.heat_sources = _build_heat_sources(
             _list_of_mappings(self.config.get("heat_sources"))

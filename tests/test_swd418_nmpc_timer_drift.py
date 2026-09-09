@@ -89,8 +89,8 @@ def test_slow_slot_due_follows_epoch_not_finish_time(tmp_path: Path) -> None:
     epoch = 1_000.0
     runtime._anchor_schedule_epoch(epoch)
     runtime._last_nmpc_slow_slot = 0
-    assert runtime._nmpc_slow_slot_due(now=epoch + 1799.0) is False
-    assert runtime._nmpc_slow_slot_due(now=epoch + 1800.0) is True
+    assert runtime._nmpc_slow_slot_due(now=epoch + 899.0) is False
+    assert runtime._nmpc_slow_slot_due(now=epoch + 900.0) is True
 
 
 def test_nmpc_due_ignores_fast_step_count() -> None:
