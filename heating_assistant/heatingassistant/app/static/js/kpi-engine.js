@@ -328,29 +328,49 @@ export function houseHeatingPowerGaugeMax(liveTotalW, ratedCapacityW = null) {
   );
 }
 
-/** MPC / control-cycle load as percent of REGULATOR_BUDGET_S (2 s, §4.8). */
-export function mpcLoadPercent(state) {
-  const mpcEntity = systemEntity('mpc_performance');
-  const solveS = entityValue(state, mpcEntity);
-  if (solveS === null) return 0;
-  return Math.min(100, (solveS / REGULATOR_BUDGET_S) * 100);
-}
-
-/** NMPC 100% = NMPC_LOAD_FRACTION of the NMPC period. */
-export function nmpcLoadBudgetS(periodS) {
+/** Planner 100% = NMPC_LOAD_FRACTION of the sample interval. */
+export function mpcLoadBudgetS(periodS) {
   const period = Number(periodS);
   if (!Number.isFinite(period) || period <= 0) return null;
   return NMPC_LOAD_FRACTION * period;
 }
 
-/** Last NMPC duration versus 10% of the NMPC period, clamped at 100%. */
-export function nmpcLoadPercent(state) {
+/** @deprecated Use mpcLoadBudgetS. */
+export const nmpcLoadBudgetS = mpcLoadBudgetS;
+
+function sampleIntervalS(state) {
   const entity = systemEntity('mpc_performance');
-  const duration = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
-  const budget = nmpcLoadBudgetS(entityAttr(state, entity, 'nmpc_period_s'));
+  const dt = parseFloat(entityAttr(state, entity, 'dt_s'));
+  if (Number.isFinite(dt) && dt > 0) return dt;
+  const period = parseFloat(entityAttr(state, entity, 'nmpc_period_s'));
+  if (Number.isFinite(period) && period > 0) return period;
+  return null;
+}
+
+function lastPlannerDurationS(state) {
+  const entity = systemEntity('mpc_performance');
+  const published = parseFloat(entityAttr(state, entity, 'last_planner_duration_s'));
+  if (Number.isFinite(published)) return published;
+  const mode = String(entityAttr(state, entity, 'mpc_mode') || '').toLowerCase();
+  if (mode === 'linear') {
+    const cycle = parseFloat(entityValue(state, entity));
+    return Number.isFinite(cycle) ? cycle : null;
+  }
+  const nmpc = parseFloat(entityAttr(state, entity, 'last_nmpc_duration_s'));
+  if (Number.isFinite(nmpc)) return nmpc;
+  return null;
+}
+
+/** Last planner duration versus 10% of the sample interval, clamped at 100%. */
+export function mpcLoadPercent(state) {
+  const duration = lastPlannerDurationS(state);
+  const budget = mpcLoadBudgetS(sampleIntervalS(state));
   if (!Number.isFinite(duration) || budget == null || budget <= 0) return null;
   return Math.min(100, (duration / budget) * 100);
 }
+
+/** @deprecated Use mpcLoadPercent. */
+export const nmpcLoadPercent = mpcLoadPercent;
 
 /** Normalised house heating power for gauge fill: live / max, 0–1 (§4.3). */
 export function houseHeatingPowerGaugeFill(state, ratedCapacityW = null) {

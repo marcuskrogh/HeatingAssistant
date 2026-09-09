@@ -112,6 +112,6 @@ def test_tuning_page_has_shared_timing_no_plan_period() -> None:
     countdown = (
         ROOT / "heatingassistant" / "app" / "static" / "js" / "components" / "countdown.js"
     ).read_text(encoding="utf-8")
-    nmpc_block = countdown.split("COUNTDOWN_NMPC", 1)[1].split("export function", 1)[0]
-    assert "defaultDt: 900" in nmpc_block
-    assert "defaultDt: 7200" not in nmpc_block
+    compute_block = countdown.split("COUNTDOWN_COMPUTE", 1)[1].split("export const COUNTDOWN_CONTROL", 1)[0]
+    assert "defaultDt: 900" in compute_block
+    assert "defaultDt: 7200" not in compute_block

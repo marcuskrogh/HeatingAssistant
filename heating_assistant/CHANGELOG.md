@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.21
+
+- Overview and room KPIs show one Next Compute ring and one MPC Load
+  gauge for both Linear and Nonlinear. The extra Next NMPC ring is gone.
+
 # 2026.09.20
 
 - Nonlinear model predictive control uses the same sample interval and

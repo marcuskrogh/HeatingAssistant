@@ -1540,6 +1540,8 @@ class HeatingRuntime(
             "last_nmpc_ts": self._last_nmpc_ts,
             "last_duration_s": self._last_control_duration_s,
             "last_nmpc_duration_s": self._last_nmpc_duration_s,
+            "last_planner_duration_s": self._last_planner_duration_s(),
+            "mpc_mode": self._mpc_mode(),
             "nmpc_computing": bool(self._nmpc_computing),
             "control_computing": bool(self._control_computing),
             "nmpc_result_ts": self._nmpc_result_ts,

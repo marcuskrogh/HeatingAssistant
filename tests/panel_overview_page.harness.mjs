@@ -227,20 +227,20 @@ const tiles = container.querySelectorAll('.room-climate-tile');
 assert(tiles.length === 2, `overview must render one tile per room (got ${tiles.length})`);
 const countdownCards = container.querySelectorAll('.countdown');
 assert(
-  countdownCards.length === 2,
-  `overview must render NEXT CONTROL and NEXT NMPC rings (got ${countdownCards.length})`,
+  countdownCards.length === 1,
+  `overview must render one NEXT COMPUTE ring (got ${countdownCards.length})`,
 );
 const countdownLabels = countdownCards.map((card) => {
   const label = card.querySelector('.countdown__label');
   return label ? label.textContent : '';
 });
 assert(
-  countdownLabels.includes('NEXT CONTROL'),
-  `control countdown label missing (got ${countdownLabels.join(', ')})`,
+  countdownLabels.includes('NEXT COMPUTE'),
+  `compute countdown label missing (got ${countdownLabels.join(', ')})`,
 );
 assert(
-  countdownLabels.includes('NEXT NMPC'),
-  `NMPC countdown label missing (got ${countdownLabels.join(', ')})`,
+  !countdownLabels.includes('NEXT CONTROL') && !countdownLabels.includes('NEXT NMPC'),
+  `legacy dual rings must be gone (got ${countdownLabels.join(', ')})`,
 );
 assert(scheduleCalls === 1, 'initial render must fetch schedules exactly once (immediate)');
 assert(experimentCalls === 1, 'initial render must fetch experiments exactly once');

@@ -8,10 +8,22 @@ from typing import Any
 
 from heatingassistant.app import sysid_services
 from heatingassistant.app.runtime_const import _ELECTRICITY_PRICE_ENTITY
+from heatingassistant.engine import const
 
 
 class HassStatesMixin:
     """Build the synthetic entity map Ingress reads via hass_states()."""
+
+    def _mpc_mode(self) -> str:
+        return const.coerce_mpc_mode(self.options.get(const.CONF_MPC_MODE))
+
+    def _last_planner_duration_s(self) -> float | None:
+        if self._mpc_mode() == const.MPC_MODE_LINEAR:
+            return float(self._last_control_duration_s)
+        duration = self._last_nmpc_duration_s
+        if duration is None:
+            return None
+        return float(duration)
 
     def hass_states(self) -> dict[str, dict[str, Any]]:
         """Build minimal Home Assistant-like states for the custom panel."""
@@ -60,6 +72,7 @@ class HassStatesMixin:
         update_interval = float(self._derived_update_interval())
         nmpc_period_s = float(self._nmpc_period_s())
         mean_error = self._mean_tracking_error()
+        mpc_mode = self._mpc_mode()
         states["sensor.heating_assistant_mpc_performance"] = self._ha_state(
             "sensor.heating_assistant_mpc_performance",
             self._last_control_duration_s,
@@ -68,11 +81,13 @@ class HassStatesMixin:
                 "dt_s": update_interval,
                 "last_nmpc_ts": self._last_nmpc_ts,
                 "nmpc_period_s": nmpc_period_s,
+                "mpc_mode": mpc_mode,
                 "nmpc_computing": bool(self._nmpc_computing),
                 "control_computing": bool(self._control_computing),
                 "nmpc_result_ts": self._nmpc_result_ts,
                 "last_control_ran_ts": self._last_control_ran_ts,
                 "last_nmpc_duration_s": self._last_nmpc_duration_s,
+                "last_planner_duration_s": self._last_planner_duration_s(),
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
             },

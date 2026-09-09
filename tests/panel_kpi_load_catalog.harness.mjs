@@ -1,5 +1,5 @@
 /**
- * Execute NMPC / Regulator load detail payloads from the production catalog.
+ * Execute MPC load detail payloads from the production catalog.
  * Run: node tests/panel_kpi_load_catalog.harness.mjs
  */
 import { dirname, join } from 'node:path';
@@ -23,24 +23,25 @@ const state = {
     state: '0.18',
     attributes: {
       last_nmpc_duration_s: 24.7,
+      last_planner_duration_s: 24.7,
       nmpc_period_s: 7200,
+      dt_s: 7200,
+      mpc_mode: 'nmpc',
       nmpc_computing: false,
       control_computing: false,
-      dt_s: 10,
       nmpc_result_ts: 1700000000,
       last_control_ran_ts: 1700000100,
     },
   },
 };
 
-const nmpc = catalog.nmpcLoadDetail(state);
-assert(nmpc.description.includes('NMPC only'), 'NMPC expand copy must stay NMPC-only');
-assert(nmpc.sections.length === 1, 'NMPC expand must have one section');
-assert(nmpc.sections[0].title === 'NMPC', 'NMPC expand section title must be NMPC');
-assert(!nmpc.sections.some((section) => section.title === 'Regulator'), 'NMPC expand must not include Regulator rows');
-const nmpcLoad = nmpc.sections[0].rows.find((row) => row.label === 'Load');
-assert(nmpcLoad.value === '3%', '24.7 s of a 720 s NMPC budget must paint 3%');
-const nmpcBudget = nmpc.sections[0].rows.find((row) => row.label === 'Load budget');
-assert(nmpcBudget.value.includes('720'), 'NMPC budget row must show 10% of the period');
+const mpc = catalog.mpcLoadDetail(state);
+assert(mpc.description.includes('Linear and Nonlinear'), 'MPC expand copy must be mode-general');
+assert(!mpc.sections, 'MPC expand uses rows, not NMPC-only sections');
+const load = mpc.rows.find((row) => row.label === 'Load');
+assert(load.value === '3%', '24.7 s of a 720 s budget must paint 3%');
+const budget = mpc.rows.find((row) => row.label === 'Load budget');
+assert(budget.value.includes('720'), 'budget row must show 10% of the sample interval');
+assert(mpc.rows.some((row) => row.label === 'Sample interval'), 'sample interval row must be present');
 
 console.log('panel_kpi_load_catalog.harness.mjs: ok');
