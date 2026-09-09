@@ -7,9 +7,11 @@ must be the exact calendar version on its own line.
 # 2026.09.19
 
 - Controller Tuning planner cards show Linear or Nonlinear, then model
-  predictive control, with a clearer in-use state. Switching the live
-  solver still requires Apply Changes. Nonlinear timing uses a sample
-  interval instead of a substep count.
+  predictive control, with a distinct in-use vs selected state. Switching
+  the live solver still requires Apply Changes. Nonlinear timing uses a
+  sample interval instead of a substep count. Linear-only cost weights
+  (setpoint pull, heater-effort, linear band penalty, end-of-horizon)
+  are hidden when Nonlinear is selected.
 
 # 2026.09.18
 

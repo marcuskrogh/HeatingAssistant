@@ -34,31 +34,34 @@ const MODE_CARDS = [
 ];
 
 const SHARED_LIVE_PARAM_DEFS = [
-  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Allowed swing above and below the setpoint', step: 0.1, parse: parseFloat },
-  { key: 'tracking_weight', label: 'Tracking weight', unit: '', hint: 'How hard to pull toward the setpoint inside the band (0 = stay inside the band only)', step: 0.1, parse: parseFloat },
-  { key: 'energy_weight', label: 'Energy weight', unit: '', hint: 'Prefer using less heat', step: 0.01, parse: parseFloat },
-  { key: 'energy_price_weight', label: 'Price sensitivity', unit: '', hint: 'Use less electricity when the price is high', step: 0.1, parse: parseFloat },
-  { key: 'smoothing_weight', label: 'Output smoothing', unit: '', hint: 'Avoid abrupt heater changes', step: 0.05, parse: parseFloat },
-  { key: 'soft_constraint_weight', label: 'Comfort-band penalty (quadratic)', unit: '', hint: 'How hard leaving the comfort band is penalised', step: 1, parse: parseFloat },
-  { key: 'soft_constraint_linear_weight', label: 'Comfort-band penalty (linear)', unit: '', hint: 'Extra steadily growing penalty outside the band (0 = off)', step: 1, parse: parseFloat },
-  { key: 'terminal_weight', label: 'End-of-plan weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint', step: 1, parse: parseFloat },
+  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Half-width of the comfort band around the setpoint. Both planners try to stay inside this band.', step: 0.1, parse: parseFloat },
+  { key: 'energy_price_weight', label: 'Price sensitivity', unit: '', hint: 'How strongly a high electricity price pushes the plan toward less electrical heat (0 = ignore price).', step: 0.1, parse: parseFloat },
+  { key: 'smoothing_weight', label: 'Output smoothing', unit: '', hint: 'Penalty on changing the heater command from one interval to the next.', step: 0.05, parse: parseFloat },
+  { key: 'soft_constraint_weight', label: 'Comfort-band penalty', unit: '', hint: 'How hard leaving the comfort band is penalised. Larger values fight harder to stay inside.', step: 1, parse: parseFloat },
+];
+
+const LINEAR_LIVE_PARAM_DEFS = [
+  { key: 'tracking_weight', label: 'Setpoint pull', unit: '', hint: 'How hard the linear planner pulls toward the exact setpoint while already inside the band (0 = stay inside the band only).', step: 0.1, parse: parseFloat },
+  { key: 'energy_weight', label: 'Heater-effort penalty', unit: '', hint: 'Penalty on heater command size itself, separate from electricity price.', step: 0.01, parse: parseFloat },
+  { key: 'soft_constraint_linear_weight', label: 'Outside-band linear penalty', unit: '', hint: 'Extra steadily growing penalty the further outside the band (0 = off).', step: 1, parse: parseFloat },
+  { key: 'terminal_weight', label: 'End-of-horizon weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint (must be at least 1).', step: 1, parse: parseFloat },
 ];
 
 const LINEAR_RESTART_PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often the linear planner updates heater commands (default 900 s = 15 min).', step: 60, parse: parseFloat },
+  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often the linear planner recomputes heater commands (default 900 s = 15 min).', step: 60, parse: parseFloat },
   { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'How many sample intervals to plan ahead (default 144 ≈ 36 h at 15 min). Rebuilds the planner.', step: 1, parse: parseInt },
 ];
 
 const NMPC_RESTART_PARAM_DEFS = [
-  { key: 'nmpc_period', label: 'Plan period', unit: 's', hint: 'How often a new nonlinear plan is computed (default 7200 s = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
-  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'How far the plan looks ahead (default 36 h). Must be a whole number of plan periods.', step: 1, parse: parseFloat },
+  { key: 'nmpc_period', label: 'Plan period', unit: 's', hint: 'How often a new nonlinear plan is solved (default 7200 s = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
+  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'How far the nonlinear plan covers (default 36 h). Must be a whole number of plan periods.', step: 1, parse: parseFloat },
 ];
 
 const NMPC_HIDDEN_PARAM_DEFS = [
   { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: '', step: 1, parse: parseInt },
 ];
 
-const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS];
+const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS];
 const RESTART_PARAM_DEFS = [
   ...LINEAR_RESTART_PARAM_DEFS,
   ...NMPC_RESTART_PARAM_DEFS,
@@ -168,14 +171,12 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const isLive = card.key === applied;
       const isDraft = card.key === selectedMode;
       btn.classList.toggle('tuning-mode-card--in-use', isLive);
+      btn.classList.toggle('tuning-mode-card--selected', isDraft);
       btn.classList.toggle('tuning-mode-card--draft', isDraft && !isLive);
       btn.setAttribute('aria-pressed', isDraft ? 'true' : 'false');
       let badge = '';
       let badgeClass = 'tuning-mode-card__badge';
-      if (isLive && isDraft) {
-        badge = 'In use';
-        badgeClass += ' tuning-mode-card__badge--in-use';
-      } else if (isLive) {
+      if (isLive) {
         badge = 'In use';
         badgeClass += ' tuning-mode-card__badge--in-use';
       } else if (isDraft) {
@@ -184,10 +185,13 @@ function renderTuningIndex(container, rooms, connection, hass) {
       }
       btn.innerHTML = `
         <div class="tuning-mode-card__head">
-          <div class="tuning-mode-card__name">${card.name}</div>
+          <span class="tuning-mode-card__radio" aria-hidden="true"></span>
+          <div class="tuning-mode-card__titles">
+            <div class="tuning-mode-card__name">${card.name}</div>
+            <div class="tuning-mode-card__subtitle">model predictive control</div>
+          </div>
           <span class="${badgeClass}">${badge}</span>
         </div>
-        <div class="tuning-mode-card__subtitle">model predictive control</div>
         <p class="tuning-mode-card__body">${card.body}</p>
       `;
     }
@@ -246,18 +250,23 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   appendParamSubsection(
-    'Shared live tuning',
-    'Penalty weights and comfort band — shared by both planners. Applied on the next planning cycle after you save.',
+    'Shared with both planners',
+    'Comfort band, electricity price, command smoothing, and the band-exit penalty. Applied on the next planning cycle after you save.',
     SHARED_LIVE_PARAM_DEFS,
+  );
+  const linearLiveSubsection = appendParamSubsection(
+    'Linear MPC cost weights',
+    'Extra terms on the linear quadratic program. The nonlinear planner does not use these.',
+    LINEAR_LIVE_PARAM_DEFS,
   );
   const linearSubsection = appendParamSubsection(
     'Linear MPC timing',
-    'Sample interval and prediction horizon. Changing these rebuilds the linear planner when you Apply Changes.',
+    'How often the linear planner solves, and how far it looks ahead. Changing these rebuilds the linear planner when you Apply Changes.',
     LINEAR_RESTART_PARAM_DEFS,
   );
   const nmpcRestartSubsection = appendParamSubsection(
     'Nonlinear MPC timing',
-    'Plan period, sample interval, and look-ahead. Changing these rebuilds the nonlinear planner when you Apply Changes.',
+    'Plan period is how often a new nonlinear plan is solved. Sample interval is how often that held plan is applied to the heaters. Look-ahead is how far the plan covers. Changing these rebuilds the nonlinear planner when you Apply Changes.',
     NMPC_RESTART_PARAM_DEFS,
   );
   const derivedGroup = document.createElement('div');
@@ -265,7 +274,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   derivedGroup.innerHTML = `
     <label class="form-label" for="ctrl-nmpc_sample_interval">Sample interval</label>
     <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" step="60" value="">
-    <span class="form-hint">s — how often the current plan is applied (default 900 s). Must divide the plan period evenly.</span>
+    <span class="form-hint">s — how often the current held plan is applied to the heaters (default 900 s). Must divide the plan period evenly.</span>
   `;
   nmpcRestartSubsection.querySelector('.tuning-params-grid')?.appendChild(derivedGroup)
     || nmpcRestartSubsection.appendChild(derivedGroup);
@@ -279,6 +288,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   function syncModeParamVisibility() {
     const linear = selectedMode === MPC_MODE_LINEAR;
+    linearLiveSubsection.hidden = !linear;
     linearSubsection.hidden = !linear;
     nmpcRestartSubsection.hidden = linear;
   }
@@ -424,11 +434,20 @@ function renderTuningIndex(container, rooms, connection, hass) {
     }
     const defs = selectedMode === MPC_MODE_LINEAR
       ? LINEAR_RESTART_PARAM_DEFS
-      : NMPC_RESTART_PARAM_DEFS;
-    return defs.some((def) => !valuesEqual(
+      : [...NMPC_RESTART_PARAM_DEFS, ...NMPC_HIDDEN_PARAM_DEFS];
+    if (defs.some((def) => !valuesEqual(
       configured[def.key],
       appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
-    ));
+    ))) {
+      return true;
+    }
+    if (selectedMode === MPC_MODE_NMPC && nmpcSampleInput) {
+      const period = Number(appliedConfig.nmpc_period ?? DEFAULTS.nmpc_period);
+      const substeps = Number(appliedConfig.nmpc_fast_substeps ?? DEFAULTS.nmpc_fast_substeps);
+      const appliedDt = substeps > 0 ? period / substeps : DEFAULTS.update_interval;
+      return !valuesEqual(Number(nmpcSampleInput.value), appliedDt);
+    }
+    return false;
   }
 
   function updatePendingBanner(pending) {

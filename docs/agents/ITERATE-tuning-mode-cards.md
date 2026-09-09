@@ -24,8 +24,10 @@
   control**, then a short effect description.
 - In-use vs drafted (not yet applied) is visually distinct; Apply Changes
   is required to switch the live solver.
-- Shared live weights and per-mode timing use operator-facing labels and
-  hints. Nonlinear Fast substeps is not a labelled Tuning field.
+- Shared knobs are only those both planners use (comfort band, price,
+  smoothing, quadratic band penalty). Linear-only QP weights are shown
+  only for Linear. Nonlinear timing uses operator-facing labels; Fast
+  substeps is not a labelled Tuning field.
 - Tests, CalVer, changelog, App package sync.
 
 ## Out of scope
@@ -41,6 +43,7 @@
 - Relates: SWD-522
 - Sub-tasks: SWD-527, SWD-528
 - Branch: `cursor/swd-526-tuning-mode-cards-58e6`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/673
 
 ## Next
 `/review-fix SWD-526` — Review and auto-fix on the new delivery PR

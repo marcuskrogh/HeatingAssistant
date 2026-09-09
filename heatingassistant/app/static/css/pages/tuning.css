@@ -10,7 +10,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  min-height: 168px;
+  min-height: 188px;
   text-align: left;
   padding: 20px 20px 20px 24px;
   border: 2px solid var(--border);
@@ -42,18 +42,21 @@
   border-color: var(--accent);
   background: var(--accent-dim);
   color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .tuning-mode-card--in-use::before {
   background: var(--accent);
 }
 
+.tuning-mode-card--selected:not(.tuning-mode-card--draft) {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .tuning-mode-card--draft {
   border-color: var(--warning);
   background: rgba(255, 193, 7, 0.1);
   color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--warning);
+  box-shadow: 0 0 0 2px var(--warning);
 }
 
 .tuning-mode-card--draft::before {
@@ -62,10 +65,36 @@
 
 .tuning-mode-card__head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
+}
+
+.tuning-mode-card__radio {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.tuning-mode-card--selected:not(.tuning-mode-card--draft) .tuning-mode-card__radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+.tuning-mode-card--draft .tuning-mode-card__radio {
+  border-color: var(--warning);
+  box-shadow: inset 0 0 0 3px var(--warning);
+}
+
+.tuning-mode-card__titles {
+  flex: 1;
+  min-width: 0;
 }
 
 .tuning-mode-card__name {
@@ -84,6 +113,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
+  margin-top: 4px;
 }
 
 .tuning-mode-card__badge--in-use {
@@ -97,7 +127,7 @@
 .tuning-mode-card__subtitle {
   font-size: var(--type-caption);
   color: var(--text-dim);
-  margin-bottom: 12px;
+  margin-top: 4px;
   line-height: 1.4;
 }
 
