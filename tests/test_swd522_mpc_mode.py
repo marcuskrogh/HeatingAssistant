@@ -154,10 +154,15 @@ def test_tuning_page_has_exclusive_mode_cards():
     source = (
         ROOT / "heatingassistant" / "app" / "static" / "js" / "pages" / "tuning-controller.js"
     ).read_text(encoding="utf-8")
-    assert "Linear model predictive control" in source
-    assert "Nonlinear model predictive control" in source
-    assert "linearisation error" in source
+    assert "name: 'Linear'" in source
+    assert "name: 'Nonlinear'" in source
+    assert "model predictive control" in source
+    assert "tuning-mode-card--in-use" in source
+    assert "Apply to switch" in source
     assert "mpc_mode: selectedMode" in source
     assert "tuning-mode-card" in source
     assert "p_deadband" not in source
     assert "u_ref_gate" not in source
+    assert "btn-apply-all" in source
+    click = source.split("btn.addEventListener('click'", 1)[1].split("});", 1)[0]
+    assert "updateControllerTuning" not in click
