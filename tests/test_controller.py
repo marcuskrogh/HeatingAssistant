@@ -1276,9 +1276,8 @@ class TestTotalComputes:
         from heatingassistant.engine.controller import MPC_STATS_BUFFER_SIZE
 
         model, sources = two_room
-        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, mpc_mode="nmpc")
         now = _MPC_NOW
-        # Run one more than the buffer size
         for _ in range(MPC_STATS_BUFFER_SIZE + 1):
             ctrl.compute(outdoor_temp=0.0, now=now)
         assert ctrl.total_computes == MPC_STATS_BUFFER_SIZE + 1, (
