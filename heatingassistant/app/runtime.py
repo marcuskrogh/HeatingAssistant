@@ -676,6 +676,7 @@ class HeatingRuntime(
             return dict(self.actuator_outputs)
         try:
             self._control_computing = True
+            await self._best_effort_mqtt(self.publish_status(), "control computing")
             started = time.time()
             self._refresh_configured_sensor_quality()
             self._sync_p_fast_index(started)
@@ -728,11 +729,13 @@ class HeatingRuntime(
                         )
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
-            await self._best_effort_mqtt(self.publish_status(), "status")
             return dict(self.actuator_outputs)
         finally:
             self._control_computing = False
-            self._control_lock.release()
+            try:
+                await self._best_effort_mqtt(self.publish_status(), "status")
+            finally:
+                self._control_lock.release()
 
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""

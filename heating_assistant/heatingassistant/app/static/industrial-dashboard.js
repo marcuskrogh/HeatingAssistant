@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '160';
+  return '161';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -359,6 +359,9 @@ function sensorStateChanged(prev, next, configSnapshot) {
   // HA may mutate the same state object when only attributes change.
   if (prev.last_updated !== next.last_updated) return true;
   if (prev.state !== next.state) return true;
+  if (JSON.stringify(prev.attributes || {}) !== JSON.stringify(next.attributes || {})) {
+    return true;
+  }
   if (next.entity_id === CONTROLLER_CONFIG_ENTITY) {
     return controllerConfigAttrsChanged(prev.attributes, next.attributes);
   }

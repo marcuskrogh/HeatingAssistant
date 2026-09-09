@@ -74,8 +74,8 @@ def test_panel_entry_cache_bust() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=160" in index
-        assert "return '160'" in dashboard
+        assert "industrial-dashboard.js?v=161" in index
+        assert "return '161'" in dashboard
 
 
 def test_nmpc_worker_publishes_last_nmpc_duration(tmp_path: Path) -> None:
