@@ -24,12 +24,12 @@ const MODE_CARDS = [
   {
     key: MPC_MODE_LINEAR,
     name: 'Linear',
-    body: 'Updates heater commands on a lighter quadratic program each sample. Faster to solve; the house model is linearised, so strong nonlinearities are approximated.',
+    body: 'Updates heater commands on a quadratic program each sample. Faster to solve; the house model is linearised, so strong nonlinearities are approximated.',
   },
   {
     key: MPC_MODE_NMPC,
     name: 'Nonlinear',
-    body: 'Computes a full nonlinear plan on a slower cycle, then holds that plan between solves. Heavier compute and longer solves; no linearisation of the dynamics.',
+    body: 'Updates heater commands on a nonlinear program each sample — the same receding-horizon problem as Linear, without linearising the house model. Heavier compute.',
   },
 ];
 
@@ -47,33 +47,29 @@ const LINEAR_LIVE_PARAM_DEFS = [
   { key: 'terminal_weight', label: 'End-of-horizon weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint (must be at least 1).', step: 1, parse: parseFloat },
 ];
 
-const LINEAR_RESTART_PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often the linear planner recomputes heater commands (default 900 s = 15 min).', step: 60, parse: parseFloat },
-  { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'How many sample intervals to plan ahead (default 144 ≈ 36 h at 15 min). Rebuilds the planner.', step: 1, parse: parseInt },
+const SHARED_RESTART_PARAM_DEFS = [
+  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often heater commands are applied (default 900 s).', step: 60, parse: parseFloat },
 ];
 
-const NMPC_RESTART_PARAM_DEFS = [
-  { key: 'nmpc_period', label: 'Plan period', unit: 's', hint: 'How often a new nonlinear plan is solved (default 7200 s = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
-  { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'How far the nonlinear plan covers (default 36 h). Must be a whole number of plan periods.', step: 1, parse: parseFloat },
-];
-
-const NMPC_HIDDEN_PARAM_DEFS = [
-  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: '', step: 1, parse: parseInt },
+const HIDDEN_TIMING_PARAM_DEFS = [
+  { key: 'horizon', label: '', unit: '', hint: '', step: 1, parse: parseInt },
+  { key: 'nmpc_horizon_h', label: '', unit: '', hint: '', step: 1, parse: parseFloat },
+  { key: 'nmpc_period', label: '', unit: '', hint: '', step: 900, parse: parseFloat },
+  { key: 'nmpc_fast_substeps', label: '', unit: '', hint: '', step: 1, parse: parseInt },
 ];
 
 const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS];
 const RESTART_PARAM_DEFS = [
-  ...LINEAR_RESTART_PARAM_DEFS,
-  ...NMPC_RESTART_PARAM_DEFS,
-  ...NMPC_HIDDEN_PARAM_DEFS,
+  ...SHARED_RESTART_PARAM_DEFS,
+  ...HIDDEN_TIMING_PARAM_DEFS,
 ];
 const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
   mpc_mode: MPC_MODE_NMPC,
-  nmpc_period: 7200,
-  nmpc_fast_substeps: 8,
+  nmpc_period: 900,
+  nmpc_fast_substeps: 1,
   nmpc_horizon_h: 36,
   update_interval: 900,
   comfort_offset: 2.0,
@@ -260,37 +256,31 @@ function renderTuningIndex(container, rooms, connection, hass) {
     LINEAR_LIVE_PARAM_DEFS,
   );
   const linearSubsection = appendParamSubsection(
-    'Linear MPC timing',
-    'How often the linear planner solves, and how far it looks ahead. Changing these rebuilds the linear planner when you Apply Changes.',
-    LINEAR_RESTART_PARAM_DEFS,
+    'Timing',
+    'Sample interval and look-ahead. Both planners use the same receding-horizon grid. Changing these rebuilds the planner when you Apply Changes.',
+    SHARED_RESTART_PARAM_DEFS,
   );
-  const nmpcRestartSubsection = appendParamSubsection(
-    'Nonlinear MPC timing',
-    'Plan period is how often a new nonlinear plan is solved. Sample interval is how often that held plan is applied to the heaters. Look-ahead is how far the plan covers. Changing these rebuilds the nonlinear planner when you Apply Changes.',
-    NMPC_RESTART_PARAM_DEFS,
-  );
-  const derivedGroup = document.createElement('div');
-  derivedGroup.className = 'form-group';
-  derivedGroup.innerHTML = `
-    <label class="form-label" for="ctrl-nmpc_sample_interval">Sample interval</label>
-    <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" step="60" value="">
-    <span class="form-hint">s — how often the current held plan is applied to the heaters (default 900 s). Must divide the plan period evenly.</span>
+  const lookAheadGroup = document.createElement('div');
+  lookAheadGroup.className = 'form-group';
+  lookAheadGroup.innerHTML = `
+    <label class="form-label" for="ctrl-look_ahead_h">Look-ahead</label>
+    <input class="form-input" type="number" id="ctrl-look_ahead_h" step="1" value="">
+    <span class="form-hint">h — How far the plan covers (default 36 h). Must be a whole number of sample intervals.</span>
   `;
-  nmpcRestartSubsection.querySelector('.tuning-params-grid')?.appendChild(derivedGroup)
-    || nmpcRestartSubsection.appendChild(derivedGroup);
-  const nmpcSampleInput = derivedGroup.querySelector('input');
-  const hiddenSubsteps = document.createElement('input');
-  hiddenSubsteps.type = 'hidden';
-  hiddenSubsteps.id = 'ctrl-nmpc_fast_substeps';
-  nmpcRestartSubsection.appendChild(hiddenSubsteps);
-  inputs.nmpc_fast_substeps = hiddenSubsteps;
+  linearSubsection.querySelector('.tuning-params-grid')?.appendChild(lookAheadGroup)
+    || linearSubsection.appendChild(lookAheadGroup);
+  const lookAheadInput = lookAheadGroup.querySelector('input');
+  for (const def of HIDDEN_TIMING_PARAM_DEFS) {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.id = `ctrl-${def.key}`;
+    linearSubsection.appendChild(hidden);
+    inputs[def.key] = hidden;
+  }
   container.appendChild(formSection);
 
   function syncModeParamVisibility() {
-    const linear = selectedMode === MPC_MODE_LINEAR;
-    linearLiveSubsection.hidden = !linear;
-    linearSubsection.hidden = !linear;
-    nmpcRestartSubsection.hidden = linear;
+    linearLiveSubsection.hidden = selectedMode !== MPC_MODE_LINEAR;
   }
 
   syncModeCards();
@@ -400,7 +390,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   };
 
   function collectConfiguredConfig() {
-    syncSubstepsFromSampleInterval();
+    syncTimingAliases();
     const cfg = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) cfg[def.key] = def.parse(inputs[def.key].value);
     for (const def of WINDOW_DEFS) cfg[def.key] = def.parse(windowInputs[def.key].value);
@@ -408,7 +398,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function collectMpcParams() {
-    syncSubstepsFromSampleInterval();
+    syncTimingAliases();
     const mpcData = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) mpcData[def.key] = def.parse(inputs[def.key].value);
     return mpcData;
@@ -432,20 +422,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (coerceMode(configured.mpc_mode) !== coerceMode(appliedConfig.mpc_mode)) {
       return true;
     }
-    const defs = selectedMode === MPC_MODE_LINEAR
-      ? LINEAR_RESTART_PARAM_DEFS
-      : [...NMPC_RESTART_PARAM_DEFS, ...NMPC_HIDDEN_PARAM_DEFS];
-    if (defs.some((def) => !valuesEqual(
+    if (RESTART_PARAM_DEFS.some((def) => !valuesEqual(
       configured[def.key],
       appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
     ))) {
       return true;
     }
-    if (selectedMode === MPC_MODE_NMPC && nmpcSampleInput) {
-      const period = Number(appliedConfig.nmpc_period ?? DEFAULTS.nmpc_period);
-      const substeps = Number(appliedConfig.nmpc_fast_substeps ?? DEFAULTS.nmpc_fast_substeps);
-      const appliedDt = substeps > 0 ? period / substeps : DEFAULTS.update_interval;
-      return !valuesEqual(Number(nmpcSampleInput.value), appliedDt);
+    if (lookAheadInput && appliedConfig) {
+      return !valuesEqual(Number(lookAheadInput.value), appliedLookAheadHours(appliedConfig));
     }
     return false;
   }
@@ -465,6 +449,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
       : 'Unsaved changes — penalty weights and window settings apply to the live controller on the next cycle.';
   }
 
+  function appliedLookAheadHours(config) {
+    const storedH = Number(config.nmpc_horizon_h);
+    if (Number.isFinite(storedH) && storedH > 0) return storedH;
+    const dt = Number(config.update_interval ?? DEFAULTS.update_interval);
+    const horizon = Number(config.horizon ?? DEFAULTS.horizon);
+    return dt > 0 ? horizon * dt / 3600 : DEFAULTS.nmpc_horizon_h;
+  }
+
   function updatePendingIndicators() {
     const pending = hasPendingChanges();
     updatePendingBanner(pending);
@@ -475,53 +467,51 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const applied = appliedConfig?.[def.key] ?? ALL_DEFAULTS[def.key];
       input.classList.toggle('form-input--modified', pending && !valuesEqual(configured, applied));
     }
-    if (nmpcSampleInput && appliedConfig) {
-      const period = Number(appliedConfig.nmpc_period ?? DEFAULTS.nmpc_period);
-      const substeps = Number(appliedConfig.nmpc_fast_substeps ?? DEFAULTS.nmpc_fast_substeps);
-      const appliedDt = substeps > 0 ? period / substeps : DEFAULTS.update_interval;
-      const sample = Number(nmpcSampleInput.value);
-      nmpcSampleInput.classList.toggle(
+    if (lookAheadInput && appliedConfig) {
+      const hours = Number(lookAheadInput.value);
+      lookAheadInput.classList.toggle(
         'form-input--modified',
-        pending && Number.isFinite(sample) && !valuesEqual(sample, appliedDt),
+        pending && Number.isFinite(hours) && !valuesEqual(hours, appliedLookAheadHours(appliedConfig)),
       );
     }
   }
 
-  function fillSampleFromSubsteps() {
-    const period = Number(inputs.nmpc_period?.value);
-    const substeps = Number(inputs.nmpc_fast_substeps?.value);
-    if (!nmpcSampleInput) return;
-    if (Number.isFinite(period) && Number.isFinite(substeps) && substeps > 0) {
-      nmpcSampleInput.value = String(period / substeps);
+  function fillLookAhead() {
+    if (!lookAheadInput) return;
+    const hours = Number(inputs.nmpc_horizon_h?.value);
+    if (Number.isFinite(hours) && hours > 0) {
+      lookAheadInput.value = String(hours);
+      return;
+    }
+    const dt = Number(inputs.update_interval?.value);
+    const horizon = Number(inputs.horizon?.value);
+    if (dt > 0 && Number.isFinite(horizon) && horizon >= 1) {
+      lookAheadInput.value = String(horizon * dt / 3600);
     }
   }
 
-  function syncSubstepsFromSampleInterval() {
-    const period = Number(inputs.nmpc_period?.value);
-    const sample = Number(nmpcSampleInput?.value);
-    if (!(period > 0) || !(sample > 0) || !inputs.nmpc_fast_substeps) return;
-    const ratio = period / sample;
-    const rounded = Math.round(ratio);
-    if (Math.abs(ratio - rounded) <= 1e-6 && rounded >= 1) {
-      inputs.nmpc_fast_substeps.value = String(rounded);
-    }
+  function syncTimingAliases() {
+    const dt = Number(inputs.update_interval?.value);
+    const hours = Number(lookAheadInput?.value);
+    if (!(dt > 0) || !(hours > 0) || !inputs.horizon) return;
+    const steps = hours * 3600 / dt;
+    const rounded = Math.round(steps);
+    if (Math.abs(steps - rounded) > 1e-6 || rounded < 1) return;
+    inputs.horizon.value = String(rounded);
+    if (inputs.nmpc_horizon_h) inputs.nmpc_horizon_h.value = String(hours);
+    if (inputs.nmpc_period) inputs.nmpc_period.value = String(dt);
+    if (inputs.nmpc_fast_substeps) inputs.nmpc_fast_substeps.value = '1';
   }
 
-  function nmpcTimingError() {
-    if (selectedMode !== MPC_MODE_NMPC) return null;
-    const period = Number(inputs.nmpc_period?.value);
-    const sample = Number(nmpcSampleInput?.value);
-    const horizonH = Number(inputs.nmpc_horizon_h?.value);
-    if (!(period > 0) || !(sample > 0) || !(horizonH > 0)) {
-      return 'Plan period, sample interval, and look-ahead must be positive.';
+  function timingError() {
+    const dt = Number(inputs.update_interval?.value);
+    const hours = Number(lookAheadInput?.value);
+    if (!(dt > 0) || !(hours > 0)) {
+      return 'Sample interval and look-ahead must be positive.';
     }
-    const substeps = period / sample;
-    if (Math.abs(substeps - Math.round(substeps)) > 1e-6 || Math.round(substeps) < 1) {
-      return 'Sample interval must divide the plan period evenly.';
-    }
-    const nSlow = horizonH * 3600 / period;
-    if (Math.abs(nSlow - Math.round(nSlow)) > 1e-6) {
-      return 'Look-ahead must be a whole number of plan periods.';
+    const steps = hours * 3600 / dt;
+    if (Math.abs(steps - Math.round(steps)) > 1e-6 || Math.round(steps) < 1) {
+      return 'Look-ahead must be a whole number of sample intervals.';
     }
     return null;
   }
@@ -538,7 +528,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
-    fillSampleFromSubsteps();
+    fillLookAhead();
+    syncTimingAliases();
     updatePendingIndicators();
   }
 
@@ -548,7 +539,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
     syncModeParamVisibility();
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    fillSampleFromSubsteps();
+    fillLookAhead();
+    syncTimingAliases();
     updatePendingIndicators();
   }
 
@@ -592,7 +584,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   const allParamInputs = [
     ...Object.values(inputs),
     ...Object.values(windowInputs),
-    nmpcSampleInput,
+    lookAheadInput,
   ];
 
   let userEditing = false;
@@ -600,7 +592,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (!inp) return;
     inp.addEventListener('input', () => {
       userEditing = true;
-      syncSubstepsFromSampleInterval();
+      syncTimingAliases();
       updatePendingIndicators();
     });
   });
@@ -696,6 +688,11 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   async function runPreview() {
+    const timingErr = timingError();
+    if (timingErr) {
+      setPreviewStatus(timingErr, 'error');
+      return;
+    }
     setPreviewStatus('Computing control plan…', 'running');
     btnPreview.disabled = true;
     previewChartsEl.hidden = true;
@@ -741,18 +738,10 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   btnApply.addEventListener('click', async () => {
-    const timingErr = nmpcTimingError();
+    const timingErr = timingError();
     if (timingErr) {
       setStatus(timingErr, 'error');
       return;
-    }
-    if (selectedMode === MPC_MODE_LINEAR) {
-      const dt = Number(inputs.update_interval?.value);
-      const horizon = Number(inputs.horizon?.value);
-      if (!(dt > 0) || !(horizon >= 1)) {
-        setStatus('Linear sample interval and prediction horizon must be positive.', 'error');
-        return;
-      }
     }
     setStatus('Applying…', 'running');
     btnApply.disabled = true;

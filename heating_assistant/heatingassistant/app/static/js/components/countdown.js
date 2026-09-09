@@ -13,7 +13,7 @@ export const COUNTDOWN_NMPC = {
   dtAttr: 'nmpc_period_s',
   lastRunAttr: 'last_nmpc_ts',
   label: 'NEXT NMPC',
-  defaultDt: 7200,
+  defaultDt: 900,
   useEntityLastUpdated: false,
   missingRemaining: 'due',
 };

@@ -2,9 +2,8 @@
 Application facade for house-heating MPC.
 
 HeatingMPCController builds HouseThermalSDE + _InnovationEKF (CD-EKF) and
-either the linear QP each sample or a two-rate NMPC planner whose remaining
-``U*`` is held as zero-order hold. The linearised QP is EKF glue on the
-nonlinear path and is not solved there.
+either the linear QP or a nonlinear program on the same sample grid. The
+linearised QP is EKF glue on the nonlinear path and is not solved there.
 
 Public API:
     controller = HeatingMPCController(model, heat_sources, ...)
@@ -107,24 +106,15 @@ class HeatingMPCController:
 
       actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
 
-    The fast loop at each ``T_s``:
-      1. CD-EKF predict+update using the last applied P command.
-      2. ``u = clip(u_ref + K_p (T_ref − T_hat), u_min, u_max)`` from the
-         last accepted plan, or ``u = 0`` while NMPC is near zero and air
-         is inside the P temperature deadband.  With no plan, P toward
-         the setpoint while air is outside the comfort band (watchdog
-         still forces ``u = 0``).
-         ``T_ref`` is the OCP air trajectory on the fast grid (``m`` samples
-         per slow ``U*`` hold from integrator substeps). It is not a
-         two-hour constant. ``u_ref`` is the zero-order hold of ``U*``.
-         That accept-time path stays for the whole slow interval: new
-         disturbances move ``T_hat``, not the reference. Room-view
-         Forecast is leftover ``T_ref``.
+    The loop at each ``T_s``:
+      1. CD-EKF predict+update using the last applied command.
+      2. Apply the current sample of the last accepted plan (held only while
+         a new NLP is still computing), clipped to each source.
       3. Apply the command to all heat sources.
 
-    The slow OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
-    :meth:`solve_nmpc`.  Cost: soft comfort zone, input ROM, energy-price.
-    No extra setpoint pull.
+    The OCP (SciPy SLSQP, analytic Jacobian) runs on a worker via
+    :meth:`solve_nmpc` each sample.  Cost: soft comfort zone, input ROM,
+    energy-price.  No extra setpoint pull.
 
     Forecasts
     ---------
@@ -136,12 +126,12 @@ class HeatingMPCController:
     ----------
     model             : HouseModel
     heat_sources      : list of HeatSource
-    horizon           : fast-step count (tests / legacy).  Ignored when the
-                        NMPC triple is given.
-    dt                : fast sample ``T_s`` [s] (tests / legacy).
-    nmpc_period       : slow NMPC cadence [s].  With the other triple keys,
-                        this wins over ``horizon`` / ``dt``.
-    nmpc_fast_substeps: fast ticks per slow interval.
+    horizon           : receding-horizon step count.  Ignored when the
+                        NMPC triple is given (then n_fast is derived).
+    dt                : sample ``T_s`` [s] (tests / legacy).
+    nmpc_period       : sample interval [s] when the triple is given.
+                        Production persists this equal to ``dt``.
+    nmpc_fast_substeps: production is 1 (one decision per sample).
     nmpc_horizon_h    : look-ahead [hours].
     measurement_dt    : EKF measurement interval [s].  If None, falls back to dt.
     latitude          : site latitude [deg]

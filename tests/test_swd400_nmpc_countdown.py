@@ -53,7 +53,7 @@ def test_hass_states_use_configured_nmpc_period(tmp_path: Path) -> None:
     attrs = runtime.hass_states()["sensor.heating_assistant_mpc_performance"][
         "attributes"
     ]
-    assert attrs["nmpc_period_s"] == pytest.approx(1800.0)
+    assert attrs["nmpc_period_s"] == pytest.approx(900.0)
 
 
 def test_last_nmpc_ts_persists_across_restart(tmp_path: Path) -> None:

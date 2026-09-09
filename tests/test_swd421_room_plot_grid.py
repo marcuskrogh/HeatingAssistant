@@ -111,7 +111,7 @@ def test_rebuild_and_compute_keep_slow_power_holds() -> None:
     assert float(np.max(remaining_t[:m, 0]) - np.min(remaining_t[:m, 0])) > 0.2
 
 
-def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
+def test_room_snapshot_after_compute_uses_sample_grid() -> None:
     engine = ControlEngine(
         {
             "nmpc_period": 7200.0,
@@ -138,12 +138,13 @@ def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
     )
     ctrl = engine._controller
     assert ctrl is not None
-    m = int(ctrl._timing.m)
+    assert ctrl._timing.m == 1
     n_fast = int(ctrl.horizon)
     outdoor = _varying_outdoor(n_fast)
     t_ref = np.linspace(22.0, 24.0, n_fast).reshape(-1, 1)
+    u_star = np.linspace(0.7, 0.15, n_fast).reshape(-1, 1)
     ctrl._outdoor_forecast = list(outdoor)
-    ctrl.set_accepted_path(np.array([[0.7], [0.15]], dtype=float), t_ref)
+    ctrl.set_accepted_path(u_star, t_ref)
     assert ctrl.rebuild_forecast_from_plan() is True
     preview_watts = _watts(ctrl.heating_schedule, _ENGINE_ROOM)
 
@@ -158,9 +159,9 @@ def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
     watts = _watts(snap["heating_schedule"], _ENGINE_ROOM)
     temps = _temps(snap["predictions"], _ENGINE_ROOM)
     assert watts == pytest.approx(preview_watts, abs=1.0)
-    _assert_slow_holds(watts, m, atol=1.0)
     assert temps == pytest.approx(t_ref.ravel().tolist(), abs=1e-12)
     assert snap["dt"] == pytest.approx(ctrl._dt)
+    assert ctrl._dt == pytest.approx(1800.0)
 
     payload = build_app_forecast_payload(
         rooms=[{"name": _ENGINE_ROOM, "setpoint": 23.5, "comfort_offset": 2.0}],
@@ -173,4 +174,4 @@ def test_room_snapshot_after_compute_keeps_slow_power_holds() -> None:
     assert payload["step_seconds"] == pytest.approx(ctrl._dt)
     room = payload["rooms"]["living_room"]
     plotted = [float(step["heating_power"]) for step in room["forecast"][1:]]
-    _assert_slow_holds(plotted[: n_fast], m, atol=1.0)
+    assert plotted[:n_fast] == pytest.approx(watts[:n_fast], abs=1.0)

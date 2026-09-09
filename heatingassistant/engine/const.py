@@ -446,13 +446,13 @@ SHERMAN_GRIMSRUD_DT_TYPICAL = 20.0  # K
 AIR_RHO_CP = 1200.0  # J / (m³ · K)
 
 # Controller configuration keys
-CONF_HORIZON = "horizon"               # linear-mode step count; NMPC uses derived n_fast at runtime
-CONF_UPDATE_INTERVAL = "update_interval"  # linear-mode sample interval [s]; NMPC derives T_s from the triple
+CONF_HORIZON = "horizon"               # receding-horizon step count (both planners)
+CONF_UPDATE_INTERVAL = "update_interval"  # sample interval [s] (both planners)
 CONF_MPC_MODE = "mpc_mode"  # exclusive planner: "linear" | "nmpc"
 MPC_MODE_LINEAR = "linear"
 MPC_MODE_NMPC = "nmpc"
-CONF_NMPC_PERIOD = "nmpc_period"  # slow NMPC cadence [s]
-CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF + plan-apply ticks per slow interval
+CONF_NMPC_PERIOD = "nmpc_period"  # alias of sample interval [s]; kept for persisted configs
+CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # always 1 in production (legacy two-rate M)
 CONF_NMPC_HORIZON_H = "nmpc_horizon_h"  # look-ahead [hours]
 CONF_P_GAIN = "p_gain"  # legacy two-layer tracker gain; ignored if present
 CONF_P_DEADBAND = "p_deadband"  # P temperature deadband when NMPC is near zero [K]
@@ -510,14 +510,14 @@ DEFAULT_SETPOINT = 22.0                # °C
 DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
 DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
 DEFAULT_MPC_MODE = MPC_MODE_NMPC       # nonlinear planner is the default
-DEFAULT_NMPC_PERIOD = 7200.0           # 2 h slow NMPC cadence
-DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then plan-apply ticks per slow interval
+DEFAULT_NMPC_PERIOD = 900.0            # same as sample interval (one NLP decision per tick)
+DEFAULT_NMPC_FAST_SUBSTEPS = 1         # one decision per sample
 DEFAULT_NMPC_HORIZON_H = 36.0          # look-ahead hours
 DEFAULT_P_GAIN = 0.1                   # unused; leftover two-layer tracker default
 DEFAULT_P_DEADBAND = 1.0               # P tracking deadband around T_ref when NMPC is off [K]
 DEFAULT_U_REF_GATE = 0.02              # |u_ref| below this counts as NMPC off (heater fraction)
-DEFAULT_UPDATE_INTERVAL = 900          # derived T_s = nmpc_period / M (seconds)
-DEFAULT_HORIZON = 144                  # derived n_fast = N * M (36 h / 15 min)
+DEFAULT_UPDATE_INTERVAL = 900          # sample interval T_s [s]
+DEFAULT_HORIZON = 144                  # 36 h / 15 min sample interval
 NMPC_WATCHDOG_S = 5 * 3600.0           # consecutive-reject wall clock before heaters off
 NMPC_WATCHDOG_NOTIFICATION_ID = "heating_assistant_nmpc_plan"
 NMPC_WATCHDOG_TITLE = "Heating plan unavailable"
