@@ -41,4 +41,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/678
 
 ## Next
-`/review-fix SWD-536` — Review and auto-fix (single pass)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/678

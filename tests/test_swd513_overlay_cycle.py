@@ -21,7 +21,8 @@ def test_wrap_overlay_uses_poll_gap_cap_not_nmpc_duration() -> None:
         assert "function wrapOverlayCapS" in js
         assert "last_nmpc_duration_s" not in js
         assert "Math.max(90" not in js
-        assert "? 8 : 2.5" in js
+        assert "? 8 : 2.5" not in js
+        assert "return 8;" in js
 
 
 def test_pages_do_not_paint_overlay_from_raw_flags() -> None:

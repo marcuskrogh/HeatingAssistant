@@ -53,3 +53,6 @@ def test_overview_and_room_have_one_next_compute_ring() -> None:
     assert "NMPC LOAD" not in overview
     assert "nmpcCountdown" not in overview
     assert "nmpcCountdown" not in room
+    assert countdown.count("lastRunAttr: 'last_nmpc_ts'") == 1
+    assert "? 8 : 2.5" not in countdown
+    assert "return 8;" in countdown

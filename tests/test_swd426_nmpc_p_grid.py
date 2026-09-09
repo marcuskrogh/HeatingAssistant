@@ -248,7 +248,7 @@ def test_panel_wires_shared_epoch_and_computing_overlay() -> None:
     room = (_STATIC / "js" / "pages" / "room-detail.js").read_text(encoding="utf-8")
     utils = (_STATIC / "js" / "utils.js").read_text(encoding="utf-8")
     assert "lastRunAttr: 'last_nmpc_ts'" in countdown
-    assert countdown.count("lastRunAttr: 'last_nmpc_ts'") >= 2
+    assert countdown.count("lastRunAttr: 'last_nmpc_ts'") == 1
     assert "useEntityLastUpdated: true" not in countdown
     assert "export function setCountdownComputing" in countdown
     assert "countdown--computing" in css
