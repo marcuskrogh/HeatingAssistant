@@ -446,12 +446,15 @@ SHERMAN_GRIMSRUD_DT_TYPICAL = 20.0  # K
 AIR_RHO_CP = 1200.0  # J / (m³ · K)
 
 # Controller configuration keys
-CONF_HORIZON = "horizon"               # derived fast-step count (n_fast); not a primary NMPC knob
-CONF_UPDATE_INTERVAL = "update_interval"  # derived sample interval T_s [s]; EKF / P / history
+CONF_HORIZON = "horizon"               # linear-mode step count; NMPC uses derived n_fast at runtime
+CONF_UPDATE_INTERVAL = "update_interval"  # linear-mode sample interval [s]; NMPC derives T_s from the triple
+CONF_MPC_MODE = "mpc_mode"  # exclusive planner: "linear" | "nmpc"
+MPC_MODE_LINEAR = "linear"
+MPC_MODE_NMPC = "nmpc"
 CONF_NMPC_PERIOD = "nmpc_period"  # slow NMPC cadence [s]
-CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF+P ticks per slow interval
+CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # fast EKF + plan-apply ticks per slow interval
 CONF_NMPC_HORIZON_H = "nmpc_horizon_h"  # look-ahead [hours]
-CONF_P_GAIN = "p_gain"  # heater P-law gain [1/K]
+CONF_P_GAIN = "p_gain"  # legacy two-layer tracker gain; ignored if present
 CONF_P_DEADBAND = "p_deadband"  # P temperature deadband when NMPC is near zero [K]
 CONF_U_REF_GATE = "u_ref_gate"  # |u_ref| below this is NMPC-off for the P deadband
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
@@ -506,10 +509,11 @@ DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 22.0                # °C
 DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
 DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
+DEFAULT_MPC_MODE = MPC_MODE_NMPC       # nonlinear planner is the default
 DEFAULT_NMPC_PERIOD = 7200.0           # 2 h slow NMPC cadence
-DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then P ticks per slow interval
+DEFAULT_NMPC_FAST_SUBSTEPS = 8         # EKF then plan-apply ticks per slow interval
 DEFAULT_NMPC_HORIZON_H = 36.0          # look-ahead hours
-DEFAULT_P_GAIN = 0.1                   # P-law gain [1/K]
+DEFAULT_P_GAIN = 0.1                   # unused; leftover two-layer tracker default
 DEFAULT_P_DEADBAND = 1.0               # P tracking deadband around T_ref when NMPC is off [K]
 DEFAULT_U_REF_GATE = 0.02              # |u_ref| below this counts as NMPC off (heater fraction)
 DEFAULT_UPDATE_INTERVAL = 900          # derived T_s = nmpc_period / M (seconds)
@@ -784,3 +788,12 @@ MAX_DATASET_RECORDS = 20000
 #: Origin labels for stored datasets.
 DATASET_SOURCE_MANUAL = "manual"
 DATASET_SOURCE_EXPERIMENT = "experiment"
+
+
+def coerce_mpc_mode(value) -> str:
+    """Return ``linear`` or ``nmpc``. Unknown / empty values default to NMPC."""
+
+    raw = str(value or "").strip().lower()
+    if raw in (MPC_MODE_LINEAR, "lmpc", "qp"):
+        return MPC_MODE_LINEAR
+    return MPC_MODE_NMPC

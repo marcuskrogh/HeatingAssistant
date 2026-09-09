@@ -4,6 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-522 | Task | [Feature] Choose linear or nonlinear MPC on Controller Tuning | In Review | — | docs/agents/PLAN-mpc-mode-choice.md | `/ship SWD-522` (closeout) |
+| SWD-523 | Sub-task | Engine: exclusive linear vs nonlinear MPC | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
+| SWD-524 | Sub-task | UI: Tuning mode cards and mode-specific params | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
+| SWD-525 | Sub-task | Tests, CalVer, changelog, App sync | To Do | SWD-522 | docs/agents/PLAN-mpc-mode-choice.md | — |
 | SWD-519 | Task | [Iterate] Compute overlay and KPIs lag after NMPC/P finish | Done | — | docs/agents/ITERATE-compute-refresh.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/671 (`ee376de5`) |
 | SWD-520 | Sub-task | Publish compute status at NMPC start/end; refresh UI on finish | Done | SWD-519 | docs/agents/ITERATE-compute-refresh.md | — |
 | SWD-521 | Sub-task | Tests, CalVer, changelog, App sync for compute refresh | Done | SWD-519 | docs/agents/ITERATE-compute-refresh.md | — |
@@ -243,6 +247,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-09 — `/review-fix` SWD-522 CLEAN (focused): 0 blockers / 0 should-fix. Next `/ship SWD-522`.
+- 2026-09-09 — `/define` SWD-522: exclusive linear vs NMPC on Tuning; Sub-tasks SWD-523/524/525; branch `cursor/swd-522-mpc-mode-choice-58e6`. Next `/implement SWD-522`.
 - 2026-09-08 — `/ship` SWD-513: merged #670 as `16319e7d`. Task Done. Changelog `# 2026.09.16`.
 - 2026-09-08 — `/review-fix` SWD-513 CLEAN (focused Core+Integration). COMMENT on PR #670 (self-review cannot REQUEST_CHANGES). Harness now locks CONTROL wrap cap and flag. Next closeout merge.
 - 2026-09-08 — `/iterate` SWD-513 In Review: wrap overlay no longer fights idle computing flags; PR https://github.com/marcuskrogh/HeatingAssistant/pull/670. Next `/review-fix SWD-513`.

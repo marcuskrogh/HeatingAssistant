@@ -328,17 +328,12 @@ export function houseHeatingPowerGaugeMax(liveTotalW, ratedCapacityW = null) {
   );
 }
 
-/** MPC / regulator P-cycle load as percent of REGULATOR_BUDGET_S (2 s, §4.8). */
+/** MPC / control-cycle load as percent of REGULATOR_BUDGET_S (2 s, §4.8). */
 export function mpcLoadPercent(state) {
   const mpcEntity = systemEntity('mpc_performance');
   const solveS = entityValue(state, mpcEntity);
   if (solveS === null) return 0;
   return Math.min(100, (solveS / REGULATOR_BUDGET_S) * 100);
-}
-
-/** Same 2 s P-cycle load used by the room Regulator Load card. */
-export function regulatorLoadPercent(state) {
-  return mpcLoadPercent(state);
 }
 
 /** NMPC 100% = NMPC_LOAD_FRACTION of the NMPC period. */

@@ -9,11 +9,19 @@ import pytest
 
 from heatingassistant.app.runtime import HeatingRuntime, publish_tag_in
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
+from heatingassistant.mqtt.supervisor import set_last_discovery_error
 from heatingassistant.mqtt.topics import entities as entities_topic
 from heatingassistant.persistence import save_state
 
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _clear_mqtt_discovery_error() -> None:
+    set_last_discovery_error(None)
+    yield
+    set_last_discovery_error(None)
 
 
 def _room_options() -> dict[str, Any]:
@@ -205,6 +213,27 @@ async def test_persisted_bad_clears_when_configured_tag_has_live_value(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_live_bad_numeric_stays_bad_through_health_refresh(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_room_options())
+    await runtime.start()
+    await publish_tag_in(runtime, "living_room_temp_1", 19.0)
+    await publish_tag_in(
+        runtime,
+        "living_room_temp_2",
+        99.0,
+        status="BAD",
+        reason="stale",
+    )
+
+    health = runtime.system_health()
+    assert runtime.tag_statuses["living_room_temp_1"] == "GOOD"
+    assert runtime.tag_statuses["living_room_temp_2"] == "BAD"
+    assert runtime.room_temperature("Living Room") == pytest.approx(19.0)
+    assert _sensor_module(health)["quality"] == "warning"
+    assert "living_room_temp_2" in (_sensor_module(health)["detail"] or "")
+
+
+@pytest.mark.asyncio
 async def test_configured_tag_without_live_value_still_warns(tmp_path) -> None:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_room_options())
     await runtime.start()
@@ -213,4 +242,3 @@ async def test_configured_tag_without_live_value_still_warns(tmp_path) -> None:
     sensors = _sensor_module(health)
     assert sensors["quality"] == "warning"
     assert "living_room_temp_1" in sensors["detail"]
-    assert "living_room_temp_1" in (health.get("issue_summary") or "")

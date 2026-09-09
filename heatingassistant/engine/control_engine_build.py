@@ -113,17 +113,12 @@ class BuildMixin:
             nmpc_period=timing.period_s,
             nmpc_fast_substeps=timing.fast_substeps,
             nmpc_horizon_h=timing.horizon_h,
-            p_deadband=float(
-                config.get(const.CONF_P_DEADBAND, const.DEFAULT_P_DEADBAND)
-            ),
-            u_ref_gate=float(
-                config.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
-            ),
             solar_gain_smoothing_tau_s=coerce_solar_gain_smoothing_tau_s(
                 config.get(
                     const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
                     const.SOLAR_GAIN_SMOOTHING_TAU_S,
                 )
             ),
+            mpc_mode=const.coerce_mpc_mode(config.get(const.CONF_MPC_MODE)),
         )
         return build_mpc_controller(build_config)

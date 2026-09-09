@@ -28,6 +28,7 @@ _PREVIEW_TUNING_KEYS = frozenset(
         const.CONF_NMPC_PERIOD,
         const.CONF_NMPC_FAST_SUBSTEPS,
         const.CONF_NMPC_HORIZON_H,
+        const.CONF_MPC_MODE,
     }
 )
 
@@ -96,6 +97,12 @@ class PreviewMixin:
         try:
             live = self._nmpc_timing()
         except ValueError:
+            return False
+        live_mode = const.coerce_mpc_mode(self.config.get(const.CONF_MPC_MODE))
+        draft_mode = const.coerce_mpc_mode(
+            overrides.get(const.CONF_MPC_MODE, live_mode)
+        )
+        if draft_mode != live_mode:
             return False
         if abs(float(timing.dt_s) - float(live.dt_s)) > 1e-6:
             return False
@@ -264,17 +271,18 @@ class PreviewMixin:
         price_forecast: list[float] | None,
     ) -> dict[str, Any]:
         try:
-            plan = preview_ctrl.solve_nmpc(
-                outdoor_temp,
-                now=compute_now,
-                outdoor_forecast=outdoor_forecast,
-                cloud_forecast=cloud_forecast,
-                cloud_cover_now=cloud_cover_now,
-                ghi_forecast=ghi_forecast,
-                ghi_now=ghi_now,
-                price_forecast=price_forecast,
-            )
-            preview_ctrl.apply_nmpc_result(plan)
+            if getattr(preview_ctrl, "mpc_mode", None) != const.MPC_MODE_LINEAR:
+                plan = preview_ctrl.solve_nmpc(
+                    outdoor_temp,
+                    now=compute_now,
+                    outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
+                    price_forecast=price_forecast,
+                )
+                preview_ctrl.apply_nmpc_result(plan)
             preview_ctrl.compute(
                 outdoor_temp,
                 solar_gains=None,

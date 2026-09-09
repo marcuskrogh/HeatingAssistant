@@ -9,7 +9,6 @@ import pytest
 
 from heatingassistant.engine.controller import HeatingMPCController
 from heatingassistant.engine.heat_sources import ElectricHeater
-from heatingassistant.engine.nmpc_p import p_command
 from heatingassistant.engine.thermal_model import HouseModel, Room
 
 _NOW = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
@@ -81,18 +80,8 @@ def test_compute_with_new_disturbances_does_not_retarget_p() -> None:
     k = int(ctrl._nmpc_k)
     idx = min(max(k, 0), n_fast - 1)
     n = min(idx // int(ctrl.timing.m), n_slow - 1)
-    t_hat = float(ctrl._ekf.x_hat[0])
     src = ctrl._sources[0]
-    expected = p_command(
-        float(frozen_u[n, 0]),
-        float(frozen_t[idx, 0]),
-        t_hat,
-        float(src.p_gain),
-        float(src.u_min),
-        float(src.u_max),
-        u_ref_gate=ctrl._u_ref_gate,
-        p_deadband=ctrl._p_deadband,
-    )
+    expected = float(np.clip(frozen_u[n, 0], src.u_min, src.u_max))
     actual = float(ctrl._p_command_vector(None, None, None)[0])
     assert actual == pytest.approx(expected)
 
@@ -114,8 +103,6 @@ def test_p_follows_fast_grid_t_ref_inside_slow_u_hold() -> None:
     t_ref = np.linspace(20.0, 24.0, n_fast).reshape(n_fast, 1)
     u_star = np.full((n_slow, 1), 0.4)
     ctrl.set_accepted_path(u_star, t_ref, now=_EPOCH, plan_epoch=_EPOCH)
-    t_hat = float(ctrl._ekf.x_hat[0])
-    src = ctrl._sources[0]
 
     def _p_at(k: int) -> float:
         ctrl._nmpc_k = k
@@ -123,29 +110,8 @@ def test_p_follows_fast_grid_t_ref_inside_slow_u_hold() -> None:
 
     u0 = _p_at(0)
     u1 = _p_at(1)
-    expected0 = p_command(
-        0.4,
-        float(t_ref[0, 0]),
-        t_hat,
-        float(src.p_gain),
-        float(src.u_min),
-        float(src.u_max),
-        u_ref_gate=ctrl._u_ref_gate,
-        p_deadband=ctrl._p_deadband,
-    )
-    expected1 = p_command(
-        0.4,
-        float(t_ref[1, 0]),
-        t_hat,
-        float(src.p_gain),
-        float(src.u_min),
-        float(src.u_max),
-        u_ref_gate=ctrl._u_ref_gate,
-        p_deadband=ctrl._p_deadband,
-    )
-    assert u0 == pytest.approx(expected0)
-    assert u1 == pytest.approx(expected1)
-    assert u0 != pytest.approx(u1)
+    assert u0 == pytest.approx(0.4)
+    assert u1 == pytest.approx(0.4)
 
 
 def test_forecast_t_none_without_accepted_path() -> None:

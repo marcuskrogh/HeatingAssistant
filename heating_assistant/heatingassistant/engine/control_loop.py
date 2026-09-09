@@ -17,7 +17,6 @@ from .control_engine_preview import (  # noqa: F401
     _snapshot_from_controller,
 )
 from .heat_sources import ElectricHeater, GenericThermostat, HeatPump, HeatSource
-from .nmpc_p import require_non_negative_p_gating
 from .nmpc_timing import timing_from_options
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 
@@ -51,16 +50,12 @@ def _coerce_solar_forecast(raw: Any) -> list[dict[str, float]]:
 
 
 def reject_negative_p_gating_knobs(mapping: Mapping[str, Any]) -> None:
-    """Raise if live P-deadband or NMPC-off gate knobs are negative."""
+    """Raise if leftover two-layer tracker knobs in a persist payload are negative."""
 
-    require_non_negative_p_gating(
-        float(mapping[const.CONF_P_DEADBAND])
-        if const.CONF_P_DEADBAND in mapping
-        else 0.0,
-        float(mapping[const.CONF_U_REF_GATE])
-        if const.CONF_U_REF_GATE in mapping
-        else 0.0,
-    )
+    if const.CONF_P_DEADBAND in mapping and float(mapping[const.CONF_P_DEADBAND]) < 0.0:
+        raise ValueError(f"p_deadband must be >= 0; got {mapping[const.CONF_P_DEADBAND]}")
+    if const.CONF_U_REF_GATE in mapping and float(mapping[const.CONF_U_REF_GATE]) < 0.0:
+        raise ValueError(f"u_ref_gate must be >= 0; got {mapping[const.CONF_U_REF_GATE]}")
 
 
 class ControlEngine(BuildMixin, PreviewMixin):
@@ -133,14 +128,35 @@ class ControlEngine(BuildMixin, PreviewMixin):
         """Rebuild model/controller state from an App config dictionary."""
 
         reject_negative_p_gating_knobs(config)
-        self.config = dict(config)
+        incoming = dict(config)
+        mode = const.coerce_mpc_mode(incoming.get(const.CONF_MPC_MODE))
+        incoming[const.CONF_MPC_MODE] = mode
+        linear_dt = incoming.get(
+            const.CONF_UPDATE_INTERVAL, const.DEFAULT_UPDATE_INTERVAL
+        )
+        linear_horizon = incoming.get(const.CONF_HORIZON, const.DEFAULT_HORIZON)
+        nmpc_period = incoming.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
+        nmpc_substeps = incoming.get(
+            const.CONF_NMPC_FAST_SUBSTEPS, const.DEFAULT_NMPC_FAST_SUBSTEPS
+        )
+        nmpc_horizon_h = incoming.get(
+            const.CONF_NMPC_HORIZON_H, const.DEFAULT_NMPC_HORIZON_H
+        )
+        self.config = incoming
         try:
             timing = self._nmpc_timing(self.config)
-            self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
-            self.config[const.CONF_HORIZON] = timing.n_fast
-            self.config[const.CONF_NMPC_PERIOD] = timing.period_s
-            self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
-            self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
+            if mode == const.MPC_MODE_LINEAR:
+                self.config[const.CONF_UPDATE_INTERVAL] = timing.dt_s
+                self.config[const.CONF_HORIZON] = timing.n_fast
+                self.config[const.CONF_NMPC_PERIOD] = nmpc_period
+                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = nmpc_substeps
+                self.config[const.CONF_NMPC_HORIZON_H] = nmpc_horizon_h
+            else:
+                self.config[const.CONF_UPDATE_INTERVAL] = linear_dt
+                self.config[const.CONF_HORIZON] = linear_horizon
+                self.config[const.CONF_NMPC_PERIOD] = timing.period_s
+                self.config[const.CONF_NMPC_FAST_SUBSTEPS] = timing.fast_substeps
+                self.config[const.CONF_NMPC_HORIZON_H] = timing.horizon_h
         except ValueError:
             _LOGGER.warning("Invalid NMPC timing triple in config; controller build may fail")
         self.model = _build_house_model(_list_of_mappings(self.config.get("rooms")))
@@ -607,7 +623,6 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
             "power_scale": _as_float(source_cfg.get("power_scale"), 1.0),
             "emitter_time_constant": emitter_tau,
         }
-        p_gain = _as_float(source_cfg.get(const.CONF_P_GAIN), const.DEFAULT_P_GAIN)
         try:
             if source_type == const.SOURCE_TYPE_HEAT_PUMP:
                 sources.append(
@@ -664,8 +679,6 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
                 )
         except (TypeError, ValueError) as exc:
             _LOGGER.warning("Skipping invalid heat source %r: %s", source_cfg, exc)
-        else:
-            sources[-1].p_gain = p_gain
     return sources
 
 

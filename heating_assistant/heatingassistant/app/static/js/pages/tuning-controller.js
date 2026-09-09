@@ -17,31 +17,51 @@ import {
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
-// Parameters that take effect on the live controller without rebuilding its structure.
-const LIVE_PARAM_DEFS = [
+const MPC_MODE_LINEAR = 'linear';
+const MPC_MODE_NMPC = 'nmpc';
+
+const MODE_CARDS = [
+  {
+    key: MPC_MODE_LINEAR,
+    title: 'Linear model predictive control',
+    body: 'For systems that need a lower computational load. More computationally efficient, but suffers from linearisation error.',
+  },
+  {
+    key: MPC_MODE_NMPC,
+    title: 'Nonlinear model predictive control',
+    body: 'For systems that can handle a larger computational load. Takes longer to compute the solution.',
+  },
+];
+
+const SHARED_LIVE_PARAM_DEFS = [
   { key: 'comfort_offset', label: 'Comfort Offset', unit: '°C', hint: 'Symmetric band around setpoint', step: 0.1, parse: parseFloat },
   { key: 'tracking_weight', label: 'Tracking Weight', unit: '', hint: 'Setpoint tracking strength (0 = band only)', step: 0.1, parse: parseFloat },
   { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, parse: parseFloat },
   { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, parse: parseFloat },
   { key: 'smoothing_weight', label: 'Output Smoothing', unit: '', hint: 'Penalises rapid output changes', step: 0.05, parse: parseFloat },
-  { key: 'p_deadband', label: 'P deadband (NMPC off)', unit: '°C', hint: 'Stay off while the planner is near zero and air is within this of the planned temperature. Default 1.0 °C.', step: 0.1, parse: parseFloat },
-  { key: 'u_ref_gate', label: 'NMPC-off gate', unit: '', hint: 'Planner command below this fraction is treated as off, so the P deadband applies. Small preheat stays unconstrained. Default 0.02.', step: 0.01, parse: parseFloat },
   { key: 'soft_constraint_weight', label: 'Comfort Band Penalty (quadratic)', unit: '', hint: 'Quadratic penalty for leaving comfort zone', step: 1, parse: parseFloat },
   { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, parse: parseFloat },
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
 ];
 
-// Changing these rebuilds the NMPC problem (slow period / substeps / look-ahead).
-const RESTART_PARAM_DEFS = [
+const LINEAR_RESTART_PARAM_DEFS = [
+  { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'Re-planning cadence for the linear controller (default 900 s).', step: 60, parse: parseFloat },
+  { key: 'horizon', label: 'Prediction horizon', unit: 'steps', hint: 'Steps planned ahead (default 144 ≈ 36 h at 15 min). Rebuilds the QP.', step: 1, parse: parseInt },
+];
+
+const NMPC_RESTART_PARAM_DEFS = [
   { key: 'nmpc_period', label: 'NMPC period', unit: 's', hint: 'Slow planner cadence (default 7200 = 2 h). Must divide the look-ahead.', step: 900, parse: parseFloat },
-  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then P ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
+  { key: 'nmpc_fast_substeps', label: 'Fast substeps', unit: '', hint: 'EKF then apply-plan ticks per NMPC period (default 8). Sample interval = period / substeps.', step: 1, parse: parseInt },
   { key: 'nmpc_horizon_h', label: 'Look-ahead', unit: 'h', hint: 'Planner look-ahead in hours (default 36). Must be an integer number of NMPC periods.', step: 1, parse: parseFloat },
 ];
 
+const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS];
+const RESTART_PARAM_DEFS = [...LINEAR_RESTART_PARAM_DEFS, ...NMPC_RESTART_PARAM_DEFS];
 const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
+  mpc_mode: MPC_MODE_NMPC,
   nmpc_period: 7200,
   nmpc_fast_substeps: 8,
   nmpc_horizon_h: 36,
@@ -52,8 +72,6 @@ const DEFAULTS = {
   energy_weight: 0.01,
   energy_price_weight: 1.0,
   smoothing_weight: 0.1,
-  p_deadband: 1.0,
-  u_ref_gate: 0.02,
   soft_constraint_weight: 10.0,
   soft_constraint_linear_weight: 0.0,
   terminal_weight: 100.0,
@@ -98,8 +116,50 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Adjust MPC controller and window-detection settings. Preview the planned trajectories before applying changes to the live controller.';
+  desc.textContent = 'Choose the planner, then adjust weights and timing. Shared weights keep their values when you switch between linear and nonlinear control.';
   container.appendChild(desc);
+
+  let selectedMode = MPC_MODE_NMPC;
+
+  const modeSection = document.createElement('div');
+  modeSection.className = 'tuning-mode-grid';
+  const modeButtons = {};
+  for (const card of MODE_CARDS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tuning-mode-card';
+    btn.dataset.mode = card.key;
+    btn.setAttribute('aria-pressed', card.key === selectedMode ? 'true' : 'false');
+    btn.innerHTML = `
+      <div class="tuning-mode-card__title">${card.title}</div>
+      <p class="tuning-mode-card__body">${card.body}</p>
+    `;
+    btn.addEventListener('click', () => {
+      selectedMode = card.key;
+      syncModeCards();
+      syncModeParamVisibility();
+      userEditing = true;
+      updatePendingIndicators();
+    });
+    modeButtons[card.key] = btn;
+    modeSection.appendChild(btn);
+  }
+  container.appendChild(modeSection);
+
+  function coerceMode(value) {
+    return String(value || '').toLowerCase() === MPC_MODE_LINEAR
+      ? MPC_MODE_LINEAR
+      : MPC_MODE_NMPC;
+  }
+
+  function syncModeCards() {
+    for (const card of MODE_CARDS) {
+      const btn = modeButtons[card.key];
+      const on = card.key === selectedMode;
+      btn.classList.toggle('tuning-mode-card--active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
 
   const pendingBanner = document.createElement('div');
   pendingBanner.className = 'tuning-pending-banner';
@@ -150,29 +210,44 @@ function renderTuningIndex(container, rooms, connection, hass) {
       grid.appendChild(group);
       inputs[def.key] = group.querySelector('input');
     }
+    return subsection;
   }
 
   appendParamSubsection(
-    'Live tuning',
-    'Penalty weights and comfort band — applied to the running controller on the next planning cycle.',
-    LIVE_PARAM_DEFS,
+    'Shared live tuning',
+    'Penalty weights and comfort band — shared by both planners. Applied on the next planning cycle.',
+    SHARED_LIVE_PARAM_DEFS,
   );
-  appendParamSubsection(
-    'Restart required',
-    'NMPC period, fast substeps, and look-ahead — the planner is rebuilt when these change. Sample interval is derived (period / substeps).',
-    RESTART_PARAM_DEFS,
+  const linearSubsection = appendParamSubsection(
+    'Linear MPC timing',
+    'Sample interval and prediction horizon rebuild the quadratic program.',
+    LINEAR_RESTART_PARAM_DEFS,
+  );
+  const nmpcRestartSubsection = appendParamSubsection(
+    'Nonlinear MPC timing',
+    'NMPC period, fast substeps, and look-ahead rebuild the nonlinear planner. Sample interval is derived (period / substeps).',
+    NMPC_RESTART_PARAM_DEFS,
   );
   const derivedGroup = document.createElement('div');
   derivedGroup.className = 'form-group';
   derivedGroup.innerHTML = `
-    <label class="form-label" for="ctrl-update_interval">Sample interval</label>
-    <input class="form-input" type="number" id="ctrl-update_interval" value="" readonly>
-    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and P run at this cadence)</span>
+    <label class="form-label" for="ctrl-nmpc_sample_interval">Sample interval</label>
+    <input class="form-input" type="number" id="ctrl-nmpc_sample_interval" value="" readonly>
+    <span class="form-hint">s — derived as NMPC period / fast substeps (EKF and plan apply at this cadence)</span>
   `;
-  formSection.querySelector('.tuning-params-grid:last-of-type')?.appendChild(derivedGroup)
-    || formSection.appendChild(derivedGroup);
-  inputs.update_interval = derivedGroup.querySelector('input');
+  nmpcRestartSubsection.querySelector('.tuning-params-grid')?.appendChild(derivedGroup)
+    || nmpcRestartSubsection.appendChild(derivedGroup);
+  const nmpcDerivedInput = derivedGroup.querySelector('input');
   container.appendChild(formSection);
+
+  function syncModeParamVisibility() {
+    const linear = selectedMode === MPC_MODE_LINEAR;
+    linearSubsection.hidden = !linear;
+    nmpcRestartSubsection.hidden = linear;
+  }
+
+  syncModeCards();
+  syncModeParamVisibility();
 
   // --- Window Configuration section ---
   const windowSection = document.createElement('div');
@@ -279,14 +354,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
   };
 
   function collectConfiguredConfig() {
-    const cfg = {};
+    const cfg = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) cfg[def.key] = def.parse(inputs[def.key].value);
     for (const def of WINDOW_DEFS) cfg[def.key] = def.parse(windowInputs[def.key].value);
     return cfg;
   }
 
   function collectMpcParams() {
-    const mpcData = {};
+    const mpcData = { mpc_mode: selectedMode };
     for (const def of PARAM_DEFS) mpcData[def.key] = def.parse(inputs[def.key].value);
     return mpcData;
   }
@@ -294,6 +369,9 @@ function renderTuningIndex(container, rooms, connection, hass) {
   function hasPendingChanges() {
     if (!appliedConfig) return false;
     const configured = collectConfiguredConfig();
+    if (coerceMode(configured.mpc_mode) !== coerceMode(appliedConfig.mpc_mode)) {
+      return true;
+    }
     return ALL_PARAM_DEFS.some((def) => !valuesEqual(
       configured[def.key],
       appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
@@ -303,7 +381,13 @@ function renderTuningIndex(container, rooms, connection, hass) {
   function hasPendingRestartChanges() {
     if (!appliedConfig) return false;
     const configured = collectConfiguredConfig();
-    return RESTART_PARAM_DEFS.some((def) => !valuesEqual(
+    if (coerceMode(configured.mpc_mode) !== coerceMode(appliedConfig.mpc_mode)) {
+      return true;
+    }
+    const defs = selectedMode === MPC_MODE_LINEAR
+      ? LINEAR_RESTART_PARAM_DEFS
+      : NMPC_RESTART_PARAM_DEFS;
+    return defs.some((def) => !valuesEqual(
       configured[def.key],
       appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
     ));
@@ -320,7 +404,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     const needsRestart = hasPendingRestartChanges();
     pendingBanner.classList.toggle('tuning-pending-banner--restart', needsRestart);
     pendingBanner.textContent = needsRestart
-      ? 'Unsaved changes include the NMPC period, fast substeps, or look-ahead — applying will rebuild the planner.'
+      ? 'Unsaved changes include the planner mode or timing — applying will rebuild the controller.'
       : 'Unsaved changes — penalty weights and window settings apply to the live controller on the next cycle.';
   }
 
@@ -339,14 +423,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
   function updateDerivedSampleInterval() {
     const period = Number(inputs.nmpc_period?.value);
     const substeps = Number(inputs.nmpc_fast_substeps?.value);
-    const derived = inputs.update_interval;
-    if (!derived) return;
+    if (!nmpcDerivedInput) return;
     if (Number.isFinite(period) && Number.isFinite(substeps) && substeps > 0) {
-      derived.value = String(period / substeps);
+      nmpcDerivedInput.value = String(period / substeps);
     }
   }
 
   function nmpcTimingError() {
+    if (selectedMode !== MPC_MODE_NMPC) return null;
     const period = Number(inputs.nmpc_period?.value);
     const substeps = Number(inputs.nmpc_fast_substeps?.value);
     const horizonH = Number(inputs.nmpc_horizon_h?.value);
@@ -361,6 +445,9 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function populate(config) {
+    selectedMode = coerceMode(config.mpc_mode ?? DEFAULTS.mpc_mode);
+    syncModeCards();
+    syncModeParamVisibility();
     for (const def of PARAM_DEFS) {
       const val = config[def.key];
       if (val !== undefined && val !== null) inputs[def.key].value = val;
@@ -374,6 +461,9 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function populateDefaults() {
+    selectedMode = DEFAULTS.mpc_mode;
+    syncModeCards();
+    syncModeParamVisibility();
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
     updateDerivedSampleInterval();
@@ -571,6 +661,14 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (timingErr) {
       setStatus(timingErr, 'error');
       return;
+    }
+    if (selectedMode === MPC_MODE_LINEAR) {
+      const dt = Number(inputs.update_interval?.value);
+      const horizon = Number(inputs.horizon?.value);
+      if (!(dt > 0) || !(horizon >= 1)) {
+        setStatus('Linear sample interval and prediction horizon must be positive.', 'error');
+        return;
+      }
     }
     setStatus('Applying…', 'running');
     btnApply.disabled = true;

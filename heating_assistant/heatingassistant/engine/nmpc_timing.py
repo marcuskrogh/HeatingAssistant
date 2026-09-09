@@ -7,6 +7,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .const import (
+    CONF_MPC_MODE,
+    DEFAULT_HORIZON,
+    DEFAULT_UPDATE_INTERVAL,
+    MPC_MODE_LINEAR,
+    coerce_mpc_mode,
+)
+
 
 _NMPC_KEYS = ("nmpc_period", "nmpc_fast_substeps", "nmpc_horizon_h")
 
@@ -143,11 +151,18 @@ def timing_from_options(
 ) -> NmpcTiming:
     """Build timing from config.
 
-    The NMPC triple wins when any of its keys is set.  Otherwise a present
-    ``update_interval`` / ``horizon`` pair is treated as a one-interval grid
-    (tests and previews).  Completely empty config uses the production defaults.
+    Linear mode uses stored ``update_interval`` / ``horizon`` even when an
+    NMPC triple is also present.  Nonlinear mode uses the NMPC triple when
+    any of its keys is set.  Otherwise a present interval / horizon pair is
+    a one-interval grid (tests).  Empty config uses production NMPC defaults.
     """
 
+    if coerce_mpc_mode(options.get(CONF_MPC_MODE)) == MPC_MODE_LINEAR:
+        dt_s = float(
+            _filled(options.get("update_interval"), DEFAULT_UPDATE_INTERVAL)
+        )
+        n_fast = int(_filled(options.get("horizon"), DEFAULT_HORIZON))
+        return timing_from_dt_horizon(dt_s, n_fast)
     if any(options.get(key) is not None for key in _NMPC_KEYS):
         return derive_nmpc_timing(
             float(_filled(options.get("nmpc_period"), default_period)),
@@ -185,6 +200,12 @@ def timing_from_preview_overrides(
 
     ov = dict(overrides or {})
     merged = {**dict(base), **ov}
+    if coerce_mpc_mode(merged.get(CONF_MPC_MODE)) == MPC_MODE_LINEAR:
+        dt_s = float(
+            _filled(merged.get("update_interval"), DEFAULT_UPDATE_INTERVAL)
+        )
+        n_fast = int(_filled(merged.get("horizon"), DEFAULT_HORIZON))
+        return timing_from_dt_horizon(dt_s, n_fast)
     if any(ov.get(key) is not None for key in _NMPC_KEYS):
         return timing_from_options(
             merged,

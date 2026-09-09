@@ -4,6 +4,17 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.18
+
+- Controller Tuning lets you choose linear or nonlinear model predictive
+  control. Shared weights stay in place when you switch, and each planner
+  keeps its own timing settings.
+- Nonlinear control holds the planned heater command between NMPC solves.
+  The extra tracking loop on the planned temperature is gone, and the room
+  Regulator Load card is removed. Heating units still map that command to a
+  climate setpoint from the unit's internal temperature. The old heater
+  P-gain field for the two-layer tracker is gone.
+
 # 2026.09.17
 
 - Next Control and Next NMPC rings stay in the computing overlay for the

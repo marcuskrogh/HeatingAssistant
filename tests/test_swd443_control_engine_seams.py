@@ -67,6 +67,7 @@ def test_module_helpers_remain_on_control_loop() -> None:
     assert "tracking_weight" in _PREVIEW_TUNING_KEYS
     assert "comfort_offset" in _PREVIEW_TUNING_KEYS
     assert "p_deadband" not in _PREVIEW_TUNING_KEYS
+    assert "mpc_mode" in _PREVIEW_TUNING_KEYS
     assert "tracking_weight" in _PREVIEW_WEIGHT_DEFAULTS
 
 

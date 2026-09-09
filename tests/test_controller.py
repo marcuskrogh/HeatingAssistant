@@ -25,9 +25,15 @@ from mbc.estimation import (
 )
 from heatingassistant.engine.controller import (
     HouseThermalSDE,
-    HeatingMPCController,
+    HeatingMPCController as _HeatingMPCController,
     HeatingLinearisedMPC,
 )
+
+
+def HeatingMPCController(*args, **kwargs):
+    """This file covers the linearised QP path; default mode is linear."""
+    kwargs.setdefault("mpc_mode", "linear")
+    return _HeatingMPCController(*args, **kwargs)
 
 
 # -- Helpers ------------------------------------------------------------------
@@ -36,7 +42,7 @@ _MPC_NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
 
 
 def _seed_path(ctrl, t_ref=None, u_ref=0.3):
-    """Install a slow plan so compute() runs the P-law (no inline NLP)."""
+    """Install a slow U* plan for NMPC ZOH tests (unused on the linear path)."""
     n_fast = ctrl.horizon
     n_rooms = ctrl._system._n_rooms
     nu = ctrl._system.nu
@@ -787,11 +793,6 @@ class TestHeatingMPCController:
     def test_heats_when_below_setpoint(self, two_room):
         model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        n_fast = ctrl.horizon
-        n_rooms = ctrl._system._n_rooms
-        t_ref = np.full((n_fast, n_rooms), 21.0)
-        u_star = np.zeros((ctrl.timing.n_slow, ctrl._system.nu))
-        ctrl.set_accepted_path(u_star, t_ref)
         now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=-10.0, now=now)
         assert any(frac > 0.0 for frac in actions.values())
@@ -1168,7 +1169,6 @@ class TestHeatingMPCController:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
-        _seed_path(ctrl, t_ref=[21.0], u_ref=0.0)
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=25.0, now=now)
         assert actions["hp"] < 0.0, (
@@ -1184,7 +1184,6 @@ class TestHeatingMPCController:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
-        _seed_path(ctrl, t_ref=[21.0], u_ref=0.0)
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=25.0, now=now)
         assert hp.current_power < 0.0, (
@@ -1277,9 +1276,8 @@ class TestTotalComputes:
         from heatingassistant.engine.controller import MPC_STATS_BUFFER_SIZE
 
         model, sources = two_room
-        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, mpc_mode="nmpc")
         now = _MPC_NOW
-        # Run one more than the buffer size
         for _ in range(MPC_STATS_BUFFER_SIZE + 1):
             ctrl.compute(outdoor_temp=0.0, now=now)
         assert ctrl.total_computes == MPC_STATS_BUFFER_SIZE + 1, (
@@ -1297,9 +1295,7 @@ class TestSolarForecastIndexing:
 
     def test_solar_seq_zero_uses_current_time(self):
         """solar_seq[0] must equal the solar gain computed at *now* (not now+dt)."""
-        from heatingassistant.engine.controller import (
-            HeatingMPCController, HouseThermalSDE,
-        )
+        from heatingassistant.engine.controller import HouseThermalSDE
         from heatingassistant.engine.solar_model import room_solar_gains
         from datetime import timedelta
 

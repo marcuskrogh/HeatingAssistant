@@ -1001,6 +1001,9 @@ class HeatingRuntime(
                 "power_scale": float(getattr(source, "power_scale", 1.0)),
             }
         config = {
+            const.CONF_MPC_MODE: const.coerce_mpc_mode(
+                self.options.get(const.CONF_MPC_MODE, const.DEFAULT_MPC_MODE)
+            ),
             "comfort_offset": float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)),
             "tracking_weight": float(self.options.get("tracking_weight", 1.0)),
             "energy_weight": float(self.options.get("energy_weight", 1.0)),
@@ -1008,19 +1011,15 @@ class HeatingRuntime(
                 self.options.get("energy_price_weight", const.DEFAULT_ENERGY_PRICE_WEIGHT)
             ),
             "smoothing_weight": float(self.options.get("smoothing_weight", 0.05)),
-            const.CONF_P_DEADBAND: float(
-                self.options.get(const.CONF_P_DEADBAND, const.DEFAULT_P_DEADBAND)
-            ),
-            const.CONF_U_REF_GATE: float(
-                self.options.get(const.CONF_U_REF_GATE, const.DEFAULT_U_REF_GATE)
-            ),
             "soft_constraint_weight": float(self.options.get("soft_constraint_weight", 10.0)),
             "soft_constraint_linear_weight": float(
                 self.options.get("soft_constraint_linear_weight", 0.0)
             ),
             "terminal_weight": float(self.options.get("terminal_weight", 1.0)),
-            "horizon": int(self.control_engine._derived_horizon(self.options)),
-            "update_interval": int(self.control_engine._derived_dt(self.options)),
+            "horizon": int(self.options.get("horizon", const.DEFAULT_HORIZON)),
+            "update_interval": int(
+                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+            ),
             const.CONF_NMPC_PERIOD: float(
                 self.options.get(const.CONF_NMPC_PERIOD, const.DEFAULT_NMPC_PERIOD)
             ),
@@ -2566,15 +2565,18 @@ class HeatingRuntime(
         """Rebuild tag quality from the current config and live values.
 
         Historical BAD rows for tags that are not configured this cycle are
-        dropped. Configured tags with a usable catalog or tag value become
-        GOOD; configured tags with no usable value become BAD.
+        dropped. Configured tags with no usable value become BAD. Catalog
+        overlay may mark a newer HA snapshot GOOD via update_tag. Do not
+        promote a live MQTT BAD/UNCERTAIN just because a number is stored —
+        averaging and health must keep skipping that sensor.
         """
 
         self._apply_catalog_to_inbound_tags()
         self._prune_unbound_tag_quality()
         for tag in self._configured_sensor_tags():
             if self._configured_tag_is_usable(tag):
-                self.tag_statuses[tag] = "GOOD"
+                if self.tag_statuses.get(tag) not in {"BAD", "UNCERTAIN"}:
+                    self.tag_statuses[tag] = "GOOD"
             else:
                 self.tag_statuses[tag] = "BAD"
                 # Do not invent a wall-clock timestamp for a missing value.
