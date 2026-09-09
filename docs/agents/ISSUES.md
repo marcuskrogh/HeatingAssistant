@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-529 | Task | [Iterate] Align Linear and Nonlinear Tuning parameter names | In Progress | — | docs/agents/ITERATE-tuning-param-names.md | `/review-fix SWD-529` |
-| SWD-530 | Sub-task | Unify Timing labels and Look-ahead hours on Linear | In Progress | SWD-529 | docs/agents/ITERATE-tuning-param-names.md | — |
-| SWD-531 | Sub-task | Tests, TUNING.md, CalVer, App sync | To Do | SWD-529 | docs/agents/ITERATE-tuning-param-names.md | — |
+| SWD-529 | Task | [Iterate] Align Linear and Nonlinear Tuning parameter names | In Review | — | docs/agents/ITERATE-tuning-param-names.md | `/review-fix SWD-529` — https://github.com/marcuskrogh/HeatingAssistant/pull/675 |
+| SWD-530 | Sub-task | Unify Timing labels and Look-ahead hours on Linear | Done | SWD-529 | docs/agents/ITERATE-tuning-param-names.md | — |
+| SWD-531 | Sub-task | Tests, TUNING.md, CalVer, App sync | Done | SWD-529 | docs/agents/ITERATE-tuning-param-names.md | — |
 | SWD-526 | Task | [Iterate] Tuning mode cards, Apply gate, and solver knobs | Done | — | docs/agents/ITERATE-tuning-mode-cards.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/673 (`257d7c4b`) |
 | SWD-527 | Sub-task | Tuning mode cards and Apply-to-switch | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |
 | SWD-528 | Sub-task | Solver knobs, copy, tests, CalVer | Done | SWD-526 | docs/agents/ITERATE-tuning-mode-cards.md | — |

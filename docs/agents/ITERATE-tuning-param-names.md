@@ -38,5 +38,8 @@
 - Relates: SWD-526
 - Sub-tasks: SWD-530, SWD-531
 
+- Branch: `cursor/swd-529-tuning-param-names-58e6`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/675
+
 ## Next
 `/review-fix SWD-529` — Review and auto-fix (single pass)
