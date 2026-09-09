@@ -97,6 +97,7 @@ def test_nmpc_reject_publishes_computing_start_and_idle_result(tmp_path: Path) -
     idle = [row for row in snaps if row["nmpc_computing"] is False]
     assert idle
     assert idle[-1]["nmpc_result_ts"] is not None
+    assert float(idle[-1]["last_nmpc_duration_s"] or 0) >= 0
     assert runtime._nmpc_computing is False
 
 
@@ -118,6 +119,25 @@ def test_nmpc_accept_clears_computing_before_finish_publish(tmp_path: Path) -> N
     finish = [row for row in snaps if row["nmpc_computing"] is False]
     assert finish, "accepted solve must publish idle computing flags"
     assert finish[0]["nmpc_result_ts"] is not None
+    assert float(finish[0]["last_nmpc_duration_s"] or 0) >= 0
+
+
+def test_nmpc_error_publishes_idle_result(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    snaps = _record_status(runtime)
+
+    def _boom():
+        raise RuntimeError("nmpc failed")
+
+    runtime.control_engine.solve_nmpc_blocking = _boom  # type: ignore[method-assign]
+    runtime.control_engine.mark_nmpc_busy = lambda: None  # type: ignore[method-assign]
+    runtime._nmpc_computing = True
+    runtime._nmpc_worker_thread()
+    idle = [row for row in snaps if row["nmpc_computing"] is False]
+    assert idle, "failed solve must still publish idle computing flags"
+    assert idle[-1]["nmpc_result_ts"] is not None
+    assert float(idle[-1]["last_nmpc_duration_s"] or 0) >= 0
+    assert runtime._nmpc_computing is False
 
 
 def test_control_cycle_publishes_computing_start(tmp_path: Path) -> None:

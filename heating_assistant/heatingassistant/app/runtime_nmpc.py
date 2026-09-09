@@ -42,14 +42,14 @@ class NmpcMixin:
         self._mark_nmpc_slot_started()
         self._nmpc_computing = True
         self.control_engine.mark_nmpc_busy()
+        # Publish before start so a fast worker cannot idle-publish first.
+        self._publish_compute_status()
         self._nmpc_thread = threading.Thread(
             target=self._nmpc_worker_thread,
             name="heatingassistant-nmpc",
             daemon=True,
         )
         self._nmpc_thread.start()
-        # HA MQTT and Ingress must see the flag before the next P cycle.
-        self._publish_compute_status()
 
     def _nmpc_worker_thread(self) -> None:
         started = time.time()
