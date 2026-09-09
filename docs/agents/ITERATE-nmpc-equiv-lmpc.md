@@ -48,4 +48,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/676
 
 ## Next
-`/ship SWD-532` — Closeout after CI (review-fix CLEAN)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/676 (`b07c39d8`)
