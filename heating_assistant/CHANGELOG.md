@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.22
+
+- Controller Tuning planner cards use one even outline on all sides. The
+  live planner is still the filled card; switching still needs Apply
+  Changes.
+
 # 2026.09.21
 
 - Overview and room KPIs show one Next Compute ring and one MPC Load
