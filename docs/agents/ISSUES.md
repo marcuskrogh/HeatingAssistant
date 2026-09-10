@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-539 | Task | [Tweak] Even stroke on planner selection cards | In Review | — | docs/agents/PLAN-planner-card-stroke.md | `/ship SWD-539` CLEAN — https://github.com/marcuskrogh/HeatingAssistant/pull/680 |
+| SWD-539 | Task | [Tweak] Even stroke on planner selection cards | Done | — | docs/agents/PLAN-planner-card-stroke.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/680 (`7c7ef1e9`) |
 | SWD-540 | Sub-task | Even planner-card stroke and selection polish | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
 | SWD-541 | Sub-task | Tests, CalVer, changelog, App sync for card stroke | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
 | SWD-536 | Task | [Iterate] Mode-general Next Compute and MPC Load KPIs | Done | — | docs/agents/ITERATE-kpi-mpc-general.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/678 (`e56b7edc`) |
@@ -259,6 +259,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-10 — `/ship` SWD-539 via PR #680 (`7c7ef1e9`): even 1px planner-card frames; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.22`. Next: Done.
 - 2026-09-09 — `/ship` SWD-536 via PR #678 (`e56b7edc`): one Next Compute ring and mode-general MPC Load; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.21`. Next: Done.
 - 2026-09-09 — `/iterate` SWD-526 from SWD-522: mode-card design, Apply-to-switch, operator timing knobs. Next `/review-fix SWD-526`.
 - 2026-09-09 — `/ship` SWD-522 via PR #672 (`4cc5a506`): exclusive linear vs nonlinear MPC; NMPC holds `U*` (ZOH); two-layer P and heater P gain gone; inner climate setpoint mapping stays. Review CLEAN (focused). Changelog `heating_assistant/CHANGELOG.md` `# 2026.09.18`. Next: Done.
