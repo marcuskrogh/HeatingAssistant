@@ -73,4 +73,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-539` — Focused review then ship on the same PR
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/680
