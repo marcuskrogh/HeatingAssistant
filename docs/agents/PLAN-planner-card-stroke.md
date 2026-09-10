@@ -68,9 +68,9 @@
 - Task: SWD-539
 - Sub-tasks: SWD-540, SWD-541
 - Branch: swd-539-planner-card-stroke
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/680
 - Classification: tweak
 - Workflow: delta-fast
 
 ## Next
-`/implement SWD-539` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-539` — Focused review then ship on the same PR

@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-539 | Task | [Tweak] Even stroke on planner selection cards | In Progress | — | docs/agents/PLAN-planner-card-stroke.md | `/review-fix SWD-539` |
-| SWD-540 | Sub-task | Even planner-card stroke and selection polish | In Progress | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
-| SWD-541 | Sub-task | Tests, CalVer, changelog, App sync for card stroke | In Progress | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
+| SWD-539 | Task | [Tweak] Even stroke on planner selection cards | In Review | — | docs/agents/PLAN-planner-card-stroke.md | `/review-fix SWD-539` — https://github.com/marcuskrogh/HeatingAssistant/pull/680 |
+| SWD-540 | Sub-task | Even planner-card stroke and selection polish | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
+| SWD-541 | Sub-task | Tests, CalVer, changelog, App sync for card stroke | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
 | SWD-536 | Task | [Iterate] Mode-general Next Compute and MPC Load KPIs | Done | — | docs/agents/ITERATE-kpi-mpc-general.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/678 (`e56b7edc`) |
 | SWD-537 | Sub-task | Unify Next Compute ring and MPC Load KPIs | Done | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
 | SWD-538 | Sub-task | Tests, CalVer, changelog, App sync for KPI copy | Done | SWD-536 | docs/agents/ITERATE-kpi-mpc-general.md | — |
