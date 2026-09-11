@@ -562,10 +562,11 @@ DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price enti
 DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
 DEFAULT_PRICE_SPOT_SURCHARGE = 0.0     # no surcharge adder by default
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
+OFF_PERIOD_TMAX = 40.0                 # °C open upper bound on off-period NMPC steps so preheat is not penalised
 
 # Comfort schedule modes
 SCHEDULE_MODE_COMFORT = "comfort"      # apply the period's setpoint (default behaviour)
-SCHEDULE_MODE_OFF = "off"              # disable heat sources for the room during this period
+SCHEDULE_MODE_OFF = "off"              # frost floor only on the horizon (heaters may preheat)
 
 # Source types
 SOURCE_TYPE_ELECTRIC = "electric_heater"

@@ -25,6 +25,7 @@ from mbc.estimation import (
 )
 
 from ..const import (
+    DEFAULT_FROST_PROTECTION,
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
@@ -33,6 +34,7 @@ from ..const import (
     MPC_MODE_LINEAR,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
+    OFF_PERIOD_TMAX,
     coerce_mpc_mode,
     coerce_nmpc_max_compute_s,
 )
@@ -62,6 +64,7 @@ from ..solar_model import (
     smooth_solar_gain_schedule,
 )
 from ..thermal_model import HouseModel
+from ..schedule_control import off_step_holds_heater_off
 from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
 from .sde import HouseThermalSDE
@@ -995,6 +998,38 @@ class HeatingMPCController:
         )
         return True
 
+    @staticmethod
+    def _traj_array(traj: Any, field: str, room: str, *, dtype: Any) -> np.ndarray:
+        mapping = getattr(traj, field, None) or {}
+        return np.asarray(mapping.get(room, []), dtype=dtype).reshape(-1)
+
+    @staticmethod
+    def _fill_room_horizon_bounds(
+        t_min: np.ndarray,
+        t_max: np.ndarray,
+        col: int,
+        sps: np.ndarray,
+        offs: np.ndarray,
+        enabled: np.ndarray,
+        frosts: np.ndarray,
+        n_fast: int,
+    ) -> None:
+        n = min(n_fast, sps.shape[0], offs.shape[0]) if sps.size and offs.size else 0
+        for k in range(n):
+            on = True if enabled.size == 0 or k >= enabled.size else bool(enabled[k])
+            if on:
+                t_min[k, col] = float(sps[k] - offs[k])
+                t_max[k, col] = float(sps[k] + offs[k])
+                continue
+            frost = (
+                float(frosts[k]) if k < frosts.size else DEFAULT_FROST_PROTECTION
+            )
+            t_min[k, col] = frost
+            t_max[k, col] = float(OFF_PERIOD_TMAX)
+        if 0 < n < n_fast:
+            t_min[n:, col] = t_min[n - 1, col]
+            t_max[n:, col] = t_max[n - 1, col]
+
     def _comfort_bounds_fast(
         self,
         control_trajectory: Optional[Any],
@@ -1012,15 +1047,92 @@ class HeatingMPCController:
             t_max[:, i] = sp + off
         if control_trajectory is not None:
             for i, name in enumerate(room_list):
-                sps = np.asarray(control_trajectory.setpoints[name], dtype=float)
-                offs = np.asarray(control_trajectory.comfort_offsets[name], dtype=float)
-                n = min(n_fast, sps.shape[0], offs.shape[0])
-                t_min[:n, i] = sps[:n] - offs[:n]
-                t_max[:n, i] = sps[:n] + offs[:n]
-                if n < n_fast:
-                    t_min[n:, i] = t_min[n - 1, i]
-                    t_max[n:, i] = t_max[n - 1, i]
+                self._fill_room_horizon_bounds(
+                    t_min,
+                    t_max,
+                    i,
+                    self._traj_array(control_trajectory, "setpoints", name, dtype=float),
+                    self._traj_array(
+                        control_trajectory, "comfort_offsets", name, dtype=float
+                    ),
+                    self._traj_array(
+                        control_trajectory, "enabled_steps", name, dtype=bool
+                    ),
+                    self._traj_array(
+                        control_trajectory, "frost_floors", name, dtype=float
+                    ),
+                    n_fast,
+                )
         return t_min, t_max
+
+    def _blank_input_bound_seqs(
+        self, n_fast: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        u_min_abs, u_max_abs = self._control_system.u_bounds
+        u_min_seq = np.tile(
+            np.asarray(u_min_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+        )
+        u_max_seq = np.tile(
+            np.asarray(u_max_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+        )
+        clamp_mask = np.zeros((n_fast, len(self._sources)), dtype=bool)
+        return u_min_seq, u_max_seq, clamp_mask
+
+    @staticmethod
+    def _pin_off_hold_column(
+        enabled: np.ndarray,
+        column: int,
+        n_fast: int,
+        u_min_seq: np.ndarray,
+        u_max_seq: np.ndarray,
+        clamp_mask: np.ndarray,
+    ) -> bool:
+        """Pin u=0 on off steps in one source column with no later comfort."""
+
+        held = False
+        en = np.asarray(enabled, dtype=bool).reshape(-1)
+        for k in range(min(n_fast, en.size)):
+            if clamp_mask[k, column] or not off_step_holds_heater_off(en, k):
+                continue
+            u_min_seq[k, column] = 0.0
+            u_max_seq[k, column] = 0.0
+            clamp_mask[k, column] = True
+            held = True
+        return held
+
+    def _apply_off_period_u_hold(
+        self,
+        control_trajectory: Optional[Any],
+        u_min_seq: Optional[np.ndarray],
+        u_max_seq: Optional[np.ndarray],
+        clamp_mask: Optional[np.ndarray],
+        n_fast: int,
+    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+        """Pin u=0 on off steps that have no later comfort period to anticipate."""
+
+        if control_trajectory is None:
+            return u_min_seq, u_max_seq, clamp_mask
+        enabled_map = getattr(control_trajectory, "enabled_steps", None) or {}
+        if not enabled_map:
+            return u_min_seq, u_max_seq, clamp_mask
+        created = False
+        if u_min_seq is None or u_max_seq is None or clamp_mask is None:
+            u_min_seq, u_max_seq, clamp_mask = self._blank_input_bound_seqs(n_fast)
+            created = True
+        held = False
+        for j, src in enumerate(self._sources):
+            en = enabled_map.get(src.room)
+            if en is None:
+                continue
+            held = (
+                self._pin_off_hold_column(
+                    en, j, n_fast, u_min_seq, u_max_seq, clamp_mask
+                )
+                or held
+            )
+        if created and not held:
+            return None, None, None
+        return u_min_seq, u_max_seq, clamp_mask
 
     def _slow_input_bounds(
         self,
@@ -1111,6 +1223,9 @@ class HeatingMPCController:
                     u_min_seq[k, j] = u_val
                     u_max_seq[k, j] = u_val
                     clamp_mask[k, j] = True
+        u_min_seq, u_max_seq, clamp_mask = self._apply_off_period_u_hold(
+            control_trajectory, u_min_seq, u_max_seq, clamp_mask, N
+        )
         slow_lo, slow_hi = self._slow_input_bounds(u_min_seq, u_max_seq, clamp_mask)
         price_slow = None
         if price_forecast is not None and self._energy_price_weight > 0.0:
@@ -1265,16 +1380,35 @@ class HeatingMPCController:
         self._mpc.x_ref = x_ref_abs
 
         if control_trajectory is not None:
-            x_ref_abs_seq = np.zeros((N, n_rooms), dtype=float)
-            offset_seq = np.zeros((N, n_rooms), dtype=float)
+            t_min, t_max = self._comfort_bounds_fast(control_trajectory, N)
+            x_ref_abs_seq = 0.5 * (t_min + t_max)
+            offset_seq = 0.5 * (t_max - t_min)
             q_scale_seq = np.ones((N, n_rooms), dtype=float)
             r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
             for i, name in enumerate(room_list):
-                x_ref_abs_seq[:, i] = control_trajectory.setpoints[name]
-                offset_seq[:, i] = control_trajectory.comfort_offsets[name]
-                q_scale_seq[:, i] = control_trajectory.q_scales[name]
+                q_raw = self._traj_array(
+                    control_trajectory, "q_scales", name, dtype=float
+                )
+                if q_raw.size:
+                    m = min(N, q_raw.size)
+                    q_scale_seq[:m, i] = q_raw[:m]
+                    if m < N:
+                        q_scale_seq[m:, i] = q_scale_seq[m - 1, i]
+                enabled = self._traj_array(
+                    control_trajectory, "enabled_steps", name, dtype=bool
+                )
+                for k in range(min(N, enabled.size)):
+                    if not bool(enabled[k]):
+                        q_scale_seq[k, i] = 0.0
             for j, src in enumerate(self._sources):
-                r_scale_seq[:, j] = control_trajectory.r_scales[src.room]
+                r_raw = self._traj_array(
+                    control_trajectory, "r_scales", src.room, dtype=float
+                )
+                if r_raw.size:
+                    m = min(N, r_raw.size)
+                    r_scale_seq[:m, j] = r_raw[:m]
+                    if m < N:
+                        r_scale_seq[m:, j] = r_scale_seq[m - 1, j]
         else:
             x_ref_abs_seq = None
             offset_seq = None
@@ -1438,10 +1572,10 @@ class HeatingMPCController:
             applies the per-step values.  ``None`` keeps the current wind
             for the whole horizon.
         disabled_sources : set of str, optional
-            Names of heat sources whose rooms are currently off (schedule off,
-            user toggle, or window override).  Their QP outputs are zeroed
-            out before the actions dict and heating schedule are built, so
-            sensors report 0 W for both current and predicted inputs.
+            Names of heat sources whose rooms are forced off (schedule off
+            with no later comfort period to anticipate, user toggle, or
+            window override).  Upcoming comfort on the horizon keeps the
+            source commandable so NMPC can preheat or precool.
         price_forecast : list of float, optional
             Forecasted electricity prices aligned to the prediction horizon
             [currency/kWh].  When provided and energy_price_weight > 0 the
@@ -1590,6 +1724,10 @@ class HeatingMPCController:
                     clamp_mask[k, j] = True
             if not clamp_mask.any():
                 u_min_seq = u_max_seq = clamp_mask = None
+
+        u_min_seq, u_max_seq, clamp_mask = self._apply_off_period_u_hold(
+            control_trajectory, u_min_seq, u_max_seq, clamp_mask, N
+        )
 
         if self.is_linear_mpc:
             return self._compute_linear_qp(
