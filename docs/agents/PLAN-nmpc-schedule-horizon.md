@@ -56,7 +56,7 @@
 - Task: SWD-545
 - Sub-tasks: SWD-546, SWD-547
 - Branch: `cursor/nmpc-schedule-horizon-605a` (SWD-545)
-- PR: pending
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/683
 - Classification: bug
 - Workflow: fix-fast
 
