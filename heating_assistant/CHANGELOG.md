@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.23
+
+- Controller Tuning **Max compute time** (default 60 s) is a shared
+  planner knob for Linear and Nonlinear. Nonlinear previously hard-capped
+  every solve at one minute.
+
 # 2026.09.22
 
 - Controller Tuning planner cards use one even outline on all sides. The

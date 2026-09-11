@@ -1031,6 +1031,11 @@ class HeatingRuntime(
             const.CONF_NMPC_HORIZON_H: float(
                 self.options.get(const.CONF_NMPC_HORIZON_H, const.DEFAULT_NMPC_HORIZON_H)
             ),
+            const.CONF_NMPC_MAX_COMPUTE_S: const.coerce_nmpc_max_compute_s(
+                self.options.get(
+                    const.CONF_NMPC_MAX_COMPUTE_S, const.DEFAULT_NMPC_MAX_COMPUTE_S
+                )
+            ),
             "window_open_debounce": int(
                 self.options.get("window_open_debounce", const.DEFAULT_WINDOW_OPEN_DEBOUNCE)
             ),

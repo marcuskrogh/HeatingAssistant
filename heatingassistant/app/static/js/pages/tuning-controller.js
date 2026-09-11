@@ -34,10 +34,11 @@ const MODE_CARDS = [
 ];
 
 const SHARED_LIVE_PARAM_DEFS = [
-  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Half-width of the comfort band around the setpoint. Both planners try to stay inside this band.', step: 0.1, parse: parseFloat },
+  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Half-width of the comfort band around the setpoint.', step: 0.1, parse: parseFloat },
   { key: 'energy_price_weight', label: 'Price sensitivity', unit: '', hint: 'How strongly a high electricity price pushes the plan toward less electrical heat (0 = ignore price).', step: 0.1, parse: parseFloat },
   { key: 'smoothing_weight', label: 'Output smoothing', unit: '', hint: 'Penalty on changing the heater command from one interval to the next.', step: 0.05, parse: parseFloat },
   { key: 'soft_constraint_weight', label: 'Comfort-band penalty', unit: '', hint: 'How hard leaving the comfort band is penalised. Larger values fight harder to stay inside.', step: 1, parse: parseFloat },
+  { key: 'nmpc_max_compute_s', label: 'Max compute time', unit: 's', hint: 'Wall-clock cap for one planner solve. The solver stops at this limit and keeps the best plan found so far (default 60).', step: 1, parse: parseFloat },
 ];
 
 const LINEAR_LIVE_PARAM_DEFS = [
@@ -71,6 +72,7 @@ const DEFAULTS = {
   nmpc_period: 900,
   nmpc_fast_substeps: 1,
   nmpc_horizon_h: 36,
+  nmpc_max_compute_s: 60,
   update_interval: 900,
   comfort_offset: 2.0,
   horizon: 144,
@@ -122,7 +124,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Choose a planner, then Apply Changes to put it live. Shared weights keep their values when you switch. Timing knobs for the unused planner stay stored.';
+  desc.textContent = 'Choose a planner, then Apply Changes to put it live. Shared knobs keep their values when you switch.';
   container.appendChild(desc);
 
   let selectedMode = MPC_MODE_NMPC;
@@ -247,7 +249,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   appendParamSubsection(
     'Shared with both planners',
-    'Comfort band, electricity price, command smoothing, and the band-exit penalty. Applied on the next planning cycle after you save.',
+    'Comfort band, electricity price, command smoothing, band-exit penalty, and max compute time. Applied on the next planning cycle after you save.',
     SHARED_LIVE_PARAM_DEFS,
   );
   const linearLiveSubsection = appendParamSubsection(

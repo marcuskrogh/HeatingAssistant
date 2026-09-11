@@ -113,6 +113,12 @@ class BuildMixin:
             nmpc_period=timing.period_s,
             nmpc_fast_substeps=timing.fast_substeps,
             nmpc_horizon_h=timing.horizon_h,
+            nmpc_max_compute_s=const.coerce_nmpc_max_compute_s(
+                config.get(
+                    const.CONF_NMPC_MAX_COMPUTE_S,
+                    const.DEFAULT_NMPC_MAX_COMPUTE_S,
+                )
+            ),
             solar_gain_smoothing_tau_s=coerce_solar_gain_smoothing_tau_s(
                 config.get(
                     const.CONF_SOLAR_GAIN_SMOOTHING_TAU_S,
