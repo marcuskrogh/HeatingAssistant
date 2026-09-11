@@ -67,4 +67,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/architect SWD-542` — Shape stamp then implement on the same branch
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/682
