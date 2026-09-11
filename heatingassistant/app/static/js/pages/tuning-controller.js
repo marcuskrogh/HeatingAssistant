@@ -47,6 +47,10 @@ const LINEAR_LIVE_PARAM_DEFS = [
   { key: 'terminal_weight', label: 'End-of-horizon weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint (must be at least 1).', step: 1, parse: parseFloat },
 ];
 
+const NMPC_LIVE_PARAM_DEFS = [
+  { key: 'nmpc_max_compute_s', label: 'Max compute time', unit: 's', hint: 'Wall-clock cap for one nonlinear solve. The solver stops at this limit and keeps the best plan found so far (default 60).', step: 1, parse: parseFloat },
+];
+
 const SHARED_RESTART_PARAM_DEFS = [
   { key: 'update_interval', label: 'Sample interval', unit: 's', hint: 'How often heater commands are applied (default 900 s).', step: 60, parse: parseFloat },
 ];
@@ -58,7 +62,7 @@ const HIDDEN_TIMING_PARAM_DEFS = [
   { key: 'nmpc_fast_substeps', label: '', unit: '', hint: '', step: 1, parse: parseInt },
 ];
 
-const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS];
+const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS, ...NMPC_LIVE_PARAM_DEFS];
 const RESTART_PARAM_DEFS = [
   ...SHARED_RESTART_PARAM_DEFS,
   ...HIDDEN_TIMING_PARAM_DEFS,
@@ -71,6 +75,7 @@ const DEFAULTS = {
   nmpc_period: 900,
   nmpc_fast_substeps: 1,
   nmpc_horizon_h: 36,
+  nmpc_max_compute_s: 60,
   update_interval: 900,
   comfort_offset: 2.0,
   horizon: 144,
@@ -255,6 +260,11 @@ function renderTuningIndex(container, rooms, connection, hass) {
     'Extra terms on the linear quadratic program. The nonlinear planner does not use these.',
     LINEAR_LIVE_PARAM_DEFS,
   );
+  const nmpcLiveSubsection = appendParamSubsection(
+    'Nonlinear MPC solver',
+    'Wall-clock cap for one nonlinear solve. Applied on the next planning cycle after you save. Linear ignores this.',
+    NMPC_LIVE_PARAM_DEFS,
+  );
   const linearSubsection = appendParamSubsection(
     'Timing',
     'Sample interval and look-ahead. Both planners use the same receding-horizon grid. Changing these rebuilds the planner when you Apply Changes.',
@@ -281,6 +291,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   function syncModeParamVisibility() {
     linearLiveSubsection.hidden = selectedMode !== MPC_MODE_LINEAR;
+    nmpcLiveSubsection.hidden = selectedMode !== MPC_MODE_NMPC;
   }
 
   syncModeCards();

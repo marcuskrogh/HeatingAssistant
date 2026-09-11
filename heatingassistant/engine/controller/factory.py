@@ -42,6 +42,7 @@ class ControllerBuildConfig:
     nmpc_period: Optional[float] = None
     nmpc_fast_substeps: Optional[int] = None
     nmpc_horizon_h: Optional[float] = None
+    nmpc_max_compute_s: Optional[float] = None
     solar_gain_smoothing_tau_s: float = SOLAR_GAIN_SMOOTHING_TAU_S
     mpc_mode: str = DEFAULT_MPC_MODE
 
@@ -59,6 +60,7 @@ class ControllerBuildConfig:
             CONF_MPC_MODE,
             CONF_NMPC_FAST_SUBSTEPS,
             CONF_NMPC_HORIZON_H,
+            CONF_NMPC_MAX_COMPUTE_S,
             CONF_NMPC_PERIOD,
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
@@ -69,8 +71,10 @@ class ControllerBuildConfig:
             DEFAULT_MPC_MODE,
             DEFAULT_NMPC_FAST_SUBSTEPS,
             DEFAULT_NMPC_HORIZON_H,
+            DEFAULT_NMPC_MAX_COMPUTE_S,
             DEFAULT_NMPC_PERIOD,
             coerce_mpc_mode,
+            coerce_nmpc_max_compute_s,
         )
         from ..nmpc_timing import timing_from_options  # noqa: PLC0415
 
@@ -123,6 +127,16 @@ class ControllerBuildConfig:
             nmpc_period=timing.period_s,
             nmpc_fast_substeps=timing.fast_substeps,
             nmpc_horizon_h=timing.horizon_h,
+            nmpc_max_compute_s=coerce_nmpc_max_compute_s(
+                ov.get(
+                    CONF_NMPC_MAX_COMPUTE_S,
+                    getattr(
+                        coordinator,
+                        "_nmpc_max_compute_s",
+                        DEFAULT_NMPC_MAX_COMPUTE_S,
+                    ),
+                )
+            ),
             latitude=coordinator._latitude,
             longitude=coordinator._longitude,
             albedo=getattr(coordinator, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
@@ -197,6 +211,7 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         nmpc_period=config.nmpc_period,
         nmpc_fast_substeps=config.nmpc_fast_substeps,
         nmpc_horizon_h=config.nmpc_horizon_h,
+        nmpc_max_compute_s=config.nmpc_max_compute_s,
         solar_gain_smoothing_tau_s=config.solar_gain_smoothing_tau_s,
         mpc_mode=config.mpc_mode,
     )

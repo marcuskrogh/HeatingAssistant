@@ -34,12 +34,12 @@ from ..const import (
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
     coerce_mpc_mode,
+    coerce_nmpc_max_compute_s,
 )
 from ..heat_sources import HeatSource
 from ..nmpc_ocp import (
     NMPC_IDLE_U_ABS,
     NMPC_MAXITER,
-    NMPC_TIMEOUT_S,
     MeanOcp,
     evaluate_zero_heat_cost,
     mean_price_slow,
@@ -133,6 +133,7 @@ class HeatingMPCController:
                         Production persists this equal to ``dt``.
     nmpc_fast_substeps: production is 1 (one decision per sample).
     nmpc_horizon_h    : look-ahead [hours].
+    nmpc_max_compute_s: wall-clock cap for one NMPC solve [s] (default 60).
     measurement_dt    : EKF measurement interval [s].  If None, falls back to dt.
     latitude          : site latitude [deg]
     longitude         : site longitude [deg]
@@ -180,6 +181,7 @@ class HeatingMPCController:
         nmpc_period: Optional[float] = None,
         nmpc_fast_substeps: Optional[int] = None,
         nmpc_horizon_h: Optional[float] = None,
+        nmpc_max_compute_s: Optional[float] = None,
         p_deadband: float = 1.0,
         u_ref_gate: float = 0.02,
         solar_gain_smoothing_tau_s: Optional[float] = None,
@@ -187,6 +189,7 @@ class HeatingMPCController:
     ) -> None:
         self._sources = heat_sources
         self._mpc_mode = coerce_mpc_mode(mpc_mode)
+        self._nmpc_timeout_s = coerce_nmpc_max_compute_s(nmpc_max_compute_s)
         if (
             nmpc_period is not None
             or nmpc_fast_substeps is not None
@@ -1142,7 +1145,7 @@ class HeatingMPCController:
             ocp,
             warm,
             maxiter=NMPC_MAXITER if maxiter is None else int(maxiter),
-            timeout_s=NMPC_TIMEOUT_S if timeout_s is None else float(timeout_s),
+            timeout_s=self._nmpc_timeout_s if timeout_s is None else float(timeout_s),
             minimize_fn=minimize_fn,
         )
         cost_zero = evaluate_zero_heat_cost(ocp)
