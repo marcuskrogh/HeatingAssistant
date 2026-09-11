@@ -62,4 +62,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-545` — Dedicated testing phase on the bound chain (same branch/PR)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683

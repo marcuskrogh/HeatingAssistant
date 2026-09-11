@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | In Progress | — | docs/agents/PLAN-nmpc-schedule-horizon.md | `/test SWD-545` |
+| SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | In Review | — | docs/agents/PLAN-nmpc-schedule-horizon.md | `/ship SWD-545` |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-539 | Task | [Tweak] Even stroke on planner selection cards | Done | — | docs/agents/PLAN-planner-card-stroke.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/680 (`7c7ef1e9`) |

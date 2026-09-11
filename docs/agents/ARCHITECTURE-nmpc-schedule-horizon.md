@@ -15,4 +15,4 @@
 - Branch: `cursor/nmpc-schedule-horizon-605a`
 
 ## Next
-`/implement SWD-545` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683

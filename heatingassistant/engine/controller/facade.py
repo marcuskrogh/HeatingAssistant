@@ -994,6 +994,38 @@ class HeatingMPCController:
         )
         return True
 
+    @staticmethod
+    def _traj_array(traj: Any, field: str, room: str, *, dtype: Any) -> np.ndarray:
+        mapping = getattr(traj, field, None) or {}
+        return np.asarray(mapping.get(room, []), dtype=dtype).reshape(-1)
+
+    @staticmethod
+    def _fill_room_horizon_bounds(
+        t_min: np.ndarray,
+        t_max: np.ndarray,
+        col: int,
+        sps: np.ndarray,
+        offs: np.ndarray,
+        enabled: np.ndarray,
+        frosts: np.ndarray,
+        n_fast: int,
+    ) -> None:
+        n = min(n_fast, sps.shape[0], offs.shape[0]) if sps.size and offs.size else 0
+        for k in range(n):
+            on = True if enabled.size == 0 or k >= enabled.size else bool(enabled[k])
+            if on:
+                t_min[k, col] = float(sps[k] - offs[k])
+                t_max[k, col] = float(sps[k] + offs[k])
+                continue
+            frost = (
+                float(frosts[k]) if k < frosts.size else DEFAULT_FROST_PROTECTION
+            )
+            t_min[k, col] = frost
+            t_max[k, col] = float(OFF_PERIOD_TMAX)
+        if 0 < n < n_fast:
+            t_min[n:, col] = t_min[n - 1, col]
+            t_max[n:, col] = t_max[n - 1, col]
+
     def _comfort_bounds_fast(
         self,
         control_trajectory: Optional[Any],
@@ -1011,43 +1043,22 @@ class HeatingMPCController:
             t_max[:, i] = sp + off
         if control_trajectory is not None:
             for i, name in enumerate(room_list):
-                sps = np.asarray(
-                    control_trajectory.setpoints.get(name, np.array([])),
-                    dtype=float,
-                ).reshape(-1)
-                offs = np.asarray(
-                    control_trajectory.comfort_offsets.get(name, np.array([])),
-                    dtype=float,
-                ).reshape(-1)
-                enabled = np.asarray(
-                    getattr(control_trajectory, "enabled_steps", {}).get(
-                        name, np.array([])
+                self._fill_room_horizon_bounds(
+                    t_min,
+                    t_max,
+                    i,
+                    self._traj_array(control_trajectory, "setpoints", name, dtype=float),
+                    self._traj_array(
+                        control_trajectory, "comfort_offsets", name, dtype=float
                     ),
-                    dtype=bool,
-                ).reshape(-1)
-                frosts = np.asarray(
-                    getattr(control_trajectory, "frost_floors", {}).get(
-                        name, np.array([])
+                    self._traj_array(
+                        control_trajectory, "enabled_steps", name, dtype=bool
                     ),
-                    dtype=float,
-                ).reshape(-1)
-                n = min(n_fast, sps.shape[0], offs.shape[0]) if sps.size and offs.size else 0
-                for k in range(n):
-                    on = True if enabled.size == 0 or k >= enabled.size else bool(enabled[k])
-                    if on:
-                        t_min[k, i] = float(sps[k] - offs[k])
-                        t_max[k, i] = float(sps[k] + offs[k])
-                    else:
-                        frost = (
-                            float(frosts[k])
-                            if k < frosts.size
-                            else DEFAULT_FROST_PROTECTION
-                        )
-                        t_min[k, i] = frost
-                        t_max[k, i] = float(OFF_PERIOD_TMAX)
-                if 0 < n < n_fast:
-                    t_min[n:, i] = t_min[n - 1, i]
-                    t_max[n:, i] = t_max[n - 1, i]
+                    self._traj_array(
+                        control_trajectory, "frost_floors", name, dtype=float
+                    ),
+                    n_fast,
+                )
         return t_min, t_max
 
     def _blank_input_bound_seqs(
@@ -1371,27 +1382,24 @@ class HeatingMPCController:
             q_scale_seq = np.ones((N, n_rooms), dtype=float)
             r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
             for i, name in enumerate(room_list):
-                q_raw = np.asarray(
-                    control_trajectory.q_scales.get(name, np.array([])),
-                    dtype=float,
-                ).reshape(-1)
+                q_raw = self._traj_array(
+                    control_trajectory, "q_scales", name, dtype=float
+                )
                 if q_raw.size:
                     m = min(N, q_raw.size)
                     q_scale_seq[:m, i] = q_raw[:m]
                     if m < N:
                         q_scale_seq[m:, i] = q_scale_seq[m - 1, i]
-                enabled = np.asarray(
-                    control_trajectory.enabled_steps.get(name, np.array([])),
-                    dtype=bool,
-                ).reshape(-1)
+                enabled = self._traj_array(
+                    control_trajectory, "enabled_steps", name, dtype=bool
+                )
                 for k in range(min(N, enabled.size)):
                     if not bool(enabled[k]):
                         q_scale_seq[k, i] = 0.0
             for j, src in enumerate(self._sources):
-                r_raw = np.asarray(
-                    control_trajectory.r_scales.get(src.room, np.array([])),
-                    dtype=float,
-                ).reshape(-1)
+                r_raw = self._traj_array(
+                    control_trajectory, "r_scales", src.room, dtype=float
+                )
                 if r_raw.size:
                     m = min(N, r_raw.size)
                     r_scale_seq[:m, j] = r_raw[:m]
