@@ -6,9 +6,9 @@ must be the exact calendar version on its own line.
 
 # 2026.09.23
 
-- Controller Tuning lets you set Nonlinear **Max compute time** (default
-  60 s). That wall-clock cap was previously hard-coded, which made every
-  solve look like it took one minute.
+- Controller Tuning **Max compute time** (default 60 s) is a shared
+  planner knob for Linear and Nonlinear. Nonlinear previously hard-capped
+  every solve at one minute.
 
 # 2026.09.22
 

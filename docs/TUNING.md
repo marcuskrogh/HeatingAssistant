@@ -147,14 +147,14 @@ consider more history or a re-run with problematic parameters locked.
 ## MPC controller tuning
 
 Open **Tuning** and choose **linear** or **nonlinear** model predictive control.
-Shared penalty weights keep their values when you switch. Both planners use the
-same sample interval and look-ahead. Linear solves a quadratic program each
+Shared knobs keep their values when you switch. Both planners use the
+same sample interval, look-ahead, and max compute time. Linear solves a quadratic program each
 sample. Nonlinear solves the same receding-horizon problem on the nonlinear
 house model (heavier compute). Use **Preview** before **Apply Changes**.
 
 Live penalty weights take effect on the next planning cycle. Changing **Sample
-interval** or **Look-ahead** rebuilds the planner. Nonlinear **Max compute time**
-caps one NMPC solve (default 60 s); raise it if the solver is hitting the cap
+interval** or **Look-ahead** rebuilds the planner. **Max compute time**
+caps one planner solve (default 60 s); raise it if the solver is hitting the cap
 every cycle.
 
 ### Tunable parameters
@@ -172,7 +172,7 @@ every cycle.
 | **End-of-horizon weight** | `terminal_weight` | `100` | Linear only — end-of-plan tracking multiplier |
 | **Sample interval** | `update_interval` | `900 s` | How often heater commands are applied (both planners) |
 | **Look-ahead** | `horizon` / `nmpc_horizon_h` | `36 h` | How far the plan covers |
-| **Max compute time** | `nmpc_max_compute_s` | `60 s` | Nonlinear only — wall-clock cap for one NMPC solve |
+| **Max compute time** | `nmpc_max_compute_s` | `60 s` | Wall-clock cap for one Linear or Nonlinear planner solve |
 | **EKF process noise** | `sigma_w` | `0.1` | On **Parameter estimation** — faster reaction to unmodelled disturbances when higher |
 | **EKF measurement noise** | `sigma_v` | `0.5` | On **Parameter estimation** — higher trusts sensors less |
 

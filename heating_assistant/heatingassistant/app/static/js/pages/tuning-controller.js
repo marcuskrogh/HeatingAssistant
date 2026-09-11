@@ -34,10 +34,11 @@ const MODE_CARDS = [
 ];
 
 const SHARED_LIVE_PARAM_DEFS = [
-  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Half-width of the comfort band around the setpoint. Both planners try to stay inside this band.', step: 0.1, parse: parseFloat },
+  { key: 'comfort_offset', label: 'Comfort offset', unit: '°C', hint: 'Half-width of the comfort band around the setpoint.', step: 0.1, parse: parseFloat },
   { key: 'energy_price_weight', label: 'Price sensitivity', unit: '', hint: 'How strongly a high electricity price pushes the plan toward less electrical heat (0 = ignore price).', step: 0.1, parse: parseFloat },
   { key: 'smoothing_weight', label: 'Output smoothing', unit: '', hint: 'Penalty on changing the heater command from one interval to the next.', step: 0.05, parse: parseFloat },
   { key: 'soft_constraint_weight', label: 'Comfort-band penalty', unit: '', hint: 'How hard leaving the comfort band is penalised. Larger values fight harder to stay inside.', step: 1, parse: parseFloat },
+  { key: 'nmpc_max_compute_s', label: 'Max compute time', unit: 's', hint: 'Wall-clock cap for one planner solve. The solver stops at this limit and keeps the best plan found so far (default 60).', step: 1, parse: parseFloat },
 ];
 
 const LINEAR_LIVE_PARAM_DEFS = [
@@ -45,10 +46,6 @@ const LINEAR_LIVE_PARAM_DEFS = [
   { key: 'energy_weight', label: 'Heater-effort penalty', unit: '', hint: 'Penalty on heater command size itself, separate from electricity price.', step: 0.01, parse: parseFloat },
   { key: 'soft_constraint_linear_weight', label: 'Outside-band linear penalty', unit: '', hint: 'Extra steadily growing penalty the further outside the band (0 = off).', step: 1, parse: parseFloat },
   { key: 'terminal_weight', label: 'End-of-horizon weight', unit: '', hint: 'How strongly the last predicted step should still be near the setpoint (must be at least 1).', step: 1, parse: parseFloat },
-];
-
-const NMPC_LIVE_PARAM_DEFS = [
-  { key: 'nmpc_max_compute_s', label: 'Max compute time', unit: 's', hint: 'Wall-clock cap for one nonlinear solve. The solver stops at this limit and keeps the best plan found so far (default 60).', step: 1, parse: parseFloat },
 ];
 
 const SHARED_RESTART_PARAM_DEFS = [
@@ -62,7 +59,7 @@ const HIDDEN_TIMING_PARAM_DEFS = [
   { key: 'nmpc_fast_substeps', label: '', unit: '', hint: '', step: 1, parse: parseInt },
 ];
 
-const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS, ...NMPC_LIVE_PARAM_DEFS];
+const LIVE_PARAM_DEFS = [...SHARED_LIVE_PARAM_DEFS, ...LINEAR_LIVE_PARAM_DEFS];
 const RESTART_PARAM_DEFS = [
   ...SHARED_RESTART_PARAM_DEFS,
   ...HIDDEN_TIMING_PARAM_DEFS,
@@ -127,7 +124,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Choose a planner, then Apply Changes to put it live. Shared weights keep their values when you switch. Timing knobs for the unused planner stay stored.';
+  desc.textContent = 'Choose a planner, then Apply Changes to put it live. Shared knobs keep their values when you switch.';
   container.appendChild(desc);
 
   let selectedMode = MPC_MODE_NMPC;
@@ -252,18 +249,13 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   appendParamSubsection(
     'Shared with both planners',
-    'Comfort band, electricity price, command smoothing, and the band-exit penalty. Applied on the next planning cycle after you save.',
+    'Comfort band, electricity price, command smoothing, band-exit penalty, and max compute time. Applied on the next planning cycle after you save.',
     SHARED_LIVE_PARAM_DEFS,
   );
   const linearLiveSubsection = appendParamSubsection(
     'Linear MPC cost weights',
     'Extra terms on the linear quadratic program. The nonlinear planner does not use these.',
     LINEAR_LIVE_PARAM_DEFS,
-  );
-  const nmpcLiveSubsection = appendParamSubsection(
-    'Nonlinear MPC solver',
-    'Wall-clock cap for one nonlinear solve. Applied on the next planning cycle after you save. Linear ignores this.',
-    NMPC_LIVE_PARAM_DEFS,
   );
   const linearSubsection = appendParamSubsection(
     'Timing',
@@ -291,7 +283,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   function syncModeParamVisibility() {
     linearLiveSubsection.hidden = selectedMode !== MPC_MODE_LINEAR;
-    nmpcLiveSubsection.hidden = selectedMode !== MPC_MODE_NMPC;
   }
 
   syncModeCards();

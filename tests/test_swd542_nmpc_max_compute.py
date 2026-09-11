@@ -90,15 +90,23 @@ def test_engine_invalid_nmpc_max_compute_falls_back() -> None:
     assert engine._controller._nmpc_timeout_s == pytest.approx(60.0)
 
 
-def test_tuning_page_exposes_nmpc_max_compute_for_nonlinear() -> None:
+def test_tuning_page_exposes_shared_max_compute() -> None:
     source = TUNING_JS.read_text(encoding="utf-8")
-    assert "NMPC_LIVE_PARAM_DEFS" in source
-    assert "nmpc_max_compute_s" in source
-    assert "Max compute time" in source
-    assert "nmpcLiveSubsection.hidden = selectedMode !== MPC_MODE_NMPC" in source
+    assert "NMPC_LIVE_PARAM_DEFS" not in source
+    assert "nmpcLiveSubsection" not in source
+    assert "Nonlinear MPC solver" not in source
+    shared, _rest = source.split("LINEAR_LIVE_PARAM_DEFS", 1)
+    assert "nmpc_max_compute_s" in shared
+    assert "Max compute time" in shared
+    assert "one planner solve" in shared
     assert "nmpc_max_compute_s: 60" in source
-    labelled = source.split("LINEAR_LIVE_PARAM_DEFS", 1)[0]
-    assert "Max compute time" not in labelled
+    assert "linearLiveSubsection.hidden = selectedMode !== MPC_MODE_LINEAR" in source
+    assert "nmpcLiveSubsection.hidden" not in source
+
+
+def test_linear_controller_stores_max_compute() -> None:
+    ctrl = _tiny_ctrl(mpc_mode="linear", nmpc_max_compute_s=12.5)
+    assert ctrl._nmpc_timeout_s == pytest.approx(12.5)
 
 
 def test_controller_config_snapshot_includes_nmpc_max_compute(tmp_path) -> None:

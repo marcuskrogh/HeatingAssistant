@@ -2,19 +2,19 @@
 
 ## Summary
 - Each nonlinear MPC solve is hard-capped at **60 seconds** (`NMPC_TIMEOUT_S` in `nmpc_ocp.py`). That is why live compute time sits so close to one minute.
-- Expose the cap as `nmpc_max_compute_s` (default 60) on **Controller Tuning** for Nonlinear, persist it, and use it for live solves and Tuning preview.
+- Expose the cap as `nmpc_max_compute_s` (default 60) on **Controller Tuning** as a **shared** knob for Linear and Nonlinear, persist it, and use it for live NMPC, live Linear QP (`HiGHS` `time_limit`), and Tuning preview.
 
 ## Scope / Decisions / Constraints
 **In**
 - Config key `nmpc_max_compute_s`, default **60 s** (same as today’s hard cap).
-- Controller Tuning: Nonlinear-only live field **Max compute time** (seconds).
+- Controller Tuning: shared live field **Max compute time** (seconds) for both planners. Linear-only QP weights stay Linear-only.
 - Persist via existing `update_controller_tuning` / App options.
-- Live NMPC and Tuning preview both honor the stored cap.
+- Live NMPC, live Linear QP, and Tuning preview honor the stored cap.
 - Missing, non-finite, or `<= 0` values fall back to 60 s (explicit `timeout_s=` on `solve_nmpc` stays as passed, for tests).
 - Tests, CalVer `2026.09.23`, changelog, TUNING.md, App package sync.
 
 **Out**
-- Changing SciPy `maxiter`, PE `pe_max_compute_s`, or Linear QP time.
+- Changing SciPy `maxiter` or PE `pe_max_compute_s`.
 - Unlimited / zero-means-off semantics.
 
 ## Classification
@@ -46,7 +46,7 @@
 ## Pass criteria
 - Default NMPC wall-clock cap remains 60 s when the key is absent.
 - A stored `nmpc_max_compute_s` is the timeout used by `HeatingMPCController.solve_nmpc` when `timeout_s` is omitted.
-- Controller Tuning shows **Max compute time** for Nonlinear and hides it for Linear.
+- Controller Tuning shows **Max compute time** in the shared section for both Linear and Nonlinear (same label, hint, and position).
 - `controller_config` includes `nmpc_max_compute_s`.
 - Invalid / non-positive stored values coerce to 60 s.
 

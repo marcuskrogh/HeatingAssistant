@@ -326,6 +326,7 @@ class HeatingMPCController:
             rho=rho,
             rho_lin=rho_lin,
             z_offset=y_offset,
+            solver_options={"time_limit": float(self._nmpc_timeout_s)},
         )
 
         # Store global cost weights so the trajectory builder can use them
