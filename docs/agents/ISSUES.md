@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-542 | Task | [Tweak] Configurable NMPC max compute time on Controller Tuning | To Do | — | docs/agents/PLAN-nmpc-max-compute.md | `/implement SWD-542` |
+| SWD-542 | Task | [Tweak] Configurable NMPC max compute time on Controller Tuning | In Progress | — | docs/agents/PLAN-nmpc-max-compute.md | `/test SWD-542` — https://github.com/marcuskrogh/HeatingAssistant/pull/682 |
 | SWD-543 | Sub-task | Wire configurable NMPC max compute time through engine and Tuning | To Do | SWD-542 | docs/agents/PLAN-nmpc-max-compute.md | — |
 | SWD-544 | Sub-task | Tests, CalVer, changelog, App sync for NMPC compute cap | To Do | SWD-542 | docs/agents/PLAN-nmpc-max-compute.md | — |
 | SWD-539 | Task | [Tweak] Even stroke on planner selection cards | Done | — | docs/agents/PLAN-planner-card-stroke.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/680 (`7c7ef1e9`) |

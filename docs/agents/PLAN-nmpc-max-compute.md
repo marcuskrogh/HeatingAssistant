@@ -62,7 +62,7 @@
 - Task: SWD-542
 - Sub-tasks: SWD-543, SWD-544
 - Branch: `cursor/nmpc-max-compute-0f2f`
-- PR: (draft)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/682
 - Classification: tweak
 - Workflow: delta-fast
 
