@@ -64,6 +64,7 @@ from ..solar_model import (
     smooth_solar_gain_schedule,
 )
 from ..thermal_model import HouseModel
+from ..schedule_control import off_step_holds_heater_off
 from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
 from .sde import HouseThermalSDE
@@ -1049,6 +1050,51 @@ class HeatingMPCController:
                     t_max[n:, i] = t_max[n - 1, i]
         return t_min, t_max
 
+    def _apply_off_period_u_hold(
+        self,
+        control_trajectory: Optional[Any],
+        u_min_seq: Optional[np.ndarray],
+        u_max_seq: Optional[np.ndarray],
+        clamp_mask: Optional[np.ndarray],
+        n_fast: int,
+    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+        """Pin u=0 on off steps that have no later comfort period to anticipate."""
+
+        if control_trajectory is None:
+            return u_min_seq, u_max_seq, clamp_mask
+        enabled_map = getattr(control_trajectory, "enabled_steps", None) or {}
+        if not enabled_map:
+            return u_min_seq, u_max_seq, clamp_mask
+        created = False
+        if u_min_seq is None or u_max_seq is None or clamp_mask is None:
+            u_min_abs, u_max_abs = self._control_system.u_bounds
+            u_min_seq = np.tile(
+                np.asarray(u_min_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+            )
+            u_max_seq = np.tile(
+                np.asarray(u_max_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+            )
+            clamp_mask = np.zeros((n_fast, len(self._sources)), dtype=bool)
+            created = True
+        held = False
+        for j, src in enumerate(self._sources):
+            en = enabled_map.get(src.room)
+            if en is None:
+                continue
+            en = np.asarray(en, dtype=bool).reshape(-1)
+            for k in range(min(n_fast, en.size)):
+                if clamp_mask[k, j]:
+                    continue
+                if not off_step_holds_heater_off(en, k):
+                    continue
+                u_min_seq[k, j] = 0.0
+                u_max_seq[k, j] = 0.0
+                clamp_mask[k, j] = True
+                held = True
+        if created and not held:
+            return None, None, None
+        return u_min_seq, u_max_seq, clamp_mask
+
     def _slow_input_bounds(
         self,
         u_min_seq: Optional[np.ndarray],
@@ -1138,6 +1184,9 @@ class HeatingMPCController:
                     u_min_seq[k, j] = u_val
                     u_max_seq[k, j] = u_val
                     clamp_mask[k, j] = True
+        u_min_seq, u_max_seq, clamp_mask = self._apply_off_period_u_hold(
+            control_trajectory, u_min_seq, u_max_seq, clamp_mask, N
+        )
         slow_lo, slow_hi = self._slow_input_bounds(u_min_seq, u_max_seq, clamp_mask)
         price_slow = None
         if price_forecast is not None and self._energy_price_weight > 0.0:
@@ -1487,10 +1536,10 @@ class HeatingMPCController:
             applies the per-step values.  ``None`` keeps the current wind
             for the whole horizon.
         disabled_sources : set of str, optional
-            Names of heat sources whose rooms are currently off (schedule off,
-            user toggle, or window override).  Their QP outputs are zeroed
-            out before the actions dict and heating schedule are built, so
-            sensors report 0 W for both current and predicted inputs.
+            Names of heat sources whose rooms are forced off (schedule off
+            with no later comfort period to anticipate, user toggle, or
+            window override).  Upcoming comfort on the horizon keeps the
+            source commandable so NMPC can preheat or precool.
         price_forecast : list of float, optional
             Forecasted electricity prices aligned to the prediction horizon
             [currency/kWh].  When provided and energy_price_weight > 0 the
@@ -1639,6 +1688,10 @@ class HeatingMPCController:
                     clamp_mask[k, j] = True
             if not clamp_mask.any():
                 u_min_seq = u_max_seq = clamp_mask = None
+
+        u_min_seq, u_max_seq, clamp_mask = self._apply_off_period_u_hold(
+            control_trajectory, u_min_seq, u_max_seq, clamp_mask, N
+        )
 
         if self.is_linear_mpc:
             return self._compute_linear_qp(

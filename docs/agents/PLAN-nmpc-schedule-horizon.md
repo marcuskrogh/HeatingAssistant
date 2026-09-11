@@ -7,7 +7,7 @@
 ## Scope / Decisions / Constraints
 - In: `compute_control_trajectory` frost floors; `_comfort_bounds_fast` / linear band from enabled steps; `_schedule_control_context` grid + `disabled_sources`; Tuning preview `solve_nmpc(..., control_trajectory=...)`.
 - Out: Schedule UI; frost-protection live trip; window-open override (still zeros heaters); experiment input clamps.
-- Decision: **off** on the horizon means frost floor only (open upper bound). Heaters stay commandable so NMPC can preheat. Plots may still hide corridors when `enabled` is false.
+- Decision: **off** with no later comfort period holds heaters at 0 (NLP u-hold + live `disabled_sources`). Off steps that precede a comfort period stay commandable with frost-floor-only bounds so NMPC can preheat or precool. Comfort-to-comfort bound changes appear on the same horizon.
 - Constraint: Trajectory `n_steps` and `dt_seconds` must match the NMPC sample grid (`n_fast`, `dt_s`).
 
 ## Classification
@@ -38,8 +38,9 @@
 
 ## Pass criteria
 - Off-period horizon steps have `t_min = frost_floor` and `t_max` well above comfort (not frost ± offset).
-- Upcoming comfort-period steps use that period's setpoint ± comfort offset.
-- Schedule-off rooms are not in `disabled_sources` (window override and room `enabled: false` still are).
+- Upcoming comfort-period steps use that period's setpoint ± comfort offset, including comfort-to-comfort changes.
+- Schedule-off rooms with no later comfort step on the horizon are in `disabled_sources` (heater at 0). Off rooms with a later comfort step are not.
+- Window override and room `enabled: false` still disable sources.
 - NMPC / preview solve receives a trajectory on the same `dt` and `n_fast` as the NLP.
 - Spec-lock tests fail if any of the above regress.
 

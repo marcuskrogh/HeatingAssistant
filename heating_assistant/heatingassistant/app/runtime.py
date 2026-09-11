@@ -52,6 +52,7 @@ from heatingassistant.engine.schedule_control import (
     ControlTrajectory,
     compute_control_trajectory,
     resolve_room_effective_params,
+    schedule_off_zeros_live_actuation,
 )
 
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
@@ -1913,6 +1914,12 @@ class HeatingRuntime(
         for room in self._rooms():
             name = room.get("name")
             if isinstance(name, str) and name and not self._room_enabled(room):
+                disabled_rooms.add(name)
+        for name, params in effective.items():
+            if schedule_off_zeros_live_actuation(
+                trajectory.enabled_steps.get(name),
+                currently_on=bool(params.enabled),
+            ):
                 disabled_rooms.add(name)
         disabled_sources: set[str] = set()
         for source in self.control_engine.heat_sources:

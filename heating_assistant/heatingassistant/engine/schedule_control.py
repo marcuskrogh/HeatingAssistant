@@ -202,6 +202,39 @@ def compute_control_trajectory(
     return traj
 
 
+def off_step_holds_heater_off(enabled: np.ndarray, step_index: int) -> bool:
+    """True when an off-horizon step has no later comfort period to anticipate.
+
+    Preheat/precool must keep actuation free on off steps that precede an
+    enabled comfort step. Off with no later on-period holds the heater at 0.
+    """
+
+    en = np.asarray(enabled, dtype=bool).reshape(-1)
+    if step_index < 0 or step_index >= en.size:
+        return False
+    if bool(en[step_index]):
+        return False
+    return not bool(np.any(en[step_index + 1 :]))
+
+
+def schedule_off_zeros_live_actuation(
+    enabled: np.ndarray | None, *, currently_on: bool
+) -> bool:
+    """True when live heaters should be forced off for a schedule-off room.
+
+    Frost-protection trips set ``currently_on`` so they are not zeroed.
+    An upcoming comfort step anywhere on the horizon keeps heaters commandable
+    so NMPC can preheat or precool.
+    """
+
+    if currently_on:
+        return False
+    if enabled is None:
+        return True
+    en = np.asarray(enabled, dtype=bool).reshape(-1)
+    return en.size == 0 or not bool(np.any(en))
+
+
 def step_setpoint_offset(
     traj: ControlTrajectory | None,
     room_name: str,

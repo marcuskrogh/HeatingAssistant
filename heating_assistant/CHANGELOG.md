@@ -6,9 +6,10 @@ must be the exact calendar version on its own line.
 
 # 2026.09.23
 
-- Scheduled comfort and off periods now apply across the NMPC look-ahead, so
-  the controller can preheat before a comfort window instead of waiting until
-  the narrower band starts.
+- Scheduled comfort and off periods apply across the NMPC look-ahead. Off
+  periods keep the heater at zero unless a later comfort window needs
+  preheat or precool. Comfort-to-comfort changes preheat or precool into
+  the next band instead of waiting until it starts.
 
 # 2026.09.22
 
