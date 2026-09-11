@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | In Review | — | docs/agents/PLAN-nmpc-schedule-horizon.md | `/ship SWD-545` |
+| SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-542 | Task | [Tweak] Configurable NMPC max compute time on Controller Tuning | Done | — | docs/agents/PLAN-nmpc-max-compute.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/682 (`c24ad19d`) |
