@@ -147,13 +147,15 @@ consider more history or a re-run with problematic parameters locked.
 ## MPC controller tuning
 
 Open **Tuning** and choose **linear** or **nonlinear** model predictive control.
-Shared penalty weights keep their values when you switch. Both planners use the
-same sample interval and look-ahead. Linear solves a quadratic program each
+Shared knobs keep their values when you switch. Both planners use the
+same sample interval, look-ahead, and max compute time. Linear solves a quadratic program each
 sample. Nonlinear solves the same receding-horizon problem on the nonlinear
 house model (heavier compute). Use **Preview** before **Apply Changes**.
 
 Live penalty weights take effect on the next planning cycle. Changing **Sample
-interval** or **Look-ahead** rebuilds the planner.
+interval** or **Look-ahead** rebuilds the planner. **Max compute time**
+caps one planner solve (default 60 s); raise it if the solver is hitting the cap
+every cycle.
 
 ### Tunable parameters
 
@@ -170,6 +172,7 @@ interval** or **Look-ahead** rebuilds the planner.
 | **End-of-horizon weight** | `terminal_weight` | `100` | Linear only — end-of-plan tracking multiplier |
 | **Sample interval** | `update_interval` | `900 s` | How often heater commands are applied (both planners) |
 | **Look-ahead** | `horizon` / `nmpc_horizon_h` | `36 h` | How far the plan covers |
+| **Max compute time** | `nmpc_max_compute_s` | `60 s` | Wall-clock cap for one Linear or Nonlinear planner solve |
 | **EKF process noise** | `sigma_w` | `0.1` | On **Parameter estimation** — faster reaction to unmodelled disturbances when higher |
 | **EKF measurement noise** | `sigma_v` | `0.5` | On **Parameter estimation** — higher trusts sensors less |
 
@@ -229,6 +232,8 @@ aggressive last-minute corrections.
 
 The **Tuning** preview chart overlays measured temperature, MPC prediction,
 setpoint, and planned power while you iterate. **Overview** and **System status**
-show solve times and mean tracking error from the MPC performance sensor — typical
-solve times at default settings are 0.05–0.3 s. If solves approach the sample
-interval, reduce `horizon` or contact support if CPU is constrained.
+show solve times and mean tracking error from the MPC performance sensor.
+Linear solves are typically a fraction of a second. Nonlinear often uses most
+of **Max compute time** (default 60 s) on a 15 min sample. If solves hit the cap
+every cycle, raise `nmpc_max_compute_s` on Tuning, or shorten look-ahead if CPU
+is constrained.

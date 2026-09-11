@@ -454,6 +454,7 @@ MPC_MODE_NMPC = "nmpc"
 CONF_NMPC_PERIOD = "nmpc_period"  # alias of sample interval [s]; kept for persisted configs
 CONF_NMPC_FAST_SUBSTEPS = "nmpc_fast_substeps"  # always 1 in production (legacy two-rate M)
 CONF_NMPC_HORIZON_H = "nmpc_horizon_h"  # look-ahead [hours]
+CONF_NMPC_MAX_COMPUTE_S = "nmpc_max_compute_s"  # wall-clock cap for one NMPC solve [s]
 CONF_P_GAIN = "p_gain"  # legacy two-layer tracker gain; ignored if present
 CONF_P_DEADBAND = "p_deadband"  # P temperature deadband when NMPC is near zero [K]
 CONF_U_REF_GATE = "u_ref_gate"  # |u_ref| below this is NMPC-off for the P deadband
@@ -513,6 +514,7 @@ DEFAULT_MPC_MODE = MPC_MODE_NMPC       # nonlinear planner is the default
 DEFAULT_NMPC_PERIOD = 900.0            # same as sample interval (one NLP decision per tick)
 DEFAULT_NMPC_FAST_SUBSTEPS = 1         # one decision per sample
 DEFAULT_NMPC_HORIZON_H = 36.0          # look-ahead hours
+DEFAULT_NMPC_MAX_COMPUTE_S = 60.0      # wall-clock cap for one NMPC solve [s]
 DEFAULT_P_GAIN = 0.1                   # unused; leftover two-layer tracker default
 DEFAULT_P_DEADBAND = 1.0               # P tracking deadband around T_ref when NMPC is off [K]
 DEFAULT_U_REF_GATE = 0.02              # |u_ref| below this counts as NMPC off (heater fraction)
@@ -798,3 +800,20 @@ def coerce_mpc_mode(value) -> str:
     if raw in (MPC_MODE_LINEAR, "lmpc", "qp"):
         return MPC_MODE_LINEAR
     return MPC_MODE_NMPC
+
+
+def coerce_nmpc_max_compute_s(
+    value, default: float = DEFAULT_NMPC_MAX_COMPUTE_S
+) -> float:
+    """Return a positive NMPC wall-clock cap in seconds (default 60)."""
+
+    fallback = float(default)
+    if value is None:
+        return fallback
+    try:
+        cap = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if cap != cap or cap <= 0.0:  # NaN or non-positive
+        return fallback
+    return cap

@@ -7,6 +7,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | In Review | — | docs/agents/PLAN-nmpc-schedule-horizon.md | `/ship SWD-545` |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
+| SWD-542 | Task | [Tweak] Configurable NMPC max compute time on Controller Tuning | Done | — | docs/agents/PLAN-nmpc-max-compute.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/682 (`c24ad19d`) |
+| SWD-543 | Sub-task | Wire configurable NMPC max compute time through engine and Tuning | Done | SWD-542 | docs/agents/PLAN-nmpc-max-compute.md | — |
+| SWD-544 | Sub-task | Tests, CalVer, changelog, App sync for NMPC compute cap | Done | SWD-542 | docs/agents/PLAN-nmpc-max-compute.md | — |
 | SWD-539 | Task | [Tweak] Even stroke on planner selection cards | Done | — | docs/agents/PLAN-planner-card-stroke.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/680 (`7c7ef1e9`) |
 | SWD-540 | Sub-task | Even planner-card stroke and selection polish | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |
 | SWD-541 | Sub-task | Tests, CalVer, changelog, App sync for card stroke | Done | SWD-539 | docs/agents/PLAN-planner-card-stroke.md | — |

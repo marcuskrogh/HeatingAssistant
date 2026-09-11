@@ -14,13 +14,14 @@ from typing import Any, Optional
 import numpy as np
 from scipy.optimize import minimize
 
+from .const import DEFAULT_NMPC_MAX_COMPUTE_S
 from .heat_sources import HeatSource
 from .integrator import implicit_euler_substeps
 from .nmpc_accept import accept_plan
 from .nmpc_timing import NmpcTiming
 
 NMPC_MAXITER = 200
-NMPC_TIMEOUT_S = 60.0
+NMPC_TIMEOUT_S = DEFAULT_NMPC_MAX_COMPUTE_S
 NMPC_FTOL = 1e-6
 # Installed |U| below this is treated as idle (off) for re-solve scheduling.
 NMPC_IDLE_U_ABS = 1e-6
