@@ -38,7 +38,7 @@ _OFF_THEN_COMFORT = {
             "end": "06:00",
             "days": [0, 1, 2, 3, 4, 5, 6],
             "mode": "off",
-            "frost_protection": 12.0,
+            "frost_protection": 10.0,
             "enabled": True,
         },
         {
@@ -140,7 +140,7 @@ def test_trajectory_marks_off_and_upcoming_comfort() -> None:
     # k=0..3 → 04:00, 04:30, 05:00, 05:30 off; k=4 → 06:00 comfort
     assert enabled[:4] == [False, False, False, False]
     assert enabled[4] is True
-    assert traj.frost_floors["Living Room"][0] == pytest.approx(12.0)
+    assert traj.frost_floors["Living Room"][0] == pytest.approx(10.0)
     assert traj.setpoints["Living Room"][4] == pytest.approx(21.0)
     assert traj.comfort_offsets["Living Room"][4] == pytest.approx(0.5)
 
@@ -161,7 +161,10 @@ def test_nmpc_bounds_relax_off_and_tighten_at_comfort() -> None:
     )
     ctrl = _room_ctrl()
     t_min, t_max = ctrl._comfort_bounds_fast(traj, 8)
-    assert t_min[0, 0] == pytest.approx(DEFAULT_FROST_PROTECTION)
+    frost = float(traj.frost_floors["Living Room"][0])
+    assert frost == pytest.approx(10.0)
+    assert frost != pytest.approx(DEFAULT_FROST_PROTECTION)
+    assert t_min[0, 0] == pytest.approx(frost)
     assert t_max[0, 0] == pytest.approx(OFF_PERIOD_TMAX)
     # Preheat must not sit inside frost ± 2 °C.
     assert t_max[0, 0] > 21.0
@@ -303,4 +306,27 @@ def test_disabled_room_stays_disabled_with_upcoming_comfort(tmp_path: Path) -> N
     runtime._schedule_now_local = lambda: datetime(2026, 9, 11, 4, 0).astimezone()
     ctx = runtime._schedule_control_context()
     assert "Living Heater" in ctx["disabled_sources"]
+
+
+def test_preview_passes_schedule_trajectory_on_nmpc_grid(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, _OFF_THEN_COMFORT)
+    runtime._schedule_now_local = lambda: datetime(2026, 9, 11, 4, 0).astimezone()
+    runtime._outdoor_temperature = lambda: 5.0  # type: ignore[method-assign]
+    captured: dict[str, object] = {}
+
+    def _fake_preview(*_args, **kwargs):
+        captured["traj"] = kwargs.get("control_trajectory")
+        return {"error": "skip_solve"}
+
+    runtime.control_engine.preview_tuning_forecast = _fake_preview  # type: ignore[method-assign]
+    result = runtime.preview_tuning_forecast({})
+    assert result == {"error": "skip_solve"}
+    traj = captured["traj"]
+    assert traj is not None
+    n_fast, dt_s = runtime._mpc_horizon_grid()
+    enabled = traj.enabled_steps["Living Room"]
+    assert enabled.shape[0] >= n_fast
+    assert dt_s == pytest.approx(900.0)
+    assert bool(enabled[0]) is False
+    assert bool(enabled[-1]) is True
 
