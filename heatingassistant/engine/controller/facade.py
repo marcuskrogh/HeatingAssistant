@@ -1050,6 +1050,41 @@ class HeatingMPCController:
                     t_max[n:, i] = t_max[n - 1, i]
         return t_min, t_max
 
+    def _blank_input_bound_seqs(
+        self, n_fast: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        u_min_abs, u_max_abs = self._control_system.u_bounds
+        u_min_seq = np.tile(
+            np.asarray(u_min_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+        )
+        u_max_seq = np.tile(
+            np.asarray(u_max_abs, dtype=float).reshape(1, -1), (n_fast, 1)
+        )
+        clamp_mask = np.zeros((n_fast, len(self._sources)), dtype=bool)
+        return u_min_seq, u_max_seq, clamp_mask
+
+    @staticmethod
+    def _pin_off_hold_column(
+        enabled: np.ndarray,
+        column: int,
+        n_fast: int,
+        u_min_seq: np.ndarray,
+        u_max_seq: np.ndarray,
+        clamp_mask: np.ndarray,
+    ) -> bool:
+        """Pin u=0 on off steps in one source column with no later comfort."""
+
+        held = False
+        en = np.asarray(enabled, dtype=bool).reshape(-1)
+        for k in range(min(n_fast, en.size)):
+            if clamp_mask[k, column] or not off_step_holds_heater_off(en, k):
+                continue
+            u_min_seq[k, column] = 0.0
+            u_max_seq[k, column] = 0.0
+            clamp_mask[k, column] = True
+            held = True
+        return held
+
     def _apply_off_period_u_hold(
         self,
         control_trajectory: Optional[Any],
@@ -1067,30 +1102,19 @@ class HeatingMPCController:
             return u_min_seq, u_max_seq, clamp_mask
         created = False
         if u_min_seq is None or u_max_seq is None or clamp_mask is None:
-            u_min_abs, u_max_abs = self._control_system.u_bounds
-            u_min_seq = np.tile(
-                np.asarray(u_min_abs, dtype=float).reshape(1, -1), (n_fast, 1)
-            )
-            u_max_seq = np.tile(
-                np.asarray(u_max_abs, dtype=float).reshape(1, -1), (n_fast, 1)
-            )
-            clamp_mask = np.zeros((n_fast, len(self._sources)), dtype=bool)
+            u_min_seq, u_max_seq, clamp_mask = self._blank_input_bound_seqs(n_fast)
             created = True
         held = False
         for j, src in enumerate(self._sources):
             en = enabled_map.get(src.room)
             if en is None:
                 continue
-            en = np.asarray(en, dtype=bool).reshape(-1)
-            for k in range(min(n_fast, en.size)):
-                if clamp_mask[k, j]:
-                    continue
-                if not off_step_holds_heater_off(en, k):
-                    continue
-                u_min_seq[k, j] = 0.0
-                u_max_seq[k, j] = 0.0
-                clamp_mask[k, j] = True
-                held = True
+            held = (
+                self._pin_off_hold_column(
+                    en, j, n_fast, u_min_seq, u_max_seq, clamp_mask
+                )
+                or held
+            )
         if created and not held:
             return None, None, None
         return u_min_seq, u_max_seq, clamp_mask
