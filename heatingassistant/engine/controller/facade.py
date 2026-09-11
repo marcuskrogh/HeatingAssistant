@@ -25,6 +25,7 @@ from mbc.estimation import (
 )
 
 from ..const import (
+    DEFAULT_FROST_PROTECTION,
     DEFAULT_NMPC_FAST_SUBSTEPS,
     DEFAULT_NMPC_HORIZON_H,
     DEFAULT_NMPC_PERIOD,
@@ -33,6 +34,7 @@ from ..const import (
     MPC_MODE_LINEAR,
     MPC_STATS_BUFFER_SIZE,
     NMPC_WATCHDOG_S,
+    OFF_PERIOD_TMAX,
     coerce_mpc_mode,
 )
 from ..heat_sources import HeatSource
@@ -1008,12 +1010,41 @@ class HeatingMPCController:
             t_max[:, i] = sp + off
         if control_trajectory is not None:
             for i, name in enumerate(room_list):
-                sps = np.asarray(control_trajectory.setpoints[name], dtype=float)
-                offs = np.asarray(control_trajectory.comfort_offsets[name], dtype=float)
-                n = min(n_fast, sps.shape[0], offs.shape[0])
-                t_min[:n, i] = sps[:n] - offs[:n]
-                t_max[:n, i] = sps[:n] + offs[:n]
-                if n < n_fast:
+                sps = np.asarray(
+                    control_trajectory.setpoints.get(name, np.array([])),
+                    dtype=float,
+                ).reshape(-1)
+                offs = np.asarray(
+                    control_trajectory.comfort_offsets.get(name, np.array([])),
+                    dtype=float,
+                ).reshape(-1)
+                enabled = np.asarray(
+                    getattr(control_trajectory, "enabled_steps", {}).get(
+                        name, np.array([])
+                    ),
+                    dtype=bool,
+                ).reshape(-1)
+                frosts = np.asarray(
+                    getattr(control_trajectory, "frost_floors", {}).get(
+                        name, np.array([])
+                    ),
+                    dtype=float,
+                ).reshape(-1)
+                n = min(n_fast, sps.shape[0], offs.shape[0]) if sps.size and offs.size else 0
+                for k in range(n):
+                    on = True if enabled.size == 0 or k >= enabled.size else bool(enabled[k])
+                    if on:
+                        t_min[k, i] = float(sps[k] - offs[k])
+                        t_max[k, i] = float(sps[k] + offs[k])
+                    else:
+                        frost = (
+                            float(frosts[k])
+                            if k < frosts.size
+                            else DEFAULT_FROST_PROTECTION
+                        )
+                        t_min[k, i] = frost
+                        t_max[k, i] = float(OFF_PERIOD_TMAX)
+                if 0 < n < n_fast:
                     t_min[n:, i] = t_min[n - 1, i]
                     t_max[n:, i] = t_max[n - 1, i]
         return t_min, t_max
@@ -1261,16 +1292,38 @@ class HeatingMPCController:
         self._mpc.x_ref = x_ref_abs
 
         if control_trajectory is not None:
-            x_ref_abs_seq = np.zeros((N, n_rooms), dtype=float)
-            offset_seq = np.zeros((N, n_rooms), dtype=float)
+            t_min, t_max = self._comfort_bounds_fast(control_trajectory, N)
+            x_ref_abs_seq = 0.5 * (t_min + t_max)
+            offset_seq = 0.5 * (t_max - t_min)
             q_scale_seq = np.ones((N, n_rooms), dtype=float)
             r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
             for i, name in enumerate(room_list):
-                x_ref_abs_seq[:, i] = control_trajectory.setpoints[name]
-                offset_seq[:, i] = control_trajectory.comfort_offsets[name]
-                q_scale_seq[:, i] = control_trajectory.q_scales[name]
+                q_raw = np.asarray(
+                    control_trajectory.q_scales.get(name, np.array([])),
+                    dtype=float,
+                ).reshape(-1)
+                if q_raw.size:
+                    m = min(N, q_raw.size)
+                    q_scale_seq[:m, i] = q_raw[:m]
+                    if m < N:
+                        q_scale_seq[m:, i] = q_scale_seq[m - 1, i]
+                enabled = np.asarray(
+                    control_trajectory.enabled_steps.get(name, np.array([])),
+                    dtype=bool,
+                ).reshape(-1)
+                for k in range(min(N, enabled.size)):
+                    if not bool(enabled[k]):
+                        q_scale_seq[k, i] = 0.0
             for j, src in enumerate(self._sources):
-                r_scale_seq[:, j] = control_trajectory.r_scales[src.room]
+                r_raw = np.asarray(
+                    control_trajectory.r_scales.get(src.room, np.array([])),
+                    dtype=float,
+                ).reshape(-1)
+                if r_raw.size:
+                    m = min(N, r_raw.size)
+                    r_scale_seq[:m, j] = r_raw[:m]
+                    if m < N:
+                        r_scale_seq[m:, j] = r_scale_seq[m - 1, j]
         else:
             x_ref_abs_seq = None
             offset_seq = None

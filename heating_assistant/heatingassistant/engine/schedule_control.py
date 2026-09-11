@@ -7,13 +7,13 @@ and MPC solves schedule-aware.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 
-from .const import DEFAULT_COMFORT_OFFSET, DEFAULT_SETPOINT
+from .const import DEFAULT_COMFORT_OFFSET, DEFAULT_FROST_PROTECTION, DEFAULT_SETPOINT
 from .schedule import (
     EffectiveControlParams,
     RoomSchedule,
@@ -37,6 +37,7 @@ class ControlTrajectory:
     q_scales: dict[str, np.ndarray]
     r_scales: dict[str, np.ndarray]
     enabled_steps: dict[str, np.ndarray]
+    frost_floors: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def schedule_from_payload(payload: Mapping[str, Any] | Sequence[Any] | None) -> RoomSchedule:
@@ -114,9 +115,9 @@ def compute_control_trajectory(
 ) -> ControlTrajectory:
     """Build per-step setpoints / comfort corridors for the MPC horizon.
 
-    Off periods carry forward the last comfort values (transparent reference)
-    while marking ``enabled_steps`` False so callers can zero actuation and
-    hide corridors on the plot.
+    Off periods carry forward the last comfort values (plot reference) and
+    mark ``enabled_steps`` False so callers hide corridors. Frost floors are
+    stored separately so the MPC can keep only a lower bound and preheat.
     """
 
     traj = ControlTrajectory(
@@ -125,6 +126,7 @@ def compute_control_trajectory(
         q_scales={},
         r_scales={},
         enabled_steps={},
+        frost_floors={},
     )
     n = max(0, int(n_steps))
     if n <= 0:
@@ -150,6 +152,7 @@ def compute_control_trajectory(
         qw_seq = np.empty(n, dtype=float)
         rw_seq = np.empty(n, dtype=float)
         enabled_seq = np.ones(n, dtype=bool)
+        frost_seq = np.full(n, DEFAULT_FROST_PROTECTION, dtype=float)
 
         current = current_effective.get(name)
         last_sp = current.setpoint if current is not None else base_sp
@@ -173,6 +176,14 @@ def compute_control_trajectory(
                     last_rw = params.energy_weight
                 else:
                     enabled_seq[k] = False
+                    period = schedule.active(t_k)
+                    if period is not None and period.is_off:
+                        frost = (
+                            period.frost_protection
+                            if period.frost_protection is not None
+                            else DEFAULT_FROST_PROTECTION
+                        )
+                        frost_seq[k] = float(frost)
             sp_seq[k] = last_sp
             off_seq[k] = last_off
             qw_seq[k] = last_qw
@@ -186,6 +197,7 @@ def compute_control_trajectory(
         traj.q_scales[name] = qw_seq
         traj.r_scales[name] = rw_seq
         traj.enabled_steps[name] = enabled_seq
+        traj.frost_floors[name] = frost_seq
 
     return traj
 

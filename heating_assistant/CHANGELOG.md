@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.23
+
+- Scheduled comfort and off periods now apply across the NMPC look-ahead, so
+  the controller can preheat before a comfort window instead of waiting until
+  the narrower band starts.
+
 # 2026.09.22
 
 - Controller Tuning planner cards use one even outline on all sides. The

@@ -10,11 +10,11 @@ room's *effective* setpoint and *enabled* flag.  Two modes are supported:
   tracks the new reference.  Use this for setback values such as a daytime
   "eco" period where you want a cooler-but-controlled room.
 
-* ``off`` – heat sources for the room are switched off for the duration of
-  the period.  An optional ``frost_protection`` floor re-enables heating if
-  the measured temperature drops below the configured value, so the room
-  cannot freeze.  Use this for sleep / away periods where you want the
-  heating source to genuinely stop running.
+* ``off`` – the comfort corridor is dropped for the duration of the period
+  (frost floor only).  The MPC may still heat if a later comfort period on
+  the horizon requires preheat.  An optional ``frost_protection`` floor
+  keeps the room from freezing.  Use this for sleep / away periods where
+  you do not require the narrow comfort band.
 
 Example
 -------

@@ -151,6 +151,7 @@ class PreviewMixin:
         ghi_now: float | None = None,
         price_forecast: list[float] | None = None,
         now: datetime | None = None,
+        control_trajectory: Any | None = None,
     ) -> dict[str, Any]:
         """Run a one-off MPC solve with proposed tuning parameters.
 
@@ -216,6 +217,7 @@ class PreviewMixin:
                 ghi_forecast=ghi_forecast,
                 ghi_now=ghi_now,
                 price_forecast=price_forecast,
+                control_trajectory=control_trajectory,
             )
         finally:
             for name, value in saved_comfort.items():
@@ -269,6 +271,7 @@ class PreviewMixin:
         ghi_forecast: list[float | None] | None,
         ghi_now: float | None,
         price_forecast: list[float] | None,
+        control_trajectory: Any | None = None,
     ) -> dict[str, Any]:
         try:
             if getattr(preview_ctrl, "mpc_mode", None) != const.MPC_MODE_LINEAR:
@@ -281,6 +284,7 @@ class PreviewMixin:
                     ghi_forecast=ghi_forecast,
                     ghi_now=ghi_now,
                     price_forecast=price_forecast,
+                    control_trajectory=control_trajectory,
                 )
                 preview_ctrl.apply_nmpc_result(plan)
             preview_ctrl.compute(
@@ -293,6 +297,7 @@ class PreviewMixin:
                 ghi_forecast=ghi_forecast,
                 ghi_now=ghi_now,
                 price_forecast=price_forecast,
+                control_trajectory=control_trajectory,
                 run_optimization=True,
             )
         except Exception as exc:

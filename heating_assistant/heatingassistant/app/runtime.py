@@ -1222,18 +1222,28 @@ class HeatingRuntime(
                 horizon=preview_horizon,
                 dt_s=preview_dt,
             )
+            # When previewing a global comfort_offset, hold that draft band flat
+            # (SWD-285) — skip schedule trajectory so rooms[] overrides win.
+            comfort_override = overrides.get(const.CONF_COMFORT_OFFSET)
+            trajectory = None
+            if comfort_override is None:
+                trajectory = self._build_control_trajectory(
+                    n_steps=max(preview_horizon, 1) + 1,
+                    dt_seconds=preview_dt,
+                )
+
             snapshot = self.control_engine.preview_tuning_forecast(
                 overrides,
                 self.room_temperatures,
                 outdoor_temp,
                 self._setpoints(),
+                control_trajectory=trajectory,
                 **disturbances,
             )
             if snapshot.get("error"):
                 return snapshot
 
             rooms = [dict(room) for room in self._rooms()]
-            comfort_override = overrides.get(const.CONF_COMFORT_OFFSET)
             if comfort_override is not None:
                 preview_comfort = float(comfort_override)
                 for room in rooms:
@@ -1245,15 +1255,6 @@ class HeatingRuntime(
             energy_price = self._coerce_number(self.tag_values.get(price_tag))
             if energy_price is None and price_tag != "energy_price":
                 energy_price = self._coerce_number(self.tag_values.get("energy_price"))
-
-            # When previewing a global comfort_offset, hold that draft band flat
-            # (SWD-285) — skip schedule trajectory so rooms[] overrides win.
-            trajectory = None
-            if comfort_override is None:
-                trajectory = self._build_control_trajectory(
-                    n_steps=max(preview_horizon, 1) + 1,
-                    dt_seconds=preview_dt,
-                )
 
             return build_app_forecast_payload(
                 rooms=rooms,
@@ -1877,16 +1878,27 @@ class HeatingRuntime(
             current_effective=effective,
         )
 
+    def _mpc_horizon_grid(self) -> tuple[int, float]:
+        """NMPC/linear sample count and ``dt`` for schedule trajectory alignment."""
+
+        try:
+            timing = self.control_engine._nmpc_timing(self.options)
+            return int(timing.n_fast), float(timing.dt_s)
+        except Exception:
+            return (
+                int(self.options.get("horizon", const.DEFAULT_HORIZON)),
+                float(self._derived_update_interval()),
+            )
+
     def _schedule_control_context(self) -> dict[str, Any]:
         """Build setpoints, comfort offsets, trajectory, and disabled sources."""
 
         now_local = self._schedule_now_local()
         now_utc = now_local.astimezone(timezone.utc)
         effective = self._resolve_effective_params(now_local=now_local)
-        dt = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
-        horizon = int(self.options.get("horizon", const.DEFAULT_HORIZON))
+        n_steps, dt = self._mpc_horizon_grid()
         trajectory = self._build_control_trajectory(
-            n_steps=max(horizon, 1),
+            n_steps=max(n_steps, 1),
             dt_seconds=dt,
             now_local=now_local,
             current_effective=effective,
@@ -1897,11 +1909,7 @@ class HeatingRuntime(
         comfort_offsets = {
             name: float(params.comfort_offset) for name, params in effective.items()
         }
-        disabled_rooms = {
-            name
-            for name, params in effective.items()
-            if not params.enabled
-        }
+        disabled_rooms: set[str] = set()
         for room in self._rooms():
             name = room.get("name")
             if isinstance(name, str) and name and not self._room_enabled(room):
