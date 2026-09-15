@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-548 | Task | [Iterate] NMPC schedule bounds must apply at the predicted sample time | In Progress | — | docs/agents/ITERATE-nmpc-bound-step.md | `/test SWD-548` |
-| SWD-549 | Sub-task | Apply schedule bounds at OCP state time (k+1) | In Progress | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
-| SWD-550 | Sub-task | Tests, CalVer, changelog, App sync for bound step align | In Progress | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
+| SWD-548 | Task | [Iterate] NMPC schedule bounds must apply at the predicted sample time | In Progress | — | docs/agents/ITERATE-nmpc-bound-step.md | `/test SWD-548` — https://github.com/marcuskrogh/HeatingAssistant/pull/684 |
+| SWD-549 | Sub-task | Apply schedule bounds at OCP state time (k+1) | Done | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
+| SWD-550 | Sub-task | Tests, CalVer, changelog, App sync for bound step align | Done | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |

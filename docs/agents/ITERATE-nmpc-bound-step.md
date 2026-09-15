@@ -32,6 +32,7 @@
 - Relates: [SWD-545](https://marcusknielsen.atlassian.net/browse/SWD-545)
 - Sub-tasks: [SWD-549](https://marcusknielsen.atlassian.net/browse/SWD-549), [SWD-550](https://marcusknielsen.atlassian.net/browse/SWD-550)
 - Branch: `swd-548-nmpc-bound-step`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/684
 
 ## Next
 `/test SWD-548` — Dedicated testing phase, then harden and code review
