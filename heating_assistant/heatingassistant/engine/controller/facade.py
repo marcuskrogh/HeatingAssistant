@@ -69,6 +69,11 @@ from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
 from .sde import HouseThermalSDE
 
+# Trajectory sample 0 is wall-clock now. OCP step k penalises air after one
+# dt (state at now+(k+1)·dt), so output bounds use sample k+1 — the same
+# instant the room plot already draws.
+_TRAJ_STATE_OFFSET = 1
+
 
 def _diag_np(n: int, v: float) -> np.ndarray:
     """Return an n×n diagonal numpy matrix with v on the diagonal."""
@@ -1014,21 +1019,30 @@ class HeatingMPCController:
         frosts: np.ndarray,
         n_fast: int,
     ) -> None:
-        n = min(n_fast, sps.shape[0], offs.shape[0]) if sps.size and offs.size else 0
-        for k in range(n):
-            on = True if enabled.size == 0 or k >= enabled.size else bool(enabled[k])
+        """Write per-step air bounds for one room.
+
+        Trajectory sample 0 is now. OCP step ``k`` constrains the air
+        state after one ``dt``, so this reads sample ``k+1``.
+        """
+        filled = 0
+        for k in range(n_fast):
+            src = k + _TRAJ_STATE_OFFSET
+            if src >= sps.shape[0] or src >= offs.shape[0]:
+                break
+            on = True if enabled.size == 0 or src >= enabled.size else bool(enabled[src])
             if on:
-                t_min[k, col] = float(sps[k] - offs[k])
-                t_max[k, col] = float(sps[k] + offs[k])
-                continue
-            frost = (
-                float(frosts[k]) if k < frosts.size else DEFAULT_FROST_PROTECTION
-            )
-            t_min[k, col] = frost
-            t_max[k, col] = float(OFF_PERIOD_TMAX)
-        if 0 < n < n_fast:
-            t_min[n:, col] = t_min[n - 1, col]
-            t_max[n:, col] = t_max[n - 1, col]
+                t_min[k, col] = float(sps[src] - offs[src])
+                t_max[k, col] = float(sps[src] + offs[src])
+            else:
+                frost = (
+                    float(frosts[src]) if src < frosts.size else DEFAULT_FROST_PROTECTION
+                )
+                t_min[k, col] = frost
+                t_max[k, col] = float(OFF_PERIOD_TMAX)
+            filled = k + 1
+        if 0 < filled < n_fast:
+            t_min[filled:, col] = t_min[filled - 1, col]
+            t_max[filled:, col] = t_max[filled - 1, col]
 
     def _comfort_bounds_fast(
         self,
@@ -1389,17 +1403,18 @@ class HeatingMPCController:
                 q_raw = self._traj_array(
                     control_trajectory, "q_scales", name, dtype=float
                 )
-                if q_raw.size:
-                    m = min(N, q_raw.size)
-                    q_scale_seq[:m, i] = q_raw[:m]
-                    if m < N:
-                        q_scale_seq[m:, i] = q_scale_seq[m - 1, i]
                 enabled = self._traj_array(
                     control_trajectory, "enabled_steps", name, dtype=bool
                 )
-                for k in range(min(N, enabled.size)):
-                    if not bool(enabled[k]):
-                        q_scale_seq[k, i] = 0.0
+                last_q = 1.0
+                for k in range(N):
+                    src = k + _TRAJ_STATE_OFFSET
+                    if q_raw.size and src < q_raw.size:
+                        last_q = float(q_raw[src])
+                    on = True if enabled.size == 0 or src >= enabled.size else bool(
+                        enabled[src]
+                    )
+                    q_scale_seq[k, i] = 0.0 if not on else last_q
             for j, src in enumerate(self._sources):
                 r_raw = self._traj_array(
                     control_trajectory, "r_scales", src.room, dtype=float

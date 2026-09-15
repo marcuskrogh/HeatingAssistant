@@ -156,20 +156,22 @@ def test_nmpc_bounds_relax_off_and_tighten_at_comfort() -> None:
         default_comfort_offsets={"Living Room": 2.0},
         room_enabled={"Living Room": True},
         now_local=now,
-        n_steps=8,
+        n_steps=9,
         dt_seconds=1800.0,
     )
     ctrl = _room_ctrl()
     t_min, t_max = ctrl._comfort_bounds_fast(traj, 8)
-    frost = float(traj.frost_floors["Living Room"][0])
+    frost = float(traj.frost_floors["Living Room"][1])
     assert frost == pytest.approx(10.0)
     assert frost != pytest.approx(DEFAULT_FROST_PROTECTION)
     assert t_min[0, 0] == pytest.approx(frost)
     assert t_max[0, 0] == pytest.approx(OFF_PERIOD_TMAX)
     # Preheat must not sit inside frost ± 2 °C.
     assert t_max[0, 0] > 21.0
-    assert t_min[4, 0] == pytest.approx(20.5)
-    assert t_max[4, 0] == pytest.approx(21.5)
+    # OCP k=3 is air at 06:00 (now+4·dt) — already the morning corridor.
+    assert t_min[2, 0] == pytest.approx(frost)
+    assert t_min[3, 0] == pytest.approx(20.5)
+    assert t_max[3, 0] == pytest.approx(21.5)
 
 
 def test_off_step_holds_heater_until_upcoming_comfort() -> None:
@@ -184,6 +186,30 @@ def test_off_step_holds_heater_until_upcoming_comfort() -> None:
     assert schedule_off_zeros_live_actuation(all_off, currently_on=True) is False
 
 
+def test_ocp_bounds_already_tight_on_the_sample_that_lands_on_the_change() -> None:
+    """SWD-548: corridor at the change time, not one sample later."""
+
+    now = datetime(2026, 9, 11, 4, 0)
+    rooms = [{"name": "Living Room", "setpoint": 21.0, "comfort_offset": 2.0}]
+    traj = compute_control_trajectory(
+        rooms=rooms,
+        schedules_by_slug={"living_room": _OFF_THEN_COMFORT},
+        room_slug_fn=room_slug,
+        base_setpoints={"Living Room": 21.0},
+        default_comfort_offsets={"Living Room": 2.0},
+        room_enabled={"Living Room": True},
+        now_local=now,
+        n_steps=9,
+        dt_seconds=1800.0,
+    )
+    ctrl = _room_ctrl()
+    t_min, t_max = ctrl._comfort_bounds_fast(traj, 8)
+    # Plot / OCP sample at 06:00 is k=3. Using k=4 would be the old lag.
+    assert t_min[3, 0] == pytest.approx(20.5)
+    assert t_max[3, 0] == pytest.approx(21.5)
+    assert t_min[4, 0] == pytest.approx(20.5)
+
+
 def test_comfort_to_comfort_bounds_shift_before_the_change() -> None:
     now = datetime(2026, 9, 11, 15, 0)
     rooms = [{"name": "Living Room", "setpoint": 21.0, "comfort_offset": 2.0}]
@@ -195,16 +221,17 @@ def test_comfort_to_comfort_bounds_shift_before_the_change() -> None:
         default_comfort_offsets={"Living Room": 2.0},
         room_enabled={"Living Room": True},
         now_local=now,
-        n_steps=6,
+        n_steps=7,
         dt_seconds=1800.0,
     )
     ctrl = _room_ctrl()
     t_min, t_max = ctrl._comfort_bounds_fast(traj, 6)
     assert bool(traj.enabled_steps["Living Room"][0]) is True
+    # OCP k=0 is air at 15:30 (still eco); k=1 is air at 16:00 (evening).
     assert t_min[0, 0] == pytest.approx(17.0)
     assert t_max[0, 0] == pytest.approx(19.0)
-    assert t_min[2, 0] == pytest.approx(20.5)
-    assert t_max[2, 0] == pytest.approx(21.5)
+    assert t_min[1, 0] == pytest.approx(20.5)
+    assert t_max[1, 0] == pytest.approx(21.5)
 
 
 def _runtime(tmp_path: Path, schedule: dict, *, horizon: int = 16) -> HeatingRuntime:
@@ -244,7 +271,7 @@ def test_schedule_off_does_not_disable_heaters(tmp_path: Path) -> None:
     ctx = runtime._schedule_control_context()
     assert "Living Heater" not in ctx["disabled_sources"]
     n_steps, dt = runtime._mpc_horizon_grid()
-    assert n_steps == ctx["trajectory"].enabled_steps["Living Room"].shape[0]
+    assert ctx["trajectory"].enabled_steps["Living Room"].shape[0] == n_steps + 1
     assert dt == pytest.approx(900.0)
     enabled = ctx["trajectory"].enabled_steps["Living Room"]
     assert bool(enabled[0]) is False

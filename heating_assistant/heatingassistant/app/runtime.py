@@ -1904,7 +1904,7 @@ class HeatingRuntime(
         effective = self._resolve_effective_params(now_local=now_local)
         n_steps, dt = self._mpc_horizon_grid()
         trajectory = self._build_control_trajectory(
-            n_steps=max(n_steps, 1),
+            n_steps=max(n_steps, 1) + 1,
             dt_seconds=dt,
             now_local=now_local,
             current_effective=effective,
