@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Progress | — | docs/agents/PLAN-room-wall-plot.md | `/review-fix SWD-554` |
+| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | `/review-fix SWD-554` — https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
 | SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |

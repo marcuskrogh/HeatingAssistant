@@ -50,7 +50,7 @@
 - Sub-tasks: [SWD-555](https://marcusknielsen.atlassian.net/browse/SWD-555), [SWD-556](https://marcusknielsen.atlassian.net/browse/SWD-556)
 - Relates: [SWD-548](https://marcusknielsen.atlassian.net/browse/SWD-548)
 - Branch: `swd-554-room-wall-plot`
-- PR: (open with first commit)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/686
 - Classification: tweak
 - Workflow: delta-fast
 
