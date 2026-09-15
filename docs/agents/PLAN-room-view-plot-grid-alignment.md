@@ -75,7 +75,7 @@
 - Task: SWD-551
 - Sub-tasks: SWD-552, SWD-553
 - Branch: cursor/swd-551-room-plot-grid-4b29
-- PR: (draft; filled after open)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/685
 - Classification: bug
 - Workflow: fix-fast
 
