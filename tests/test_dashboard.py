@@ -1025,6 +1025,7 @@ def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spe
 
     # Temperature datasets are the primary fix (CON-60).
     assert "'Filtered'" in source and "'Measured'" in source
+    assert "replaceChartDataset(ds, 'Wall Forecast', wallForecast)" in source
     assert "room.entities['temperature_filtered']" in source
     assert "room.entities['temperature_wall']" in source
     assert "room.entities['temperature_measured']" in source

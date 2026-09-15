@@ -55,4 +55,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-554` — Focused review then ship
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686

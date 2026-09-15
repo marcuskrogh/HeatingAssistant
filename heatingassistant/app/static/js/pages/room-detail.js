@@ -633,6 +633,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     const tempForecast = forecastToDataPoints(forecastData, 'temperature');
     const tempLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
+    const wallForecast = forecastToDataPoints(forecastData, 'wall_temperature');
     const setpointData = forecastToEnabledPoints(forecastData, 'setpoint');
     const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
     const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
@@ -644,6 +645,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
       const now = Date.now();
 
       replaceChartDataset(ds, 'Forecast', tempForecast);
+      replaceChartDataset(ds, 'Wall Forecast', wallForecast);
       if (tempLinearised.length > 0) replaceChartDataset(ds, 'Linearised', tempLinearised);
 
       const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');

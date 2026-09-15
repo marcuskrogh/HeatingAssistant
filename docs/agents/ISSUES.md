@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | `/review-fix SWD-554` — https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
+| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
 | SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |
@@ -268,6 +268,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-15 — `/review-fix` SWD-554 CLEAN (focused): live Wall Forecast refresh. Next closeout merge https://github.com/marcuskrogh/HeatingAssistant/pull/686.
 - 2026-09-15 — `/define`+`/implement` SWD-554: room temperature plot shows EKF wall history + plan-roll forecast (gray). Relates SWD-548. Next `/review-fix SWD-554`.
 - 2026-09-11 — `/implement` SWD-545: off-period NMPC bounds are frost-floor only; schedule-off no longer zeros heaters; trajectory uses NMPC grid. Next `/test SWD-545`.
 - 2026-09-11 — `/define` SWD-545: NMPC horizon ignores scheduled comfort/off for preheat; Sub-tasks SWD-546/547; branch `cursor/nmpc-schedule-horizon-605a`. Next `/implement SWD-545`.
