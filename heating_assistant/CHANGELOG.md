@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.24
+
+- Room view Temperature, Heating Power & Price, and Disturbances plots share
+  one time axis. Vertical grid lines and the now marker line up on desktop
+  and on a phone-width screen.
+
 # 2026.09.23
 
 - Scheduled comfort and off periods apply across the NMPC look-ahead. Off

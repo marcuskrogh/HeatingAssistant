@@ -80,4 +80,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-551` — Shape stamp for the shared plot-box seam, then implement on the same branch/PR
+`/implement SWD-551` — Build to ARCHITECTURE.md (same branch)

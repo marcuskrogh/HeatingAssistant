@@ -1,4 +1,5 @@
 import { CHART_HEIGHT_SECONDARY } from './chart-theme.js?v=157';
+import { alignPlotBoxPlugin } from './chart-align.js?v=158';
 
 /** Dataset labels used only for shaded regions — hidden from legend and tooltip. */
 export const SHADING_DATASET_LABELS = new Set([
@@ -148,7 +149,7 @@ export class TimeSeriesChart {
       type: 'line',
       data: { datasets },
       options,
-      plugins: [experimentBandPlugin(), nowLinePlugin()],
+      plugins: [experimentBandPlugin(), nowLinePlugin(), alignPlotBoxPlugin()],
     });
     // Re-attach any experiment bands set before the chart was rendered.
     this._chart.$experimentBands = this._bands;
@@ -263,6 +264,10 @@ export class TimeSeriesChart {
 
     this._applyAxisFormatting(opts);
     applyPluginFilters(opts);
+
+    if (this._config.alignGroup) {
+      opts.plugins.alignPlotBox = { group: this._config.alignGroup };
+    }
 
     if (isMobileChartViewport()) {
       opts.plugins.tooltip.enabled = false;

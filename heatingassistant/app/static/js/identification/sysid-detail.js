@@ -1,4 +1,4 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=157';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=158';
 import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=124';
 import { createCollapsible } from '../components/collapsible.js?v=124';

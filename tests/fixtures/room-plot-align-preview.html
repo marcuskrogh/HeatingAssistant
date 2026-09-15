@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Room plot grid alignment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; background: #1a1d23; color: #e8eaed; font-family: system-ui, sans-serif; }
+    .wrap { padding: 16px; max-width: 1100px; margin: 0 auto; }
+    .grid-charts { display: flex; flex-direction: column; gap: 16px; }
+    .status { font: 12px/1.4 ui-monospace, monospace; color: #9aa0a8; margin: 8px 0 16px; }
+    .status.ok { color: #00d4aa; }
+    .status.fail { color: #e57373; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Room plot grid alignment</h1>
+    <p class="status" id="status">loading…</p>
+    <div class="grid-charts">
+      <div id="temp"></div>
+      <div id="power"></div>
+      <div id="disturb"></div>
+    </div>
+  </div>
+  <script src="/heatingassistant/app/static/vendor/chart.min.js"></script>
+  <script src="/heatingassistant/app/static/vendor/chartjs-adapter-date-fns.min.js"></script>
+  <script type="module">
+    import { TimeSeriesChart, makeDataset } from '/heatingassistant/app/static/js/components/time-series-chart.js?v=158';
+
+    const now = Date.now();
+    const hour = 3600 * 1000;
+    const xs = [];
+    for (let i = -12; i <= 36; i++) xs.push(now + i * hour);
+
+    function series(offset, scale) {
+      return xs.map((x, i) => ({ x, y: offset + Math.sin(i / 4) * scale }));
+    }
+
+    const temp = new TimeSeriesChart(document.getElementById('temp'), {
+      title: 'TEMPERATURE', yLabel: '°C', height: 240, alignGroup: 'room-view',
+    });
+    const power = new TimeSeriesChart(document.getElementById('power'), {
+      title: 'HEATING POWER & PRICE', yLabel: 'kW', y2: true, y2Label: 'Price',
+      height: 200, alignGroup: 'room-view',
+    });
+    const disturb = new TimeSeriesChart(document.getElementById('disturb'), {
+      title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'kW',
+      height: 200, alignGroup: 'room-view',
+    });
+
+    await temp.render([
+      makeDataset('Filtered', series(24, 2), '#4fc3f7'),
+      makeDataset('Measured', series(23.5, 1.5), '#e57373'),
+    ], { yMin: 20, yMax: 28 });
+    await power.render([
+      makeDataset('Measured Power', series(2, 3), '#ffb74d'),
+      makeDataset('Price', series(1.2, 0.4), '#81c784', { yAxisID: 'y2' }),
+    ], { yMin: -4, yMax: 8, y2Min: 0, y2Max: 4 });
+    await disturb.render([
+      makeDataset('Outdoor Temperature', series(12, 8), '#90a4ae'),
+      makeDataset('Solar Gain', series(0.8, 1.2), '#ffb74d', { yAxisID: 'y2' }),
+    ], { yMin: 8, yMax: 24, y2Min: 0, y2Max: 3 });
+
+    function boxes() {
+      return [temp, power, disturb].map((c) => c._chart.chartArea);
+    }
+
+    function aligned() {
+      const [a, b, c] = boxes();
+      return Math.abs(a.left - b.left) < 1
+        && Math.abs(b.left - c.left) < 1
+        && Math.abs(a.right - b.right) < 1
+        && Math.abs(b.right - c.right) < 1;
+    }
+
+    const status = document.getElementById('status');
+    function paint() {
+      const [a, b, c] = boxes();
+      const ok = aligned();
+      status.className = 'status ' + (ok ? 'ok' : 'fail');
+      status.textContent = ok
+        ? `aligned left=${a.left.toFixed(1)} right=${a.right.toFixed(1)} viewport=${window.innerWidth}`
+        : `misaligned T=${a.left.toFixed(1)}/${a.right.toFixed(1)} P=${b.left.toFixed(1)}/${b.right.toFixed(1)} D=${c.left.toFixed(1)}/${c.right.toFixed(1)}`;
+      window.__plotAlign = { ok, boxes: boxes().map((box) => ({ left: box.left, right: box.right })) };
+    }
+    paint();
+    window.addEventListener('resize', () => {
+      requestAnimationFrame(() => requestAnimationFrame(paint));
+    });
+  </script>
+</body>
+</html>
