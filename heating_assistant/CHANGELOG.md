@@ -9,6 +9,9 @@ must be the exact calendar version on its own line.
 - Room temperature plots show the estimated wall/mass temperature as a
   transparent gray line (history and forecast). There is no wall
   measurement — only the filter and the planned roll.
+- Room view Temperature, Heating Power & Price, and Disturbances plots share
+  one time axis. Vertical grid lines and the now marker line up on desktop
+  and on a phone-width screen.
 
 # 2026.09.23
 

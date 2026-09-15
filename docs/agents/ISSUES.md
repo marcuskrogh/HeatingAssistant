@@ -7,6 +7,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
 | SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
+| SWD-551 | Task | [Bug] Align room view plot vertical grids and NOW line | In Review | — | docs/agents/PLAN-room-view-plot-grid-alignment.md | `/ship SWD-551` — https://github.com/marcuskrogh/HeatingAssistant/pull/685 |
+| SWD-552 | Sub-task | Share plot-box time axis across room view charts | To Do | SWD-551 | docs/agents/PLAN-room-view-plot-grid-alignment.md | — |
+| SWD-553 | Sub-task | Tests, CalVer, changelog, App sync, browser verify | To Do | SWD-551 | docs/agents/PLAN-room-view-plot-grid-alignment.md | — |
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
@@ -270,6 +273,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 ## Log
 - 2026-09-15 — `/review-fix` SWD-554 CLEAN (focused): live Wall Forecast refresh. Next closeout merge https://github.com/marcuskrogh/HeatingAssistant/pull/686.
 - 2026-09-15 — `/define`+`/implement` SWD-554: room temperature plot shows EKF wall history + plan-roll forecast (gray). Relates SWD-548. Next `/review-fix SWD-554`.
+- 2026-09-15 — `/review` SWD-551 CLEAN (focused, sequential). COMMENT on PR #685. Browser: aligned at 1296px and 503px. Next `/ship SWD-551`.
+- 2026-09-15 — `/restructure` SWD-551: no leftover catalog breach on `chart-align.js` / TimeSeriesChart. Next `/review SWD-551`.
+- 2026-09-15 — `/test` SWD-551: spec lock `panel_chart_align.harness.mjs`; panel syntax 58 files; CalVer tests 21 passed (`--noconftest`); working surface: room-plot-align-preview.html. Next `/restructure SWD-551`.
+- 2026-09-15 — `/implement` SWD-551: shared plot box + time domain; room-view `alignGroup`. Next `/test SWD-551`.
+- 2026-09-15 — `/architect` SWD-551: shape stamp `docs/agents/ARCHITECTURE-room-view-plot-grid-alignment.md` — chart-align.js + TimeSeriesChart `alignGroup`. Next `/implement SWD-551`.
+- 2026-09-15 — `/define` SWD-551: room view time grids and NOW do not share a plot box (y vs y2 padding). PLAN `docs/agents/PLAN-room-view-plot-grid-alignment.md` (bug / fix-fast). Sub-tasks SWD-552–553. Branch `cursor/swd-551-room-plot-grid-4b29`. Draft PR https://github.com/marcuskrogh/HeatingAssistant/pull/685. Next `/architect SWD-551`.
 - 2026-09-11 — `/implement` SWD-545: off-period NMPC bounds are frost-floor only; schedule-off no longer zeros heaters; trajectory uses NMPC grid. Next `/test SWD-545`.
 - 2026-09-11 — `/define` SWD-545: NMPC horizon ignores scheduled comfort/off for preheat; Sub-tasks SWD-546/547; branch `cursor/nmpc-schedule-horizon-605a`. Next `/implement SWD-545`.
 - 2026-09-10 — `/ship` SWD-539 via PR #680 (`7c7ef1e9`): even 1px planner-card frames; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.22`. Next: Done.

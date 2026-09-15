@@ -1,4 +1,4 @@
-import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=157';
+import { TimeSeriesChart, forecastToDataPoints, forecastToEnabledPoints } from '../components/time-series-chart.js?v=158';
 import { CHART_HEIGHT_PRIMARY, CHART_HEIGHT_SECONDARY } from '../components/chart-theme.js?v=157';
 import { createGauge, updateGauge } from '../components/gauge.js?v=127';
 import { createClimateCard } from '../components/climate-card.js?v=124';
@@ -428,6 +428,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     title: 'TEMPERATURE',
     yLabel: '\u00b0C',
     height: CHART_HEIGHT_PRIMARY,
+    alignGroup: 'room-view',
   });
 
   const powerChart = new TimeSeriesChart(powerChartEl, {
@@ -438,6 +439,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     y2: true,
     y2Label: 'Price',
     height: CHART_HEIGHT_SECONDARY,
+    alignGroup: 'room-view',
   });
 
   const disturbChart = new TimeSeriesChart(disturbChartEl, {
@@ -448,6 +450,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     y2TickFormat: POWER_KW_TICK,
     y2ValueFormat: formatPowerKw,
     height: CHART_HEIGHT_SECONDARY,
+    alignGroup: 'room-view',
   });
 
   // Resolve experiments now that the charts exist (the band overlay needs them);
