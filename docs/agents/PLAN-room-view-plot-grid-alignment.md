@@ -80,4 +80,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-551` — Build to ARCHITECTURE.md (same branch)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/685
