@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.24
+
+- Room temperature plots show the estimated wall/mass temperature as a
+  transparent gray line (history and forecast). There is no wall
+  measurement — only the filter and the planned roll.
+
 # 2026.09.23
 
 - Scheduled comfort and off periods apply across the NMPC look-ahead. Off

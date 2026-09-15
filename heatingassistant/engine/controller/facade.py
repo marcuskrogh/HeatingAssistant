@@ -46,7 +46,7 @@ from ..nmpc_ocp import (
     evaluate_zero_heat_cost,
     mean_price_slow,
     plan_from_solve,
-    roll_fast_air_path,
+    roll_fast_thermal_path,
     shift_slow_plan,
     solve_mean_ocp,
 )
@@ -369,6 +369,7 @@ class HeatingMPCController:
 
         # Visualisation data (populated after each compute())
         self._predictions: List[Dict[str, float]] = []
+        self._wall_predictions: List[Dict[str, float]] = []
         self._linearised_predictions: List[Dict[str, float]] = []
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
@@ -566,6 +567,11 @@ class HeatingMPCController:
     def predictions(self) -> List[Dict[str, float]]:
         """Latest predicted temperature trajectory [{room: degC}, ...]."""
         return self._predictions
+
+    @property
+    def wall_predictions(self) -> List[Dict[str, float]]:
+        """Latest predicted wall/mass-node trajectory [{room: degC}, ...]."""
+        return self._wall_predictions
 
     @property
     def linearised_predictions(self) -> List[Dict[str, float]]:
@@ -965,6 +971,9 @@ class HeatingMPCController:
         air = self._forecast_T(n)
         if air is not None:
             self._predictions = self._predictions_from_air(air, room_list, n_rooms)
+            self._fill_wall_predictions(
+                U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
+            )
         else:
             self._predictions = self._compute_nonlinear_predictions(
                 U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
@@ -1657,6 +1666,7 @@ class HeatingMPCController:
             self._mpc.estimate_only(y, d, p, 0.0)
             self._last_innovation = self._ekf.last_innovation
             self._predictions = []
+            self._wall_predictions = []
             self._linearised_predictions = []
             self._heating_schedule = []
             # Report each source's current commanded fraction; the coordinator
@@ -2006,6 +2016,7 @@ class HeatingMPCController:
         if U.ndim == 1:
             U = U.reshape(-1, max(int(self._system.nu), 1))
         if U.shape[0] == 0 or N == 0:
+            self._wall_predictions = []
             return []
         if U.shape[0] < N:
             U = np.vstack([U, np.tile(U[-1:], (N - U.shape[0], 1))])
@@ -2024,7 +2035,7 @@ class HeatingMPCController:
                 finite = [float(w) for w in wind_seq if np.isfinite(w)]
                 if finite:
                     plant.set_wind_speed(float(np.mean(finite)))
-            air = roll_fast_air_path(
+            air, wall = roll_fast_thermal_path(
                 plant,
                 self._ekf.x_hat,
                 U,
@@ -2035,4 +2046,19 @@ class HeatingMPCController:
             )
         finally:
             plant.set_wind_speed(wind_restore)
+        self._wall_predictions = self._predictions_from_air(wall, room_list, n_rooms)
         return self._predictions_from_air(air, room_list, n_rooms)
+
+    def _fill_wall_predictions(
+        self,
+        U_abs: np.ndarray,
+        outdoor_seq: List[float],
+        solar_seq: List[Dict[str, float]],
+        room_list: List[str],
+        n_rooms: int,
+        wind_seq: Optional[List[float]] = None,
+    ) -> None:
+        """Open-loop wall path under leftover U* from the current EKF mean."""
+        self._compute_nonlinear_predictions(
+            U_abs, outdoor_seq, solar_seq, room_list, n_rooms, wind_seq=wind_seq,
+        )

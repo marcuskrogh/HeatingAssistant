@@ -110,6 +110,43 @@ def step_hold(
     return implicit_euler_substeps(rhs, jacx, x, dt_s, n_int)
 
 
+def roll_fast_thermal_path(
+    sde: Any,
+    x0: np.ndarray,
+    U_fast: np.ndarray,
+    d_fast: Sequence[np.ndarray],
+    *,
+    dt_s: float,
+    n_int: int,
+    n_rooms: int,
+    p: Optional[np.ndarray] = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Open-loop air and wall paths on the fast grid (same integrator as MeanOcp)."""
+
+    p_vec = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+    U = np.asarray(U_fast, dtype=float)
+    if U.ndim == 1:
+        U = U.reshape(-1, int(sde.nu))
+    d_list = list(d_fast)
+    if not d_list:
+        raise ValueError("d_fast must contain at least one disturbance")
+    n = int(U.shape[0])
+    n_air = int(n_rooms)
+    x = np.asarray(x0, dtype=float).copy()
+    air = np.zeros((n, n_air), dtype=float)
+    wall = np.zeros((n, n_air), dtype=float)
+    last_d = d_list[-1]
+    for k in range(n):
+        d_k = d_list[k] if k < len(d_list) else last_d
+        x = step_hold(sde, x, U[k], d_k, p_vec, dt_s, n_int)
+        air[k] = x[:n_air]
+        if x.size >= 2 * n_air:
+            wall[k] = x[n_air : 2 * n_air]
+        else:
+            wall[k] = air[k]
+    return air, wall
+
+
 def roll_fast_air_path(
     sde: Any,
     x0: np.ndarray,
@@ -123,21 +160,16 @@ def roll_fast_air_path(
 ) -> np.ndarray:
     """Open-loop room temperatures on the fast grid (same integrator as MeanOcp)."""
 
-    p_vec = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
-    U = np.asarray(U_fast, dtype=float)
-    if U.ndim == 1:
-        U = U.reshape(-1, int(sde.nu))
-    d_list = list(d_fast)
-    if not d_list:
-        raise ValueError("d_fast must contain at least one disturbance")
-    n = int(U.shape[0])
-    x = np.asarray(x0, dtype=float).copy()
-    air = np.zeros((n, n_rooms), dtype=float)
-    last_d = d_list[-1]
-    for k in range(n):
-        d_k = d_list[k] if k < len(d_list) else last_d
-        x = step_hold(sde, x, U[k], d_k, p_vec, dt_s, n_int)
-        air[k] = x[:n_rooms]
+    air, _wall = roll_fast_thermal_path(
+        sde,
+        x0,
+        U_fast,
+        d_fast,
+        dt_s=dt_s,
+        n_int=n_int,
+        n_rooms=n_rooms,
+        p=p,
+    )
     return air
 
 

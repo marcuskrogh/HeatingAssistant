@@ -13,6 +13,7 @@ const SYSTEM_METRICS = [
 const ROOM_METRICS = [
   '_temperature_measured',
   '_temperature_filtered',
+  '_temperature_wall',
   '_temperature_forecast',
   '_temperature_offset',
   '_internal_gain_estimated',

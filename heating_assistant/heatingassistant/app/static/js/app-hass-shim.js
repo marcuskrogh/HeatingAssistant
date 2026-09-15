@@ -128,6 +128,11 @@
           r_aw_fraction: coerceNumber(room.r_aw_fraction) ?? 0.05,
         },
       );
+      states[`sensor.heating_assistant_${slug}_temperature_wall`] = entityState(
+        `sensor.heating_assistant_${slug}_temperature_wall`,
+        temperature ?? 'unknown',
+        { room: name, unit_of_measurement: '°C' },
+      );
       states[`sensor.heating_assistant_${slug}_setpoint`] = entityState(
         `sensor.heating_assistant_${slug}_setpoint`,
         setpoint,

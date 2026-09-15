@@ -45,6 +45,18 @@ _PREVIEW_WEIGHT_DEFAULTS: dict[str, float] = {
 }
 
 
+def _float_room_map(raw: Any) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(raw, Mapping):
+        return out
+    for key, value in raw.items():
+        try:
+            out[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _snapshot_from_controller(
     controller: Any,
     *,
@@ -54,14 +66,8 @@ def _snapshot_from_controller(
 ) -> dict[str, Any]:
     """Build a forecast snapshot dict from a one-off controller solve."""
 
-    filtered: dict[str, float] = {}
-    raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
-    if isinstance(raw_filtered, Mapping):
-        for key, value in raw_filtered.items():
-            try:
-                filtered[str(key)] = float(value)
-            except (TypeError, ValueError):
-                continue
+    filtered = _float_room_map(getattr(controller, "filtered_temperatures", None))
+    walls = _float_room_map(getattr(controller, "wall_temperatures", None))
     return {
         "mode": "mpc",
         "compute_ts": compute_ts or datetime.now(timezone.utc),
@@ -69,6 +75,9 @@ def _snapshot_from_controller(
         "linearised_predictions": [
             dict(item)
             for item in list(getattr(controller, "linearised_predictions", []) or [])
+        ],
+        "wall_predictions": [
+            dict(item) for item in list(getattr(controller, "wall_predictions", []) or [])
         ],
         "heating_schedule": [
             dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
@@ -83,6 +92,7 @@ def _snapshot_from_controller(
             float(value) for value in list(getattr(controller, "price_forecast", []) or [])
         ],
         "filtered_temperatures": filtered,
+        "wall_temperatures": walls,
         "dt": float(dt),
         "horizon": int(horizon),
     }
