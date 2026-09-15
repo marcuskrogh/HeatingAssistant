@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.24
+
+- Comfort schedule changes apply at the predicted sample time, not one
+  sample later. Preheat and precool start in time for the new band
+  instead of waiting until after the first violation.
+
 # 2026.09.23
 
 - Scheduled comfort and off periods apply across the NMPC look-ahead. Off

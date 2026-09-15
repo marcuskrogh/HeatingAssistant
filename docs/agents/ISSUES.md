@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-548 | Task | [Iterate] NMPC schedule bounds must apply at the predicted sample time | In Progress | — | docs/agents/ITERATE-nmpc-bound-step.md | `/test SWD-548` |
+| SWD-549 | Sub-task | Apply schedule bounds at OCP state time (k+1) | In Progress | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
+| SWD-550 | Sub-task | Tests, CalVer, changelog, App sync for bound step align | In Progress | SWD-548 | docs/agents/ITERATE-nmpc-bound-step.md | — |
 | SWD-545 | Task | [Bug] NMPC horizon must use scheduled comfort/off bounds for preheat | Done | — | docs/agents/PLAN-nmpc-schedule-horizon.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/683 (`75cd35f4`) |
 | SWD-546 | Sub-task | Pass schedule comfort/off bounds into NMPC horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
 | SWD-547 | Sub-task | Tests, CalVer, changelog, App sync for NMPC schedule horizon | Done | SWD-545 | docs/agents/PLAN-nmpc-schedule-horizon.md | — |
@@ -265,6 +268,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-15 — `/iterate` SWD-548 from SWD-545: OCP bounds one sample late vs plot/comfort change; Relates SWD-545; Sub-tasks SWD-549–550; branch `swd-548-nmpc-bound-step`. Next `/test SWD-548`.
 - 2026-09-11 — `/implement` SWD-545: off-period NMPC bounds are frost-floor only; schedule-off no longer zeros heaters; trajectory uses NMPC grid. Next `/test SWD-545`.
 - 2026-09-11 — `/define` SWD-545: NMPC horizon ignores scheduled comfort/off for preheat; Sub-tasks SWD-546/547; branch `cursor/nmpc-schedule-horizon-605a`. Next `/implement SWD-545`.
 - 2026-09-10 — `/ship` SWD-539 via PR #680 (`7c7ef1e9`): even 1px planner-card frames; review CLEAN (focused); changelog `heating_assistant/CHANGELOG.md` `# 2026.09.22`. Next: Done.
