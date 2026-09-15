@@ -9,7 +9,7 @@ import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=140';
+} from '../charts/mpc-preview-charts.js?v=158';
 import {
   updateControllerTuning,
   updateEstimationParams,
@@ -650,6 +650,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       : Date.now();
 
     const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
+    const wallForecast = forecastToDataPoints(forecastData, 'wall_temperature');
     const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
     const setpointForecast = forecastToEnabledPoints(forecastData, 'setpoint');
     const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');
@@ -667,7 +668,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       [], constraintUpperForecast,
       [], constraintLowerForecast,
       null,
-      previewChartOpts,
+      { ...previewChartOpts, wallForecast },
     );
     buildPowerChart(
       previewCharts.power,

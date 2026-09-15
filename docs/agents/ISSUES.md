@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
+| SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
+| SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-551 | Task | [Bug] Align room view plot vertical grids and NOW line | Done | — | docs/agents/PLAN-room-view-plot-grid-alignment.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/685 (`5a0f9048`) |
 | SWD-552 | Sub-task | Share plot-box time axis across room view charts | Done | SWD-551 | docs/agents/PLAN-room-view-plot-grid-alignment.md | — |
 | SWD-553 | Sub-task | Tests, CalVer, changelog, App sync, browser verify | Done | SWD-551 | docs/agents/PLAN-room-view-plot-grid-alignment.md | — |
@@ -268,6 +271,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-15 — `/review-fix` SWD-554 CLEAN (focused): live Wall Forecast refresh. Next closeout merge https://github.com/marcuskrogh/HeatingAssistant/pull/686.
+- 2026-09-15 — `/define`+`/implement` SWD-554: room temperature plot shows EKF wall history + plan-roll forecast (gray). Relates SWD-548. Next `/review-fix SWD-554`.
 - 2026-09-15 — `/ship` SWD-551 via PR #685 (`5a0f9048`): room plots share one time-axis plot box; review CLEAN (focused); changelog `# 2026.09.24`. Next: Done.
 - 2026-09-15 — `/review` SWD-551 CLEAN (focused, sequential). COMMENT on PR #685. Browser: aligned at 1296px and 503px. Next `/ship SWD-551`.
 - 2026-09-15 — `/restructure` SWD-551: no leftover catalog breach on `chart-align.js` / TimeSeriesChart. Next `/review SWD-551`.

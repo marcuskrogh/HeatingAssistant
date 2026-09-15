@@ -14,6 +14,17 @@ from heatingassistant.engine import const
 class HassStatesMixin:
     """Build the synthetic entity map Ingress reads via hass_states()."""
 
+    def _ekf_wall_temperature(self, room_name: str) -> float | None:
+        """Current EKF wall/mass node for ``room_name``, if the controller has one."""
+        snap = self.control_engine.forecast_snapshot()
+        walls = snap.get("wall_temperatures") or {}
+        if isinstance(walls, Mapping) and room_name in walls:
+            try:
+                return float(walls[room_name])
+            except (TypeError, ValueError):
+                return None
+        return None
+
     def _mpc_mode(self) -> str:
         return const.coerce_mpc_mode(self.options.get(const.CONF_MPC_MODE))
 
@@ -171,6 +182,13 @@ class HassStatesMixin:
                 f"sensor.heating_assistant_{slug}_temperature_filtered",
                 "unknown" if temperature is None else temperature,
                 filtered_attrs,
+                now,
+            )
+            wall_temp = self._ekf_wall_temperature(name)
+            states[f"sensor.heating_assistant_{slug}_temperature_wall"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_temperature_wall",
+                "unknown" if wall_temp is None else round(float(wall_temp), 2),
+                {"room": name, "unit_of_measurement": "°C"},
                 now,
             )
             states[f"sensor.heating_assistant_{slug}_setpoint"] = self._ha_state(

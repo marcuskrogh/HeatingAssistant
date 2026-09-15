@@ -41,8 +41,8 @@ import {
   extendDatasetToNow,
   computeYLimits,
   updatePowerChartBounds,
-} from '../charts/room-charts.js?v=140';
-import { loadChartsData } from './room-detail-history.js?v=144';
+} from '../charts/room-charts.js?v=158';
+import { loadChartsData } from './room-detail-history.js?v=145';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
@@ -558,9 +558,13 @@ function extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart
   if (tempChart._chart) {
     const ds = tempChart._chart.data.datasets;
     const filteredIdx = ds.findIndex((d) => d.label === 'Filtered');
+    const wallIdx = ds.findIndex((d) => d.label === 'Wall');
     const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
     if (filteredIdx >= 0) {
       extendDatasetToNow(ds[filteredIdx].data, entityValue(state, room.entities['temperature_filtered']), now);
+    }
+    if (wallIdx >= 0) {
+      extendDatasetToNow(ds[wallIdx].data, entityValue(state, room.entities['temperature_wall']), now);
     }
     if (measuredIdx >= 0) {
       extendDatasetToNow(ds[measuredIdx].data, entityValue(state, room.entities['temperature_measured']), now);
@@ -632,6 +636,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     const tempForecast = forecastToDataPoints(forecastData, 'temperature');
     const tempLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
+    const wallForecast = forecastToDataPoints(forecastData, 'wall_temperature');
     const setpointData = forecastToEnabledPoints(forecastData, 'setpoint');
     const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
     const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
@@ -643,6 +648,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
       const now = Date.now();
 
       replaceChartDataset(ds, 'Forecast', tempForecast);
+      replaceChartDataset(ds, 'Wall Forecast', wallForecast);
       if (tempLinearised.length > 0) replaceChartDataset(ds, 'Linearised', tempLinearised);
 
       const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');

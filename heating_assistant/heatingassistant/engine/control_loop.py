@@ -83,6 +83,8 @@ class ControlEngine(BuildMixin, PreviewMixin):
         self._last_solar_forecast: list[dict[str, float]] = []
         self._last_price_forecast: list[float] = []
         self._last_filtered_temperatures: dict[str, float] = {}
+        self._last_wall_temperatures: dict[str, float] = {}
+        self._last_wall_predictions: list[dict[str, float]] = []
         self._last_compute_ts: datetime | None = None
         self._forecast_lock = threading.Lock()
         self._nmpc_last_kwargs: dict[str, Any] = {}
@@ -257,6 +259,8 @@ class ControlEngine(BuildMixin, PreviewMixin):
                 "solar_forecast": [dict(item) for item in self._last_solar_forecast],
                 "price_forecast": list(self._last_price_forecast),
                 "filtered_temperatures": dict(self._last_filtered_temperatures),
+                "wall_temperatures": dict(self._last_wall_temperatures),
+                "wall_predictions": [dict(item) for item in self._last_wall_predictions],
                 "dt": float(self._derived_dt()),
                 "horizon": int(self._derived_horizon()),
             }
@@ -467,6 +471,8 @@ class ControlEngine(BuildMixin, PreviewMixin):
             self._last_solar_forecast = snap["solar_forecast"]
             self._last_price_forecast = snap["price_forecast"]
             self._last_filtered_temperatures = snap["filtered_temperatures"]
+            self._last_wall_temperatures = snap["wall_temperatures"]
+            self._last_wall_predictions = snap["wall_predictions"]
             self._last_compute_ts = snap["compute_ts"]
 
     def _clear_controller_forecast(self) -> None:
@@ -478,6 +484,8 @@ class ControlEngine(BuildMixin, PreviewMixin):
             self._last_solar_forecast = []
             self._last_price_forecast = []
             self._last_filtered_temperatures = {}
+            self._last_wall_temperatures = {}
+            self._last_wall_predictions = []
             self._last_compute_ts = None
 
     def _apply_measurements(
