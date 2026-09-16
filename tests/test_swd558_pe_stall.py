@@ -45,6 +45,8 @@ PROGRESS = (
 def test_pe_origin_stride_is_two_hour_grid() -> None:
     assert pe_origin_stride(900.0) == 8
     assert pe_origin_stride(60.0) == 120
+    assert pe_origin_stride(0.0) == 1
+    assert pe_origin_stride(-15.0) == 1
 
 
 def test_production_lifecycle_uses_pe_origin_stride() -> None:
