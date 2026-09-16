@@ -9,7 +9,7 @@ import numpy as np
 from mbc.control import NLPProblem, ScipyNLPBackend
 
 from .constants import _T_WALL_MIN_LAM, _T_WALL_PRIOR_STD
-from .nstep_pem import PeCancelled, PeComputeTimeout, _check_deadline
+from .nstep_pem import PeCancelled, PeComputeTimeout, PeEtaPlateau, _check_deadline
 
 _LOGGER = logging.getLogger("heatingassistant.engine.estimation.kalman_ml")
 
@@ -78,6 +78,7 @@ class RegularizedMseCache:
                 float(self._cache[1]),
                 n_obs=int(getattr(self._est, "_pe_n_obs", 0) or 0),
                 data_mse=float(mse),
+                theta=theta,
             )
 
     def fun(self, theta: np.ndarray) -> float:
@@ -190,6 +191,8 @@ def solve_lbfgs(
     except PeComputeTimeout:
         raise
     except PeCancelled:
+        raise
+    except PeEtaPlateau:
         raise
     except Exception as exc:
         _LOGGER.debug("Optimiser failed: %s", exc)

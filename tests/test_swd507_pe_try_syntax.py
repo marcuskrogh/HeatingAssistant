@@ -106,7 +106,7 @@ def test_wait_for_pe_job_is_valid_javascript() -> None:
     assert "finally {\n      hidePeOverlay();" not in source
     assert "hidePeOverlay();" in source
     assert "cancelParameterEstimation" in source
-    assert "pe-progress.js?v=159" in source
+    assert "pe-progress.js?v=160" in source
     packaged = PACKAGED.read_text(encoding="utf-8")
     assert _extract_named_function(packaged, "waitForPeJob") == fn
     assert _try_blocks_missing_handler(packaged) == []

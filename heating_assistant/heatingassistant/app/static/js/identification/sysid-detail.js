@@ -24,7 +24,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=159';
+import { renderPeProgress } from './pe-progress.js?v=160';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -1197,15 +1197,25 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // fields from the result for review. Used by Stored Datasets "Run
   // recommended estimation". Returns true on success.
   async function waitForPeJob() {
-    const deadline = Date.now() + 30 * 60 * 1000;
+    const fallbackMs = 30 * 60 * 1000;
     startPeOverlay({ status: 'running' });
-    while (Date.now() < deadline) {
+    let originMs = Date.now();
+    let capMs = fallbackMs;
+    while (Date.now() - originMs < capMs) {
       if (!connection || typeof connection.getPeJob !== 'function') {
         throw new Error('Parameter estimation status is unavailable.');
       }
       const job = await connection.getPeJob();
       if (job != null) {
         paintPeOverlay(job);
+        const capS = Number(job.cap_s);
+        if (Number.isFinite(capS) && capS > 0) {
+          capMs = capS * 1000;
+        }
+        const startedAt = Number(job.started_at);
+        if (Number.isFinite(startedAt) && startedAt > 1e9) {
+          originMs = startedAt * 1000;
+        }
         const status = job.status || 'idle';
         if (status === 'success') return job;
         if (status === 'cancelled') {
@@ -1218,6 +1228,11 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         }
       }
       await new Promise((res) => setTimeout(res, 1000));
+    }
+    try {
+      await cancelParameterEstimation(hass);
+    } catch (cancelErr) {
+      /* job may already have finished */
     }
     throw new Error('Parameter estimation timed out');
   }

@@ -18,6 +18,7 @@ from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
     MIN_HISTORY_STEPS,
     PE_ETA_NOISE,
+    PE_ETA_STALE_EVALS,
     PE_ETA_TOL,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
@@ -77,6 +78,7 @@ from .nstep_pem import (
     CANCEL_USER_MESSAGE,
     PeCancelled,
     PeComputeTimeout,
+    PeEtaPlateau,
     nstep_path_rmse,
     nstep_pem_and_grad,
     timeout_user_message,
@@ -196,6 +198,11 @@ class KalmanMLEstimator:
         self._pe_nfev = 0
         self._pe_f_hist: List[Dict[str, Any]] = []
         self._pe_n_obs = 0
+        self._pe_best_eta: Optional[float] = None
+        self._pe_best_rmse: Optional[float] = None
+        self._pe_best_theta: Optional[np.ndarray] = None
+        self._pe_best_f = float("inf")
+        self._pe_stale_evals = 0
         self._pe_deadline_mono: Optional[float] = None
         self._pe_t0_mono: Optional[float] = None
 
@@ -678,6 +685,11 @@ class KalmanMLEstimator:
         self._pe_nfev = 0
         self._pe_f_hist = []
         self._pe_n_obs = 0
+        self._pe_best_eta = None
+        self._pe_best_rmse = None
+        self._pe_best_theta = None
+        self._pe_best_f = float("inf")
+        self._pe_stale_evals = 0
         cap = max(0.0, float(self._max_compute_s))
         self._pe_deadline_mono = (
             None if cap <= 0.0 else self._pe_t0_mono + cap
@@ -713,6 +725,22 @@ class KalmanMLEstimator:
             cancelled = True
             exit_label = "Stopped by the user"
             _LOGGER.info("PE cancelled by the user")
+        except PeEtaPlateau:
+            exit_label = "Fit stopped improving"
+            stored = getattr(self, "_pe_best_theta", None)
+            if stored is None:
+                best_theta = theta_prior.copy()
+                best_f = float("inf")
+                best_converged = False
+            else:
+                best_theta = np.asarray(stored, dtype=float)
+                best_f = float(self._pe_best_f)
+                best_converged = True
+            _LOGGER.info(
+                "PE plateau after %s evals (best η=%s)",
+                self._pe_nfev,
+                self._pe_best_eta,
+            )
 
         if timed_out or cancelled:
             return {
@@ -1193,11 +1221,52 @@ class KalmanMLEstimator:
             dataset_start_ts=starts,
         )
 
+    def _pe_eta_from_misfit(
+        self, misfit: float, n_obs: int
+    ) -> Tuple[Optional[float], Optional[float]]:
+        if n_obs <= 0 or not math.isfinite(misfit) or misfit < 0.0:
+            return None, None
+        eta = math.sqrt(misfit / float(n_obs))
+        rmse_c = eta * math.sqrt(max(float(self._R_var), 0.0))
+        return eta, rmse_c
+
+    def _note_pe_best_eta(
+        self,
+        eta: Optional[float],
+        rmse_c: Optional[float],
+        f: float,
+        theta: Optional[np.ndarray],
+    ) -> None:
+        if eta is None:
+            return
+        prev = self._pe_best_eta
+        if prev is None or eta < float(prev) - 1e-6:
+            self._pe_best_eta = eta
+            self._pe_best_rmse = rmse_c
+            self._pe_stale_evals = 0
+            if theta is not None:
+                self._pe_best_theta = np.asarray(theta, dtype=float).copy()
+                self._pe_best_f = float(f)
+            return
+        self._pe_stale_evals += 1
+
+    def _raise_if_pe_eta_plateaued(self) -> None:
+        # Uncapped solves (identifiability tests, no wall-clock budget) keep
+        # SciPy's ftol/gtol/maxiter. Plateau only spends remaining cap.
+        if float(self._max_compute_s) <= 0.0:
+            return
+        if (
+            self._pe_stale_evals >= PE_ETA_STALE_EVALS
+            and self._pe_nfev >= PE_ETA_STALE_EVALS
+        ):
+            raise PeEtaPlateau()
+
     def _record_pe_progress(
         self,
         f: float,
         n_obs: int = 0,
         data_mse: Optional[float] = None,
+        theta: Optional[np.ndarray] = None,
     ) -> None:
         """Publish one unique NLP evaluation to an optional progress callback."""
         self._pe_nfev += 1
@@ -1209,11 +1278,8 @@ class KalmanMLEstimator:
         n_obs = int(n_obs or getattr(self, "_pe_n_obs", 0) or 0)
         r_var = float(self._R_var)
         misfit = float(data_mse if data_mse is not None else f)
-        eta = None
-        rmse_c = None
-        if n_obs > 0 and math.isfinite(misfit) and misfit >= 0.0:
-            eta = math.sqrt(misfit / float(n_obs))
-            rmse_c = eta * math.sqrt(max(r_var, 0.0))
+        eta, rmse_c = self._pe_eta_from_misfit(misfit, n_obs)
+        self._note_pe_best_eta(eta, rmse_c, f, theta)
         point = {
             "nfev": int(self._pe_nfev),
             "f": float(f),
@@ -1221,36 +1287,41 @@ class KalmanMLEstimator:
             "n_obs": n_obs,
             "eta": eta,
             "rmse_c": rmse_c,
+            "eta_best": self._pe_best_eta,
+            "rmse_c_best": self._pe_best_rmse,
         }
         self._pe_f_hist.append(point)
         if len(self._pe_f_hist) > 400:
             self._pe_f_hist = self._pe_f_hist[-400:]
         callback = self._on_progress
-        if callback is None:
-            return
-        try:
-            callback(
-                {
-                    "f": float(f),
-                    "nfev": int(self._pe_nfev),
-                    "phase": phase,
-                    "f_hist": list(self._pe_f_hist),
-                    "elapsed_s": float(elapsed),
-                    "cap_s": float(cap),
-                    "remaining_s": float(remaining),
-                    "data_mse": misfit,
-                    "n_obs": n_obs,
-                    "eta": eta,
-                    "rmse_c": rmse_c,
-                    "r_var": r_var,
-                    "eta_tol": float(PE_ETA_TOL),
-                    "eta_noise": float(PE_ETA_NOISE),
-                }
-            )
-        except PeCancelled:
-            raise
-        except Exception:
-            _LOGGER.debug("PE progress callback failed", exc_info=True)
+        snap = {
+            "f": float(f),
+            "nfev": int(self._pe_nfev),
+            "phase": phase,
+            "f_hist": list(self._pe_f_hist),
+            "elapsed_s": float(elapsed),
+            "cap_s": float(cap),
+            "remaining_s": float(remaining),
+            "data_mse": misfit,
+            "n_obs": n_obs,
+            "eta": eta,
+            "rmse_c": rmse_c,
+            "eta_best": self._pe_best_eta,
+            "rmse_c_best": self._pe_best_rmse,
+            "r_var": r_var,
+            "eta_tol": float(PE_ETA_TOL),
+            "eta_noise": float(PE_ETA_NOISE),
+        }
+        if callback is not None:
+            try:
+                callback(snap)
+            except PeCancelled:
+                raise
+            except PeEtaPlateau:
+                raise
+            except Exception:
+                _LOGGER.debug("PE progress callback failed", exc_info=True)
+        self._raise_if_pe_eta_plateaued()
 
     def _nstep_pem_and_grad(
         self,

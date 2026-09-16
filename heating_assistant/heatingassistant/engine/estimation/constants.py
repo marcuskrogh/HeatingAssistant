@@ -168,3 +168,5 @@ _RESTART_PERT = 0.5
 #: η ≤ 2 ⇔ RMS ≤ 1 °C at the default EKF R_var = 0.25.
 PE_ETA_TOL = 2.0
 PE_ETA_NOISE = 1.0
+#: Consecutive NLP evals without a strictly better data η before PE stops.
+PE_ETA_STALE_EVALS = 8
