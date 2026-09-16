@@ -1223,6 +1223,42 @@ class KalmanMLEstimator:
             dataset_start_ts=starts,
         )
 
+    def _pe_eta_from_misfit(
+        self, misfit: float, n_obs: int
+    ) -> Tuple[Optional[float], Optional[float]]:
+        if n_obs <= 0 or not math.isfinite(misfit) or misfit < 0.0:
+            return None, None
+        eta = math.sqrt(misfit / float(n_obs))
+        rmse_c = eta * math.sqrt(max(float(self._R_var), 0.0))
+        return eta, rmse_c
+
+    def _note_pe_best_eta(
+        self,
+        eta: Optional[float],
+        rmse_c: Optional[float],
+        f: float,
+        theta: Optional[np.ndarray],
+    ) -> None:
+        if eta is None:
+            return
+        prev = self._pe_best_eta
+        if prev is None or eta < float(prev) - 1e-6:
+            self._pe_best_eta = eta
+            self._pe_best_rmse = rmse_c
+            self._pe_stale_evals = 0
+            if theta is not None:
+                self._pe_best_theta = np.asarray(theta, dtype=float).copy()
+                self._pe_best_f = float(f)
+            return
+        self._pe_stale_evals += 1
+
+    def _raise_if_pe_eta_plateaued(self) -> None:
+        if (
+            self._pe_stale_evals >= PE_ETA_STALE_EVALS
+            and self._pe_nfev >= PE_ETA_STALE_EVALS
+        ):
+            raise PeEtaPlateau()
+
     def _record_pe_progress(
         self,
         f: float,
@@ -1240,23 +1276,8 @@ class KalmanMLEstimator:
         n_obs = int(n_obs or getattr(self, "_pe_n_obs", 0) or 0)
         r_var = float(self._R_var)
         misfit = float(data_mse if data_mse is not None else f)
-        eta = None
-        rmse_c = None
-        if n_obs > 0 and math.isfinite(misfit) and misfit >= 0.0:
-            eta = math.sqrt(misfit / float(n_obs))
-            rmse_c = eta * math.sqrt(max(r_var, 0.0))
-        if eta is not None:
-            prev = self._pe_best_eta
-            improved = prev is None or eta < float(prev) - 1e-6
-            if improved:
-                self._pe_best_eta = eta
-                self._pe_best_rmse = rmse_c
-                self._pe_stale_evals = 0
-                if theta is not None:
-                    self._pe_best_theta = np.asarray(theta, dtype=float).copy()
-                    self._pe_best_f = float(f)
-            else:
-                self._pe_stale_evals += 1
+        eta, rmse_c = self._pe_eta_from_misfit(misfit, n_obs)
+        self._note_pe_best_eta(eta, rmse_c, f, theta)
         point = {
             "nfev": int(self._pe_nfev),
             "f": float(f),
@@ -1298,11 +1319,7 @@ class KalmanMLEstimator:
                 raise
             except Exception:
                 _LOGGER.debug("PE progress callback failed", exc_info=True)
-        if (
-            self._pe_stale_evals >= PE_ETA_STALE_EVALS
-            and self._pe_nfev >= PE_ETA_STALE_EVALS
-        ):
-            raise PeEtaPlateau()
+        self._raise_if_pe_eta_plateaued()
 
     def _nstep_pem_and_grad(
         self,
