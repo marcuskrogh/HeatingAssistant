@@ -55,4 +55,4 @@
 - Workflow: delta-fast
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686 (`4fffaae4`)

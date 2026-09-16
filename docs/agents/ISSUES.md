@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | In Review | — | docs/agents/PLAN-room-wall-plot.md | CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/686 |
+| SWD-554 | Task | [Tweak] Show wall temperature on room view plots | Done | — | docs/agents/PLAN-room-wall-plot.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686 (`4fffaae4`) |
 | SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-551 | Task | [Bug] Align room view plot vertical grids and NOW line | Done | — | docs/agents/PLAN-room-view-plot-grid-alignment.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/685 (`5a0f9048`) |
@@ -271,6 +271,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-15 — `/ship` SWD-554 via PR #686 (`4fffaae4`): room plots show EKF wall history and forecast (gray); review CLEAN (focused); changelog `# 2026.09.24`. Next: Done.
 - 2026-09-15 — `/review-fix` SWD-554 CLEAN (focused): live Wall Forecast refresh. Next closeout merge https://github.com/marcuskrogh/HeatingAssistant/pull/686.
 - 2026-09-15 — `/define`+`/implement` SWD-554: room temperature plot shows EKF wall history + plan-roll forecast (gray). Relates SWD-548. Next `/review-fix SWD-554`.
 - 2026-09-15 — `/ship` SWD-551 via PR #685 (`5a0f9048`): room plots share one time-axis plot box; review CLEAN (focused); changelog `# 2026.09.24`. Next: Done.
