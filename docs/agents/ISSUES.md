@@ -4,6 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-557 | Story | [Explore] Parameter estimation optimiser stall | To Do | — | docs/pe-optimizer-stall.md (store) | `/architect SWD-558` |
+| SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | To Do | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | `/architect SWD-558` |
+| SWD-559 | Sub-task | PE origin stride, plateau stop, best-RMS overlay | To Do | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
+| SWD-560 | Sub-task | Tests, CalVer, changelog, App sync for PE stall | To Do | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
 | SWD-554 | Task | [Tweak] Show wall temperature on room view plots | Done | — | docs/agents/PLAN-room-wall-plot.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686 (`4fffaae4`) |
 | SWD-555 | Sub-task | Persist wall estimate and forecast wall path | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
 | SWD-556 | Sub-task | Room chart wall series, tests, CalVer | Done | SWD-554 | docs/agents/PLAN-room-wall-plot.md | — |
@@ -271,6 +275,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-16 — `/define` SWD-558: PE floors on 2 h cap; KPI is last spike not best RMS; origin_stride=1. PLAN `docs/agents/PLAN-pe-optimizer-stall.md` (bug / fix-fast). Story SWD-557 Relates. Sub-tasks SWD-559–560. Branch `cursor/swd-558-pe-optimizer-stall-67bc`. Overnight 24 h is parallel. Next `/architect SWD-558`.
 - 2026-09-15 — `/ship` SWD-554 via PR #686 (`4fffaae4`): room plots show EKF wall history and forecast (gray); review CLEAN (focused); changelog `# 2026.09.24`. Next: Done.
 - 2026-09-15 — `/review-fix` SWD-554 CLEAN (focused): live Wall Forecast refresh. Next closeout merge https://github.com/marcuskrogh/HeatingAssistant/pull/686.
 - 2026-09-15 — `/define`+`/implement` SWD-554: room temperature plot shows EKF wall history + plan-roll forecast (gray). Relates SWD-548. Next `/review-fix SWD-554`.
