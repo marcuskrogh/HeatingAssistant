@@ -87,4 +87,4 @@ Evidence (do not copy): project store `docs/pe-optimizer-stall.md`. 2 h run is s
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-558` — Shape origin stride, plateau stop, and best-RMS overlay on this branch (then implement).
+`/implement SWD-558` — Build to ARCHITECTURE-pe-optimizer-stall.md (same branch)

@@ -4,8 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-557 | Story | [Explore] Parameter estimation optimiser stall | To Do | — | docs/pe-optimizer-stall.md (store) | `/architect SWD-558` |
-| SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | To Do | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | `/architect SWD-558` — https://github.com/marcuskrogh/HeatingAssistant/pull/687 |
+| SWD-557 | Story | [Explore] Parameter estimation optimiser stall | To Do | — | docs/pe-optimizer-stall.md (store) | `/implement SWD-558` |
+| SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | To Do | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | `/implement SWD-558` — https://github.com/marcuskrogh/HeatingAssistant/pull/687 |
 | SWD-559 | Sub-task | PE origin stride, plateau stop, best-RMS overlay | To Do | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
 | SWD-560 | Sub-task | Tests, CalVer, changelog, App sync for PE stall | To Do | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
 | SWD-554 | Task | [Tweak] Show wall temperature on room view plots | Done | — | docs/agents/PLAN-room-wall-plot.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686 (`4fffaae4`) |
