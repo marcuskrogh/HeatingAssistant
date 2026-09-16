@@ -87,4 +87,4 @@ Evidence (do not copy): project store `docs/pe-optimizer-stall.md`. 2 h run is s
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-558` — Merge and close out when CI is green
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/687 (`4e5d51c5`)
