@@ -82,7 +82,7 @@ Evidence (do not copy): project store `docs/pe-optimizer-stall.md`. 2 h run is s
 - Task: [SWD-558](https://marcusknielsen.atlassian.net/browse/SWD-558)
 - Sub-tasks: [SWD-559](https://marcusknielsen.atlassian.net/browse/SWD-559), [SWD-560](https://marcusknielsen.atlassian.net/browse/SWD-560)
 - Branch: `cursor/swd-558-pe-optimizer-stall-67bc`
-- PR: *(opened with this define commit)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/687
 - Classification: bug
 - Workflow: fix-fast
 
