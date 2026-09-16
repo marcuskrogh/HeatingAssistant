@@ -10,6 +10,23 @@ from typing import Any
 
 _NMPC_KEYS = ("nmpc_period", "nmpc_fast_substeps", "nmpc_horizon_h")
 
+#: PE N-step origins follow the historical slow NMPC period (2 h), not the
+#: coerced one-decision-per-sample ``fast_substeps`` (always 1).
+DEFAULT_PE_ORIGIN_PERIOD_S = 7200.0
+
+
+def pe_origin_stride(
+    dt_s: float,
+    origin_period_s: float = DEFAULT_PE_ORIGIN_PERIOD_S,
+) -> int:
+    """Fast-grid steps between receding N-step PE origins."""
+
+    dt = float(dt_s)
+    period = float(origin_period_s)
+    if dt <= 0.0 or period <= 0.0:
+        return 1
+    return max(1, int(round(period / dt)))
+
 
 @dataclass(frozen=True)
 class NmpcTiming:

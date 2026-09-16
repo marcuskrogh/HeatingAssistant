@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.25
+
+- Parameter estimation launches N-step origins every two hours on a 15-minute
+  grid, stops when the data fit stops improving, and shows the best RMS so
+  far — not the last line-search spike. The Identification wait follows the
+  configured PE max compute time and cancels the job if that wait ends.
+
 # 2026.09.24
 
 - Room temperature plots show the estimated wall/mass temperature as a

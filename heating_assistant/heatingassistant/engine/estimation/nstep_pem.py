@@ -25,6 +25,13 @@ class PeComputeTimeout(Exception):
         super().__init__(timeout_user_message(self.cap_s))
 
 
+class PeEtaPlateau(Exception):
+    """Data η stopped improving; the caller should keep the best θ."""
+
+    def __init__(self) -> None:
+        super().__init__("Fit stopped improving")
+
+
 class PeCancelled(Exception):
     """Operator stopped PE while the NLP was running."""
 

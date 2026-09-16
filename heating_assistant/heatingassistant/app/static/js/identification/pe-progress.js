@@ -184,14 +184,18 @@ export function renderPeProgress(overlay, snap) {
   if (!running || timedOut || remain <= 30) timeClass += ' pe-progress__time-remain--last';
   else if (remain <= 60) timeClass += ' pe-progress__time-remain--warn';
 
-  const eta = Number.isFinite(Number(snap.eta))
-    ? Number(snap.eta)
-    : pointEta({ f: snap.f, data_mse: snap.data_mse, n_obs: snap.n_obs, eta: snap.eta });
-  const rmse = Number.isFinite(Number(snap.rmse_c))
-    ? Number(snap.rmse_c)
-    : rmseCFromEta(eta);
+  const etaHero = Number.isFinite(Number(snap.eta_best))
+    ? Number(snap.eta_best)
+    : (Number.isFinite(Number(snap.eta))
+      ? Number(snap.eta)
+      : pointEta({ f: snap.f, data_mse: snap.data_mse, n_obs: snap.n_obs, eta: snap.eta }));
+  const rmse = Number.isFinite(Number(snap.rmse_c_best))
+    ? Number(snap.rmse_c_best)
+    : (Number.isFinite(Number(snap.rmse_c))
+      ? Number(snap.rmse_c)
+      : rmseCFromEta(etaHero));
   const etaTol = Number(snap.eta_tol) || ETA_TOL;
-  const within = Number.isFinite(eta) && eta <= etaTol;
+  const within = Number.isFinite(etaHero) && etaHero <= etaTol;
   const rmseClass = within
     ? 'pe-progress__metric-value pe-progress__metric-value--lead pe-progress__metric-value--ok'
     : 'pe-progress__metric-value pe-progress__metric-value--lead';
@@ -211,7 +215,7 @@ export function renderPeProgress(overlay, snap) {
         <div>
           <div class="pe-progress__metric-label">RMS error</div>
           <div class="${rmseClass}">${fmtRmse(rmse)} °C</div>
-          <div class="pe-progress__metric-sub">${fmtEta(eta)}× noise${within ? ' · within tolerance' : ' · above tolerance'}</div>
+          <div class="pe-progress__metric-sub">${fmtEta(etaHero)}× noise${within ? ' · within tolerance' : ' · above tolerance'}</div>
         </div>
         <div>
           <div class="pe-progress__metric-label">Evaluations</div>
