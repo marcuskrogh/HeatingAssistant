@@ -55,6 +55,20 @@ def test_production_lifecycle_uses_pe_origin_stride() -> None:
     assert "origin_stride=timing.fast_substeps" not in src
 
 
+def test_eta_plateau_requires_a_compute_cap() -> None:
+    src = (
+        ROOT
+        / "heatingassistant"
+        / "engine"
+        / "estimation"
+        / "kalman_ml.py"
+    ).read_text(encoding="utf-8")
+    start = src.index("def _raise_if_pe_eta_plateaued")
+    chunk = src[start : start + 500]
+    assert "float(self._max_compute_s) <= 0.0" in chunk
+    assert "raise PeEtaPlateau()" in chunk
+
+
 def test_constant_eta_stops_before_burning_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     room = make_single_room()
     sources = make_electric_heaters([room])
@@ -73,7 +87,7 @@ def test_constant_eta_stops_before_burning_the_cap(monkeypatch: pytest.MonkeyPat
         dt=900.0,
         n_horizon_steps=8,
         origin_stride=8,
-        max_compute_s=0.0,
+        max_compute_s=3600.0,
         use_nstep_pem=True,
         on_progress=snaps.append,
     )
@@ -105,7 +119,7 @@ def test_best_eta_survives_a_worse_last_eval(monkeypatch: pytest.MonkeyPatch) ->
         dt=900.0,
         n_horizon_steps=8,
         origin_stride=8,
-        max_compute_s=0.0,
+        max_compute_s=3600.0,
         use_nstep_pem=True,
         on_progress=snaps.append,
     )

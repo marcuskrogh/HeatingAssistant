@@ -275,6 +275,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-16 — CI fix: η plateau only when PE has a compute cap; uncapped identifiability tests keep SciPy. pytest-slow rest had failed on Q_int / heater scale.
 - 2026-09-16 — `/review` SWD-558 CLEAN (focused, sequential). Next `/ship SWD-558` — stop before merge unless CI is green. Overnight 24 h PE is still parallel.
 - 2026-09-16 — `/test`+`/restructure` SWD-558: extra origin-stride lock; extract `_pe_eta_from_misfit` / `_note_pe_best_eta` / `_raise_if_pe_eta_plateaued`. Next `/review SWD-558`.
 - 2026-09-16 — `/implement` SWD-558: origin stride 8 @ 15 min, PeEtaPlateau, overlay eta_best, waitForPeJob follows cap_s then cancel. CalVer 2026.09.25. Next `/test SWD-558`.

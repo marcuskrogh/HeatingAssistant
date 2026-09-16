@@ -1251,6 +1251,10 @@ class KalmanMLEstimator:
         self._pe_stale_evals += 1
 
     def _raise_if_pe_eta_plateaued(self) -> None:
+        # Uncapped solves (identifiability tests, no wall-clock budget) keep
+        # SciPy's ftol/gtol/maxiter. Plateau only spends remaining cap.
+        if float(self._max_compute_s) <= 0.0:
+            return
         if (
             self._pe_stale_evals >= PE_ETA_STALE_EVALS
             and self._pe_nfev >= PE_ETA_STALE_EVALS
