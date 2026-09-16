@@ -87,4 +87,4 @@ Evidence (do not copy): project store `docs/pe-optimizer-stall.md`. 2 h run is s
 - Workflow: fix-fast
 
 ## Next
-`/test SWD-558` — Dedicated testing phase, then restructure, then review
+`/ship SWD-558` — Merge and close out when CI is green

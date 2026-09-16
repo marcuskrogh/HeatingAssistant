@@ -21,4 +21,4 @@
 - Branch: `cursor/swd-558-pe-optimizer-stall-67bc`
 
 ## Next
-`/implement SWD-558` — Build to this shape
+`/ship SWD-558` — Merge and close out when CI is green

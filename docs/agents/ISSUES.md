@@ -4,8 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-557 | Story | [Explore] Parameter estimation optimiser stall | To Do | — | docs/pe-optimizer-stall.md (store) | `/test SWD-558` |
-| SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | In Progress | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | `/test SWD-558` — https://github.com/marcuskrogh/HeatingAssistant/pull/687 |
+| SWD-557 | Story | [Explore] Parameter estimation optimiser stall | To Do | — | docs/pe-optimizer-stall.md (store) | `/ship SWD-558` |
+| SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | In Review | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | `/ship SWD-558` — https://github.com/marcuskrogh/HeatingAssistant/pull/687 |
 | SWD-559 | Sub-task | PE origin stride, plateau stop, best-RMS overlay | Done | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
 | SWD-560 | Sub-task | Tests, CalVer, changelog, App sync for PE stall | Done | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
 | SWD-554 | Task | [Tweak] Show wall temperature on room view plots | Done | — | docs/agents/PLAN-room-wall-plot.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/686 (`4fffaae4`) |
@@ -275,6 +275,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-16 — `/review` SWD-558 CLEAN (focused, sequential). Next `/ship SWD-558` — stop before merge unless CI is green. Overnight 24 h PE is still parallel.
+- 2026-09-16 — `/test`+`/restructure` SWD-558: extra origin-stride lock; extract `_pe_eta_from_misfit` / `_note_pe_best_eta` / `_raise_if_pe_eta_plateaued`. Next `/review SWD-558`.
 - 2026-09-16 — `/implement` SWD-558: origin stride 8 @ 15 min, PeEtaPlateau, overlay eta_best, waitForPeJob follows cap_s then cancel. CalVer 2026.09.25. Next `/test SWD-558`.
 - 2026-09-16 — `/architect` SWD-558: shape stamp `docs/agents/ARCHITECTURE-pe-optimizer-stall.md` — pe_origin_stride, PeEtaPlateau, best-RMS overlay. Next `/implement SWD-558`.
 - 2026-09-16 — `/define` SWD-558: PE floors on 2 h cap; KPI is last spike not best RMS; origin_stride=1. PLAN `docs/agents/PLAN-pe-optimizer-stall.md` (bug / fix-fast). Story SWD-557 Relates. Sub-tasks SWD-559–560. Branch `cursor/swd-558-pe-optimizer-stall-67bc`. Overnight 24 h is parallel. Next `/architect SWD-558`.

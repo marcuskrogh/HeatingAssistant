@@ -708,7 +708,6 @@ class KalmanMLEstimator:
 
         timed_out = False
         cancelled = False
-        plateaued = False
         exit_label = "Did not converge"
         try:
             best_theta, best_f, best_converged, exit_label = self._solve_joint_nlp(
@@ -727,7 +726,6 @@ class KalmanMLEstimator:
             exit_label = "Stopped by the user"
             _LOGGER.info("PE cancelled by the user")
         except PeEtaPlateau:
-            plateaued = True
             exit_label = "Fit stopped improving"
             stored = getattr(self, "_pe_best_theta", None)
             if stored is None:
