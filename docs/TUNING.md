@@ -173,7 +173,7 @@ every cycle.
 | **Sample interval** | `update_interval` | `900 s` | How often heater commands are applied (both planners) |
 | **Look-ahead** | `horizon` / `nmpc_horizon_h` | `36 h` | How far the plan covers |
 | **Max compute time** | `nmpc_max_compute_s` | `60 s` | Wall-clock cap for one Linear or Nonlinear planner solve |
-| **EKF process noise** | `sigma_w` | `0.1` | Air-node intensity on **Parameter estimation**. Wall uses the same Watt-level noise (`σ_wall = σ_w · C_air/C_wall`) so the mass node does not absorb heater residuals |
+| **EKF process noise** | `sigma_w` | `0.1` | Air-node intensity on **Parameter estimation**. Wall uses the same Watt-level noise (`σ_wall = σ_w · min(C_air/C_wall, 1)`) so the mass node does not absorb heater residuals |
 | **EKF measurement noise** | `sigma_v` | `0.5` | On **Parameter estimation** — higher trusts sensors less |
 
 ### Diagnosing oscillations
