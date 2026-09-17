@@ -57,4 +57,4 @@ Canonical copy: project store `docs/wall-temp-reconstruction-plan.md`. Findings:
 - Workflow: fix-fast
 
 ## Next
-`/review SWD-564` — lasers then code review on https://github.com/marcuskrogh/HeatingAssistant/pull/690
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690
