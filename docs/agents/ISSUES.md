@@ -279,7 +279,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-17 — `/implement` SWD-564: replace envelope clip with 2R2C wall-SS fusion and θ-dependent MAP; PR https://github.com/marcuskrogh/HeatingAssistant/pull/689. Next `/test SWD-564`.
+- 2026-09-17 — `/implement` SWD-564: wall ODE invariant — air innovations cannot move Tw; isolate P_wa before air update. Next `/test SWD-564`.
 - 2026-09-17 — `/implement` SWD-564: wall envelope in live EKF + PE; CalVer 2026.09.26; PR https://github.com/marcuskrogh/HeatingAssistant/pull/689. Next `/test SWD-564`.
 - 2026-09-17 — `/define` SWD-564: wall envelope in live EKF + PE; MODEL + ARCHITECTURE on `cursor/swd-564-wall-envelope-a891`; class bug / fix-fast; Next `/implement SWD-564`.
 - 2026-09-16 — `/ship` SWD-558 via PR #687 (`4e5d51c5`): PE origin stride 8 @ 15 min, η plateau on capped jobs, overlay best RMS; wait follows cap then cancel. Review CLEAN (focused). Changelog `# 2026.09.25`. Overnight 24 h PE was not a gate. Next: Done.

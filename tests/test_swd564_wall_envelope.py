@@ -10,7 +10,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from mbc.estimation import ContinuousDiscreteEKFParams, IntegrationScheme
+from mbc.estimation import (
+    ContinuousDiscreteEKF,
+    ContinuousDiscreteEKFParams,
+    IntegrationScheme,
+)
 
 from heatingassistant.engine.controller.ekf import _InnovationEKF
 from heatingassistant.engine.controller.sde import HouseThermalSDE
@@ -186,6 +190,85 @@ def test_overnight_filter_recovers_toward_ss() -> None:
     mu = float(sde.wall_equilibrium(y, 11.0)[0])
     assert x_hat[n] > 11.0
     assert abs(x_hat[n] - mu) < 3.0
+
+
+def test_plant_wall_cannot_undercut_air_and_outdoor() -> None:
+    """Wall ODE: if Tw < min(Ta, Tout) and Q_wall=0, dTw/dt > 0.
+
+    Over a heated overnight horizon the wall also cannot fall below the
+    running minimum of indoor air and outdoor (the user's invariant).
+    """
+    room = Room(
+        name="living_room",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        temperature=22.0,
+        wall_temperature=20.0,
+        sky_radiative_ua=0.0,
+    )
+    g_inf, g_aw, g_we = room.conductances()
+    g_wout = g_we
+    # Instantaneous: a 6 °C wall with 22 °C air and 11 °C outdoor is heated.
+    rhs = g_aw * (22.0 - 6.0) + g_wout * (11.0 - 6.0)
+    assert rhs > 0.0
+
+    model = HouseModel([room])
+    t_out_trace = [11.0 + 2.0 * np.sin(k / 8.0) for k in range(32)]
+    run_min = min(22.0, min(t_out_trace))
+    for t_out in t_out_trace:
+        ta = room.temperature
+        heat = 800.0 if ta < 22.0 else 200.0
+        model.step(900.0, {"living_room": heat}, float(t_out), {})
+        run_min = min(run_min, room.temperature, float(t_out))
+        assert room.temperature > 18.0
+        assert room.wall_temperature >= run_min - 0.05
+        assert room.wall_temperature > 10.5
+
+
+def test_air_innovation_cannot_dump_into_wall_below_outdoor() -> None:
+    """Predicted air far above the 22 °C measurement (model mismatch).
+
+    Unconstrained K_w = P_wa S^{-1} assigns that air residual to the wall
+    and can put Tw below outdoor.  Zeroing P_wa before the update leaves
+    Tw at the ODE prior.
+    """
+    room = Room(
+        name="living_room",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        temperature=22.0,
+        wall_temperature=20.0,
+        internal_gain=2500.0,
+    )
+    model = HouseModel([room])
+    sources = [ElectricHeater("h", "living_room", max_power=2000.0)]
+    sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
+    n = sde._n_rooms
+    x0 = np.array(sde.x, dtype=float)
+    x0[0] = 37.0
+    x0[n] = 12.0
+    P = np.eye(sde.nx) * 25.0
+    P[0, n] = P[n, 0] = 25.0
+    y = np.array([22.0])
+    u = np.zeros(sde.nu)
+    d = sde.disturbance_vector(11.0, {})
+    params = ContinuousDiscreteEKFParams(
+        n_steps=5, scheme=IntegrationScheme.IMPLICIT_EULER,
+    )
+
+    naive = ContinuousDiscreteEKF(sde, x0.copy(), P.copy(), params=params)
+    naive.update(y, u, d, np.array([]))
+    naive_tw = float(naive.x_hat[n])
+
+    blocked = ContinuousDiscreteEKF(sde, x0.copy(), P.copy(), params=params)
+    from heatingassistant.engine.wall_physics import block_air_wall_kalman_gain
+    block_air_wall_kalman_gain(blocked)
+    blocked.update(y, u, d, np.array([]))
+    blocked_tw = float(blocked.x_hat[n])
+
+    assert naive_tw < 11.0
+    assert blocked_tw >= 11.0 - 0.25
+    assert blocked_tw > naive_tw
 
 
 def test_wall_process_noise_fraction_on_sde() -> None:

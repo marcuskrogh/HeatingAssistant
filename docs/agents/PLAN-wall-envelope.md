@@ -6,7 +6,7 @@
 
 ## Scope / Decisions / Constraints
 - Algebraic SS (no inter-room flow): $T_w^{\mathrm{ss}}=\rho T_a+(1-\rho)T_{\mathrm{out}}+Q_{\mathrm{wall}}/(g_{\mathrm{aw}}+g_{\mathrm{wout}})$, $\rho=g_{\mathrm{aw}}/(g_{\mathrm{aw}}+g_{\mathrm{wout}})$.
-- Live path: wall diffusion is `0.1 ×` air `σ_w`; after each CD-EKF air update, Joseph-form wall measurement with $R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2$.
+- Live path: wall diffusion is `0.1 ×` air `σ_w`; before each air update, zero air–wall covariance so air innovations cannot move \(T_w\); after the air update, Joseph-form wall measurement with $R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2$.
 - PE: Tw0 stays in the safety box −30…60 °C only; MAP mean is $T_w^{\mathrm{ss}}(\theta)$ at dataset-start air/outdoor/solar anchors (moves with splits/UA/solar). N-step penalty is the hinge $(|T_w-T_w^{\mathrm{ss}}|-\sigma_{\mathrm{lag}})_+^2$ with gradient through `sx` and $\partial\mu/\partial\theta$.
 - Same fusion on sysid replay EKF and leading-window initial-state EKF.
 - Out of scope: extra RC nodes, measuring walls, changing the room-plot series style, retuning MPC weights, clipping.
@@ -38,7 +38,8 @@
 - Sandbox: none
 
 ## Pass criteria
-- After a live CD-EKF step that starts from an unphysical wall, each room’s wall estimate moves toward that step’s $T_w^{\mathrm{ss}}$ (not toward a hardcoded floor such as $\min(T_a,T_{\mathrm{out}})-1.5$).
+- A heated overnight trajectory of the plant ODE never puts \(T_w\) below the running min of indoor air and outdoor (no sky sink).
+- A wild air innovation cannot pull the live EKF wall below outdoor when air–wall covariance is isolated.
 - SDE wall diffusion equals `WALL_PROCESS_NOISE_FRACTION ×` air diffusion (same q-scale).
 - PE `t_wall_init` MAP mean for a segment is $T_w^{\mathrm{ss}}(\theta)$ of that segment’s first air/outdoor/solar sample.
 - N-step PE SSE increases when a simulated wall node leaves \(T_w^{\mathrm{ss}}\) by more than \(\sigma_{\mathrm{lag}}\); lag inside that band adds no penalty.

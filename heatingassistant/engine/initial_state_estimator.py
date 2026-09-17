@@ -43,7 +43,7 @@ _MAX_PREFIX_FRACTION: float = 0.25
 
 
 from .history.records import record_d, record_u, record_window_open
-from .wall_physics import apply_wall_ss_fusion
+from .wall_physics import apply_wall_ss_fusion, block_air_wall_kalman_gain
 
 
 def ekf_state_at_end_of_history(
@@ -158,6 +158,7 @@ def ekf_state_at_end_of_history(
             dtype=bool,
         )
         try:
+            block_air_wall_kalman_gain(ekf_step)
             x_curr, P_curr = ekf_step.update(y_update, u_curr, d_curr, p, mask=mask)
         except Exception as exc:
             _LOGGER.debug("EKF update failed during initial-state seed: %s", exc)

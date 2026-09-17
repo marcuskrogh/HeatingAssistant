@@ -14,13 +14,23 @@ The wall/mass temperature \(T_{w,i}\) is not measured.  The CD-EKF reconstructs 
 | \(\sigma_{\mathrm{lag}}=2.5\,\mathrm{K}\) | Prior std of lag around algebraic SS |
 
 ## Formulation
+**Wall energy-balance invariant** (no sky sink, \(Q_{\mathrm{wall}}\ge 0\)):
+
+\[
+C_{w,i}\dot T_{w,i} = g_{\mathrm{aw},i}(T_{a,i}-T_{w,i}) + g_{\mathrm{wout},i}(T_{\mathrm{out}}-T_{w,i}) + Q_{\mathrm{wall},i}.
+\]
+
+If \(T_{w,i} < \min(T_{a,i},T_{\mathrm{out}})\), both temperature differences are positive, so \(\dot T_{w,i}>0\).  The flow cannot *enter* the region below both boundaries.  Over a horizon, a wall that started above \(\min_s \min(T_a(s),T_{\mathrm{out}}(s))\) cannot undercut that running minimum (it can lag *above* a falling outdoor).  Sky UA (default 0) is the only modelled heat sink that can put the wall below outdoor air.
+
+The overnight plot (\(T_w\approx 6^\circ\mathrm{C}\) while \(T_a\approx 22^\circ\mathrm{C}\) and \(T_{\mathrm{out}}>10^\circ\mathrm{C}\) over the night) is **not** a trajectory of this ODE.  It is an estimator artifact: air innovations dump into \(T_w\) through \(K_w=P_{wa}S^{-1}\).
+
 **Algebraic wall SS** (\(dT_w/dt=0\), no inter-room flow):
 
 \[
 T_{w,i}^{\mathrm{ss}} = \rho_i T_{a,i} + (1-\rho_i) T_{\mathrm{out}} + Q_{\mathrm{wall},i}/(g_{\mathrm{aw},i}+g_{\mathrm{wout},i})
 \]
 
-**Live CD-EKF.** Diffusion \(\sigma_{\mathrm{wall},i} = \kappa\,\sigma_w\sqrt{q_i}\).  After the air Kalman update, fuse \(y_w = T_w^{\mathrm{ss}}\) as a measurement of the wall block with \(R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2\) (Joseph form).  Air nodes change only through covariance coupling.
+**Live CD-EKF.** Diffusion \(\sigma_{\mathrm{wall},i} = \kappa\,\sigma_w\sqrt{q_i}\).  Before the air update, zero \(P_{wa}\) so \(K_w=0\) from air.  After the air update, fuse \(y_w = T_w^{\mathrm{ss}}\) as a wall measurement with \(R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2\) (Joseph form).
 
 **PE Tw0.** Safety box remains \([-30,60]^\circ\mathrm{C}\).  Gaussian MAP mean for each dataset-start segment is \(T_w^{\mathrm{ss}}(\theta)\) at that segment’s first \((T_a,T_{\mathrm{out}},Q_{\mathrm{solar}})\) sample, so \(\mu\) moves when splits / UA / solar scale move.  Gradient includes \(\partial\mu/\partial r_{\mathrm{aw}}\) and solar/UA terms.
 
@@ -29,7 +39,7 @@ T_{w,i}^{\mathrm{ss}} = \rho_i T_{a,i} + (1-\rho_i) T_{\mathrm{out}} + Q_{\mathr
 ## Assumptions
 - The lumped wall node is thermally between indoor air and outdoor, plus solar on surfaces.
 - A wall many kelvin below outdoor while indoor air is warm is not a 2R2C equilibrium of this model; the estimator should learn that via \(\rho(\theta)\), not a floor.
-- Fusion is a Bayesian measurement of the wall row, not a hard state constraint.
+- Fusion is a Bayesian measurement of the wall row.  Air–wall covariance is zeroed before the air update so the invariant is not broken by \(K_w\).
 
 ## Algorithmic choices
 - Joseph update on the live filter (keeps \(P\succeq 0\)) rather than clipping the mean.

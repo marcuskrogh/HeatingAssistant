@@ -1,9 +1,9 @@
 # Architecture: 2R2C wall physics in estimation
 
 ## Shape
-- Lives: `heatingassistant/engine/wall_physics.py` (SS, fusion, MAP/path helpers); `controller/sde.py` (wall σ, `wall_equilibrium` / `wall_observation`); `controller/ekf.py` (`_InnovationEKF.step` SS fusion); `controller/facade.py` (initial wall \(P_0=\sigma_{\mathrm{lag}}^2\)); `sysid.py` and `initial_state_estimator.py` (replay EKF fusion); `estimation/regularization.py` (Tw0 MAP toward \(T_w^{\mathrm{ss}}(\theta)\)); `estimation/warmstart.py` and `app/sysid_services.py` (RC mix seed); `estimation/nstep_pem.py` (path residual)
+- Lives: `heatingassistant/engine/wall_physics.py` (SS, fusion, air–wall isolation); `controller/ekf.py` (zero \(P_{wa}\) then SS fusion); `sysid.py` and `initial_state_estimator.py` (same before replay updates); `controller/sde.py`; `estimation/` MAP and N-step residual
 - Depends on: existing CD-EKF, `_ThetaLayout`, N-step sensitivities `sx`, `_theta_model_quantities`
-- Seams: `wall_steady_state`, `fuse_wall_equilibrium`, `accumulate_wall_ss_penalty`, `tw0_ss_means` — unit-tested without a full house
+- Seams: `wall_steady_state`, `fuse_wall_equilibrium`, `isolate_air_wall_covariance`, `accumulate_wall_ss_penalty`, `tw0_ss_means`
 - Will not add: clip/envelope module, constrained-QP Kalman, extra thermal node, UI series
 
 ## Neighbourhood

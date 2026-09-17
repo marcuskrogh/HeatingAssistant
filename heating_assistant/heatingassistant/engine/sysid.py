@@ -34,7 +34,7 @@ import numpy as np
 
 from .history.records import record_d, record_u, record_window_open
 from .simulation.model_patch import build_sim_model
-from .wall_physics import apply_wall_ss_fusion
+from .wall_physics import apply_wall_ss_fusion, block_air_wall_kalman_gain
 
 # Backward-compatible alias for callers still importing from sysid.
 _build_sim_model = build_sim_model
@@ -414,6 +414,7 @@ def run_sysid_ekf(
         mask  = valid if not valid.all() else None
 
         try:
+            block_air_wall_kalman_gain(ekf_step)
             ekf_step.update(y_k, u_curr, d_curr, p, mask=mask)
         except Exception as exc:
             _LOGGER.warning(

@@ -197,6 +197,36 @@ def fuse_wall_equilibrium(
     return x, P
 
 
+def isolate_air_wall_covariance(P: np.ndarray, n_rooms: int) -> np.ndarray:
+    """Zero air-wall cross-covariance so air innovations cannot move Tw.
+
+    The wall energy balance already implies: if Q_wall >= 0 (no sky sink)
+    and Tw < min(Ta, Tout), then dTw/dt > 0.  The Kalman gain
+    K_w = P_wa S^{-1} ignores that and dumps air-model mismatch into the
+    unmeasured wall.  Decorrelating before the air update leaves Tw to
+    the ODE plus the SS measurement.
+    """
+    P = np.asarray(P, dtype=float).copy()
+    n = int(n_rooms)
+    if n <= 0 or P.shape[0] < 2 * n or P.shape[1] < 2 * n:
+        return P
+    P[n: 2 * n, :n] = 0.0
+    P[:n, n: 2 * n] = 0.0
+    P = 0.5 * (P + P.T)
+    return P
+
+
+def block_air_wall_kalman_gain(estimator: Any) -> None:
+    """Apply :func:`isolate_air_wall_covariance` on a CD-EKF-like object."""
+    model = getattr(estimator, "_model", None)
+    n = int(getattr(model, "_n_rooms", 0) or 0) if model is not None else 0
+    if n <= 0 or not hasattr(estimator, "_P"):
+        return
+    estimator._P = isolate_air_wall_covariance(
+        np.asarray(estimator._P, dtype=float), n,
+    )
+
+
 def apply_wall_ss_fusion(estimator: Any, y_air: Sequence[float], d: Sequence[float]) -> None:
     """Fuse RC wall equilibrium into a CD-EKF-like object (``_x``, ``_P``)."""
     model = getattr(estimator, "_model", None)

@@ -393,13 +393,26 @@ $$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{H}\bigr)\,\mathbf{P}
 | $\mathbf{P}$ | State error covariance — propagated at every step; determines the Kalman gain. |
 | $\mathbf{H} = \partial\mathbf{h}_m/\partial\mathbf{x}$ | Observation Jacobian — identity on the air block; the wall is unmeasured. |
 
-Only air temperature is measured.  After each air update the filter fuses a second measurement of the wall block: the algebraic 2R2C steady state
+Only air temperature is measured.  The wall energy balance itself already
+forbids \(T_w\) from falling below \(\min(T_a,T_{\mathrm{out}})\) when there
+is no heat sink on the wall (\(Q_{\mathrm{wall}}\ge 0\), default sky UA off):
+both conductances then drive \(T_w\) *up*.  Over a horizon that means \(T_w\)
+cannot undercut the running minimum of indoor air and outdoor if it started
+above that minimum — lag can leave the wall *warmer* than a falling outdoor,
+not colder than every boundary temperature in the window.
+
+The CD-EKF can still violate that invariant because the unmeasured wall
+inherits air innovations through \(K_w = P_{wa}S^{-1}\).  Before each air
+update the filter zeros the air–wall covariance so those innovations cannot
+assign model mismatch to \(T_w\).  The wall then follows the ODE, plus a
+second Kalman measurement of the algebraic steady state
 
 $$T_{w,i}^{\mathrm{ss}} = \rho_i T_{a,i} + (1-\rho_i) T_{\mathrm{out}} + Q_{\mathrm{wall},i}/(g_{\mathrm{aw},i}+g_{\mathrm{wout},i}), \qquad \rho_i = g_{\mathrm{aw},i}/(g_{\mathrm{aw},i}+g_{\mathrm{wout},i})$$
 
-with measurement variance $\sigma_{\mathrm{lag}}^2 + (Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2$ (Joseph form on the wall block).  That is Bayesian use of the wall energy balance at $dT_w/dt=0$, not a clip of the posterior.  Parameter estimation uses the same $T_w^{\mathrm{ss}}(\theta)$ as the MAP mean for $T_w(t_0)$ (so the target moves with splits and UA) and as an open-loop path residual on simulated $T_w$.
-
-For the house thermal system the Kalman gain on the air block weights measurements heavily relative to the model prediction.  The wall follows air and outdoor through $\rho(\theta)$ and a reduced wall diffusion $\kappa\sigma_w$.
+with \(R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2\).
+That is not a clip of the posterior.  Parameter estimation uses the same
+\(T_w^{\mathrm{ss}}(\theta)\) as the MAP mean for \(T_w(t_0)\) and as an
+open-loop path residual (hinge beyond \(\sigma_{\mathrm{lag}}\)).
 
 ### 4.3 Optimal control problem — batch QP
 
