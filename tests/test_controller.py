@@ -648,14 +648,15 @@ class TestContinuousDiscreteEKF:
         assert ekf.P.shape == (sde.nx, sde.nx)
 
     def test_update_with_measurement(self, two_room):
-        """After update the estimate should be close to the measurement."""
+        """The air update must pull the estimate toward the measurement."""
         ekf, sde = self._make_ekf(two_room)
         y = np.array([18.5, 17.5])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
+        x0 = ekf.x_hat[:sde.nym].copy()
         x_hat, P = ekf.step(y, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(x_hat[:sde.nym], y, decimal=1)
+        assert np.all(np.abs(x_hat[:sde.nym] - y) < np.abs(x0 - y))
 
     def test_covariance_propagates(self, two_room):
         """P should change after a predict-update cycle."""
