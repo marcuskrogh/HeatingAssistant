@@ -69,3 +69,39 @@ def test_wall_sigma_scales_with_air_to_wall_capacitance() -> None:
     assert sig[0] == pytest.approx(0.1)
     assert sig[n] == pytest.approx(0.1 * ratio)
     assert sig[n] < sig[0]
+
+
+def test_wall_sigma_does_not_exceed_air_when_air_fraction_is_large() -> None:
+    room = Room(
+        name="Living Room",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        temperature=22.0,
+        wall_temperature=21.0,
+        c_air_fraction=0.60,
+    )
+    sde = HeatingMPCController(
+        HouseModel([room]),
+        [ElectricHeater("heater", room="Living Room", max_power=6000.0)],
+        horizon=4,
+        dt=900.0,
+        measurement_dt=900.0,
+        n_int_steps=10,
+        mpc_mode="nmpc",
+        nmpc_period=900.0,
+        nmpc_fast_substeps=1,
+        nmpc_horizon_h=1.0,
+        sigma_w=0.1,
+    )._system
+    n = sde._n_rooms
+    sig = np.diag(sde._sigma_matrix)
+    assert float(sde._C_cap[0] / sde._C_cap[n]) > 1.0
+    assert sig[n] == pytest.approx(sig[0])
+    assert sig[0] == pytest.approx(0.1)
+
+
+def test_nmpc_grid_stays_one_decision_per_sample() -> None:
+    ctrl = _controller()
+    assert ctrl._n_int_steps == 10
+    assert ctrl.timing.fast_substeps == 1
+    assert ctrl.timing.period_s == pytest.approx(ctrl.timing.dt_s)

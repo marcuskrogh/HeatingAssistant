@@ -249,10 +249,18 @@ class TestHouseThermalSDE:
             0.0,
         )
         diag = np.diag(sig)
+        n = sde._n_rooms
+        nx_phys = sde._nx_phys
         # State order: [T_a(2), T_w(2), b(2)].
         # Air block: living_room gets scale=9, bedroom gets scale=1.
         assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9) = 0.3
         assert diag[1] == pytest.approx(0.1)  # 0.1 * sqrt(1) = 0.1
+        ratio = np.minimum(
+            sde._C_cap[:n] / np.maximum(sde._C_cap[n:nx_phys], 1e-12),
+            1.0,
+        )
+        assert diag[n] == pytest.approx(0.3 * ratio[0])
+        assert diag[n + 1] == pytest.approx(0.1 * ratio[1])
 
     def test_controlled_output_equals_state(self, two_room):
         model, sources = two_room
