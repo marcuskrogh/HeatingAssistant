@@ -93,9 +93,9 @@ That is the wrong product model. Two-layer NMPC is gone; PE must not pretend a 2
 - Prior: [SWD-558](https://marcusknielsen.atlassian.net/browse/SWD-558) (Relates)
 - Sub-tasks: [SWD-562](https://marcusknielsen.atlassian.net/browse/SWD-562), [SWD-563](https://marcusknielsen.atlassian.net/browse/SWD-563)
 - Branch: `cursor/swd-561-revert-pe-slow-origin-9845`
-- PR: (opened on this Task)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/688
 - Classification: iterate
 - Workflow: fix-fast
 
 ## Next
-`/architect SWD-561` — shape stamp, then implement → test → restructure → review → ship on the same PR
+`/ship SWD-561` — CI + merge on https://github.com/marcuskrogh/HeatingAssistant/pull/688
