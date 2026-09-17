@@ -13,7 +13,7 @@ from heatingassistant.engine.const import (
     DEFAULT_PE_MAX_COMPUTE_S,
 )
 from heatingassistant.engine.estimation.nstep_pem import timeout_user_message
-from heatingassistant.engine.nmpc_timing import pe_origin_stride, timing_from_options
+from heatingassistant.engine.nmpc_timing import timing_from_options
 from heatingassistant.engine.thermal_model import HouseModel
 from tests.helpers.estimation_fixtures import (
     generate_history,
@@ -148,11 +148,10 @@ def test_production_pe_grid_follows_nmpc_timing():
     est = make_kalman_ml_estimator(
         [room], sources, dt=timing.dt_s,
         n_horizon_steps=timing.n_fast,
-        origin_stride=pe_origin_stride(timing.dt_s),
+        origin_stride=timing.fast_substeps,
         use_nstep_pem=True,
     )
     assert est._n_horizon_steps == timing.n_fast
-    assert est._origin_stride == 8
+    assert est._origin_stride == timing.fast_substeps
     assert timing.n_fast == 144
     assert timing.fast_substeps == 1
-    assert est._origin_stride != timing.fast_substeps

@@ -9,7 +9,6 @@ import pytest
 
 from heatingassistant.engine.estimation.constants import PE_ETA_STALE_EVALS
 from heatingassistant.engine.estimation.kalman_ml import KalmanMLEstimator
-from heatingassistant.engine.nmpc_timing import pe_origin_stride
 from tests.helpers.estimation_fixtures import (
     generate_history,
     make_electric_heaters,
@@ -42,17 +41,15 @@ PROGRESS = (
 )
 
 
-def test_pe_origin_stride_is_two_hour_grid() -> None:
-    assert pe_origin_stride(900.0) == 8
-    assert pe_origin_stride(60.0) == 120
-    assert pe_origin_stride(0.0) == 1
-    assert pe_origin_stride(-15.0) == 1
-
-
-def test_production_lifecycle_uses_pe_origin_stride() -> None:
+def test_production_lifecycle_uses_nmpc_origin_stride() -> None:
     src = LIFECYCLE.read_text(encoding="utf-8")
-    assert "pe_origin_stride(timing.dt_s)" in src
-    assert "origin_stride=timing.fast_substeps" not in src
+    assert "origin_stride=timing.fast_substeps" in src
+    assert "pe_origin_stride" not in src
+    timing_src = (
+        ROOT / "heatingassistant" / "engine" / "nmpc_timing.py"
+    ).read_text(encoding="utf-8")
+    assert "def pe_origin_stride" not in timing_src
+    assert "DEFAULT_PE_ORIGIN_PERIOD_S" not in timing_src
 
 
 def test_eta_plateau_requires_a_compute_cap() -> None:

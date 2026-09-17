@@ -154,7 +154,7 @@ class KalmanMLEstimator:
         cap (library callers and tests).  Production PE passes
         ``pe_max_compute_s`` (default 60).
     n_horizon_steps, origin_stride :
-        NMPC fast look-ahead and slow-period stride for receding N-step PEM.
+        NMPC look-ahead and origin stride on the same sample grid.
         When omitted, they fall back to the tiled OE window length.
     use_nstep_pem : bool
         Production default True.  False keeps tiled OE (baseline / warm-start).
