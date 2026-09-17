@@ -43,6 +43,7 @@ _MAX_PREFIX_FRACTION: float = 0.25
 
 
 from .history.records import record_d, record_u, record_window_open
+from .wall_constraints import project_wall_block
 
 
 def ekf_state_at_end_of_history(
@@ -161,6 +162,8 @@ def ekf_state_at_end_of_history(
         except Exception as exc:
             _LOGGER.debug("EKF update failed during initial-state seed: %s", exc)
             return None
+        t_out_k = float(d_curr[0]) if len(d_curr) else None
+        project_wall_block(x_curr, y_update, t_out_k, n)
 
         t_prev = timestamp
         u_prev = u_curr

@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 from mbc.estimation import ContinuousDiscreteEKF
 
+from ..wall_constraints import project_wall_block
+
 
 class _InnovationEKF(ContinuousDiscreteEKF):
     """CD-EKF that records the Kalman innovation after each measurement fusion.
@@ -39,5 +41,10 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         x_prior = self._x.copy()
         y_hat = self._model.hm(x_prior, u, d, p, 0.0)
         self._last_innovation = (np.asarray(y, dtype=float) - y_hat).tolist()
-        return self.update(y, u, d, p, mask=mask)
+        self.update(y, u, d, p, mask=mask)
+        n = int(getattr(self._model, "_n_rooms", 0) or 0)
+        d_arr = np.asarray(d, dtype=float).reshape(-1)
+        t_out = float(d_arr[0]) if d_arr.size else None
+        project_wall_block(self._x, np.asarray(y, dtype=float), t_out, n)
+        return np.asarray(self._x, dtype=float), np.asarray(self.P, dtype=float)
 

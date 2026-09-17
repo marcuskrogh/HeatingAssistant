@@ -138,7 +138,9 @@ _R_AW_LO, _R_AW_HI = 0.02, 0.90
 #: real multi-hour excitation to move them.
 _SPLIT_PRIOR_STD = 0.1
 
-#: Linear-space bounds for the wall-envelope initial temperature [°C].
+#: Linear-space *safety* bounds for the wall-envelope initial temperature [°C].
+#: Operational identification uses the air–outdoor envelope in
+#: ``wall_constraints`` (typically a few kelvin around min/max of T_a, T_out).
 _T_WALL_LO = -30.0
 _T_WALL_HI =  60.0
 

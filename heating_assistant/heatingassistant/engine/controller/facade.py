@@ -271,11 +271,9 @@ class HeatingMPCController:
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K^2]
-        # The wall states are not measured and start at the air temperature;
-        # give them a larger initial variance so the filter knows they are a
-        # guess and lets the dynamics pull them to a consistent value.
+        # Wall is unmeasured; modest extra variance (not a free random walk).
         for i in range(n_rooms):
-            P0[n_rooms + i, n_rooms + i] = 4.0
+            P0[n_rooms + i, n_rooms + i] = 1.0
         self._ekf = _InnovationEKF(
             self._system, x0, P0,
             params=ContinuousDiscreteEKFParams(

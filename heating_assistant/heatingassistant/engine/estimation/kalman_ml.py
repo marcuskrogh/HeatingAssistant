@@ -13,6 +13,7 @@ import numpy as np
 from ..controller import HouseThermalSDE as HouseThermalSystem
 from ..heat_sources import HeatSource
 from ..thermal_model import Room
+from ..wall_constraints import apply_t_wall_init_envelope_bounds
 from mbc.control import ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
@@ -662,6 +663,11 @@ class KalmanMLEstimator:
             + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
             + [(_UA_OPEN_LO, _UA_OPEN_HI)] * len(identifiable_ua)
         )
+        apply_t_wall_init_envelope_bounds(
+            bounds, layout, history, n,
+            dataset_start_timestamps=dataset_start_timestamps,
+            theta_prior=theta_prior,
+        )
 
         # ── Apply parameter locks (equality constraints via lb = ub) ──────
         if locked_params:
@@ -1062,6 +1068,9 @@ class KalmanMLEstimator:
             + [(float(theta_prior[n + i]), float(theta_prior[n + i])) for i in range(n)]
             + [(float(theta_prior[2 * n + i]), float(theta_prior[2 * n + i])) for i in range(n)]
             + [(_T_WALL_LO, _T_WALL_HI)] * n
+        )
+        apply_t_wall_init_envelope_bounds(
+            bounds, layout, fit_history, n, theta_prior=theta_prior,
         )
 
         std_history = self._convert_history_std(fit_history, use_ym=False)

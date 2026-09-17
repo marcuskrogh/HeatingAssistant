@@ -224,10 +224,11 @@ class TestHouseThermalSDE:
         n = sde._n_rooms  # n=2
         nx_phys = sde._nx_phys  # 2n=4
         b_start = sde._offset_block_start  # 2n+m=4 (no filter)
-        # Block diagonal: 0.1·I on the air block, 0.1·I on the wall block,
-        # 0.002·I on the offset block.
+        # Block diagonal: 0.1·I on the air block, 0.01·I on the wall block
+        # (WALL_PROCESS_NOISE_FRACTION=0.1), 0.002·I on the offset block.
         expected = np.zeros((sde.nx, sde.nx))
-        expected[:nx_phys, :nx_phys] = 0.1 * np.eye(nx_phys)
+        expected[:n, :n] = 0.1 * np.eye(n)
+        expected[n:nx_phys, n:nx_phys] = 0.01 * np.eye(n)
         expected[b_start:b_start + n, b_start:b_start + n] = 0.002 * np.eye(n)
         np.testing.assert_array_almost_equal(sig, expected)
 
@@ -249,6 +250,9 @@ class TestHouseThermalSDE:
         # Air block: living_room gets scale=9, bedroom gets scale=1.
         assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9) = 0.3
         assert diag[1] == pytest.approx(0.1)  # 0.1 * sqrt(1) = 0.1
+        # Wall block is 0.1 × the matching air diffusion.
+        assert diag[2] == pytest.approx(0.03)
+        assert diag[3] == pytest.approx(0.01)
 
     def test_controlled_output_equals_state(self, two_room):
         model, sources = two_room
@@ -651,7 +655,9 @@ class TestContinuousDiscreteEKF:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         x_hat, P = ekf.step(y, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(x_hat[:sde.nym], y, decimal=1)
+        # One-step CD-EKF is pulled toward y; reduced wall process noise keeps
+        # more model coupling, so the snap is not to 0.1 K.
+        np.testing.assert_allclose(x_hat[:sde.nym], y, atol=0.25)
 
     def test_covariance_propagates(self, two_room):
         """P should change after a predict-update cycle."""

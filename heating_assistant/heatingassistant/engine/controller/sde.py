@@ -15,6 +15,7 @@ from ..const import (
 )
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel, _SG_FACTOR_TYPICAL
+from ..wall_constraints import WALL_PROCESS_NOISE_FRACTION
 
 
 class HouseThermalSDE(ContinuousDiscreteSDE):
@@ -31,7 +32,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
     where
         f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d
-        sigma             = diag(sigma_w*I_n, sigma_b*I_n)
+        sigma             = diag(σ_w I_n air, 0.1 σ_w I_n wall, σ_b I_n)
 
     and the observation model is:
         ym(tₖ) = hm(x) = T + b
@@ -401,8 +402,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         Block-diagonal layout matching the state vector
         ``[T_a (n), T_w (n), φ (m), b (n if augment_offsets)]``:
 
-        * physical blocks:  ``σ_w · √(q_scale)`` per room, applied to both
-          the air and the wall node of the room,
+        * physical blocks:  ``σ_w · √(q_scale)`` on the air node; wall node
+          uses ``WALL_PROCESS_NOISE_FRACTION · σ_w · √(q_scale)`` so the
+          slow mass cannot Brownian-walk like indoor air,
         * filter block:     ``σ_w`` per filtered source,
         * offset block:     ``σ_b`` per room (random-walk bias).
         """
@@ -411,7 +413,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         physical_std = np.sqrt(np.maximum(self._room_q_scales, 0.0))
         diag_parts = [
             self._sigma_w * physical_std,          # air block
-            self._sigma_w * physical_std,          # wall block
+            WALL_PROCESS_NOISE_FRACTION * self._sigma_w * physical_std,
             self._sigma_w * np.ones(m, dtype=float),
         ]
         if self._augment_offsets:

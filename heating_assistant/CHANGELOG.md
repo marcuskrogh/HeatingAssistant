@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.26
+
+- Wall/mass temperature on the room plot stays physically between indoor air
+  and outdoor air (with a small allowance for solar-warmed surfaces). The
+  live filter no longer lets the hidden wall crash well below outdoor
+  overnight, and parameter estimation uses the same envelope.
+
 # 2026.09.25
 
 - Parameter estimation launches N-step origins every two hours on a 15-minute

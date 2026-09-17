@@ -388,12 +388,18 @@ $$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{H}\bigr)\,\mathbf{P}
 
 | Symbol | Meaning |
 |--------|---------|
-| $\boldsymbol{\sigma}$ | Diffusion matrix — $\sigma_w \mathbf{I}$ for isotropic process noise (default $\sigma_w = 0.1$ K/√s). |
+| $\boldsymbol{\sigma}$ | Diffusion matrix — $\sigma_w$ on the **air** block (default $0.1$ K/√s); the **wall** block uses $0.1\,\sigma_w$ so the slow mass cannot Brownian-walk like indoor air.  Offset states use a much smaller $\sigma_b$. |
 | $\mathbf{R}_m$ | Measurement noise covariance — $\sigma_v^2 \mathbf{I}$ (default $\sigma_v = 0.5$ K). |
 | $\mathbf{P}$ | State error covariance — propagated at every step; determines the Kalman gain. |
-| $\mathbf{H} = \partial\mathbf{h}_m/\partial\mathbf{x}$ | Observation Jacobian — identity matrix for full-state observation. |
+| $\mathbf{H} = \partial\mathbf{h}_m/\partial\mathbf{x}$ | Observation Jacobian — identity on the air block; the wall is unmeasured. |
 
-For the house thermal system with full-state observation ($\mathbf{h}_m = \mathbf{I}$, one temperature sensor per room), the Kalman gain converges quickly to a value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
+Only air temperature is measured.  After each update the wall nodes are **projected** onto a physical envelope
+
+$$\min(T_{a,i}, T_{\mathrm{out}}) - 1.5\,\mathrm{K} \;\le\; \hat T_{w,i} \;\le\; \max(T_{a,i}, T_{\mathrm{out}}) + 8\,\mathrm{K}$$
+
+so the hidden state cannot sit well below outdoor (or far above the warmer of air and outdoor) to soak up model mismatch.  Parameter estimation uses the same envelope as a data-dependent box on $T_{w}(t_0)$ and a quadratic penalty on open-loop wall paths that leave it.
+
+For the house thermal system the Kalman gain on the air block weights measurements heavily relative to the model prediction.  The wall gain stays small because wall process noise is reduced and the envelope clips residual unphysical updates.
 
 ### 4.3 Optimal control problem — batch QP
 

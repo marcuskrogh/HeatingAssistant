@@ -34,6 +34,7 @@ import numpy as np
 
 from .history.records import record_d, record_u, record_window_open
 from .simulation.model_patch import build_sim_model
+from .wall_constraints import project_wall_block
 
 # Backward-compatible alias for callers still importing from sysid.
 _build_sim_model = build_sim_model
@@ -427,6 +428,9 @@ def run_sysid_ekf(
 
         x_curr = ekf_step.x_hat
         P_curr = ekf_step.P
+        t_out_k = float(d_curr[0]) if len(d_curr) else None
+        project_wall_block(ekf_step._x, y_k, t_out_k, n)
+        x_curr = ekf_step.x_hat
         # Re-anchor each open-window room's air node to its true sensor reading.
         # The reading is excluded from the *fit* (it was masked above) but is a
         # perfectly good temperature, so using it to hold the state keeps the
