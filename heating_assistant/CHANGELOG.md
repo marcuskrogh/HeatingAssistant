@@ -6,10 +6,10 @@ must be the exact calendar version on its own line.
 
 # 2026.09.26
 
-- Wall/mass temperature on the room plot stays physically between indoor air
-  and outdoor air (with a small allowance for solar-warmed surfaces). The
-  live filter no longer lets the hidden wall crash well below outdoor
-  overnight, and parameter estimation uses the same envelope.
+- The estimated wall/mass temperature follows the two-node room physics: a
+  mix of indoor air and outdoor air, plus solar on the surfaces. The live
+  filter and parameter estimation use that mix as a measurement of the
+  hidden wall, rather than clipping the number after the fact.
 
 # 2026.09.25
 

@@ -138,16 +138,14 @@ _R_AW_LO, _R_AW_HI = 0.02, 0.90
 #: real multi-hour excitation to move them.
 _SPLIT_PRIOR_STD = 0.1
 
-#: Linear-space *safety* bounds for the wall-envelope initial temperature [°C].
-#: Operational identification uses the air–outdoor envelope in
-#: ``wall_constraints`` (typically a few kelvin around min/max of T_a, T_out).
+#: Linear-space *safety* bounds for the wall initial temperature [°C].
+#: Identification does not box Tw0 to a clip envelope; the MAP mean is the
+#: algebraic 2R2C wall SS at the dataset-start anchors (see wall_physics).
 _T_WALL_LO = -30.0
 _T_WALL_HI =  60.0
 
-#: Prior standard deviation for the wall initial temperature [°C].  A
-#: 5 °C width says "the wall probably started close to the measured air
-#: temperature, but could be a few degrees off."  The prior mean is set
-#: to the first measured air temperature at estimation time.
+#: Prior standard deviation for the wall initial temperature [°C].  Width
+#: around algebraic T_w^ss (lag of the hidden mass, not a hard box).
 _T_WALL_PRIOR_STD = 5.0
 
 #: Minimum regularisation weight for the wall initial temperature.  With

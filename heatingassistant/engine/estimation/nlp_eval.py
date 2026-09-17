@@ -8,8 +8,9 @@ from typing import Any, Callable, List, Optional, Tuple
 import numpy as np
 from mbc.control import NLPProblem, ScipyNLPBackend
 
-from .constants import _T_WALL_MIN_LAM, _T_WALL_PRIOR_STD
+from .constants import _T_WALL_MIN_LAM
 from .nstep_pem import PeCancelled, PeComputeTimeout, PeEtaPlateau, _check_deadline
+from .regularization import _tw0_map_value_and_grad
 
 _LOGGER = logging.getLogger("heatingassistant.engine.estimation.kalman_ml")
 
@@ -117,17 +118,11 @@ class WallInitMseCache:
             max_window_steps=self._est._max_window_steps,
             min_segment_steps=self._est._min_segment_steps,
         )
-        a_tw, b_tw = self._layout.idx_t_wall_init
-        t_wall = theta[a_tw:b_tw]
         floor = _T_WALL_MIN_LAM if self._min_lam is None else float(self._min_lam)
         lam_tw = max(self._est._regularization, floor)
-        reg = lam_tw * float(
-            np.sum((t_wall - self._est._t_wall_init_prior) ** 2)
-        ) / (_T_WALL_PRIOR_STD ** 2)
         reg_grad = np.zeros(len(theta))
-        reg_grad[a_tw:b_tw] = (
-            2.0 * lam_tw * (t_wall - self._est._t_wall_init_prior)
-            / (_T_WALL_PRIOR_STD ** 2)
+        reg, _ = _tw0_map_value_and_grad(
+            self._est, theta, self._layout, lam_tw, grad=reg_grad,
         )
         self._cache[0] = theta.copy()
         self._cache[1] = mse + reg

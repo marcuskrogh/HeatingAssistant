@@ -50,6 +50,7 @@ from heatingassistant.engine.simulation.sysid_helpers import (
     patched_heat_sources,
 )
 from heatingassistant.engine.sysid import run_sysid_simulation
+from heatingassistant.engine.wall_physics import wall_ss_from_room
 from heatingassistant.persistence import save_config
 
 _LOGGER = logging.getLogger(__name__)
@@ -273,16 +274,22 @@ def _resolve_simulation_t_wall(
         estimated = {}
     result = {str(name): float(val) for name, val in dict(estimated or {}).items()}
     if not result:
-        result = _midpoint_t_wall(history, room_names)
+        house = None
+        try:
+            house = _model(runtime)
+        except Exception:
+            house = None
+        result = _wall_ss_t_wall(history, room_names, house)
     _write_t_wall_into_room_params(room_params, result)
     return result, "window_fit"
 
 
-def _midpoint_t_wall(
+def _wall_ss_t_wall(
     history: Sequence[Mapping[str, Any]],
     room_names: Sequence[str],
+    house: Any = None,
 ) -> dict[str, float]:
-    """Air/outdoor midpoint when wall-only optimisation cannot return a value."""
+    """Algebraic 2R2C wall SS when wall-only optimisation cannot return a value."""
 
     if not history:
         return {}
@@ -294,6 +301,8 @@ def _midpoint_t_wall(
         t_out = None
     if t_out is not None and t_out != t_out:
         t_out = None
+    rooms = getattr(house, "rooms", None) or {}
+    d_solar = first.get("d_solar") or {}
     result: dict[str, float] = {}
     for i, name in enumerate(room_names):
         if i >= len(y_vals):
@@ -302,8 +311,18 @@ def _midpoint_t_wall(
             t_air = float(y_vals[i])
         except (TypeError, ValueError):
             continue
-        if t_out is not None:
-            result[str(name)] = round(0.5 * (t_air + t_out), 2)
+        room = rooms.get(str(name)) if isinstance(rooms, dict) else None
+        q_s = None
+        try:
+            q_s = float(d_solar.get(str(name))) if d_solar else None
+        except (TypeError, ValueError):
+            q_s = None
+        if room is not None:
+            result[str(name)] = round(
+                wall_ss_from_room(room, t_air, t_out, q_s), 2,
+            )
+        elif t_out is not None:
+            result[str(name)] = round(t_air, 2)
         else:
             result[str(name)] = round(t_air, 2)
     return result

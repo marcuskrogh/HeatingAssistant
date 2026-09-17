@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from ..controller import HouseThermalSDE as HouseThermalSystem
+from ..wall_physics import wall_ss_from_room
 from .constants import (
     _C_AIR_HI,
     _C_AIR_LO,
@@ -34,11 +35,11 @@ def _update_wall_init_prior_from_history(
     est: Any,
     history: List[Dict[str, Any]],
 ) -> None:
-    """Set the wall-init MAP prior from the first record's air / outdoor temps.
+    """Set the wall-init MAP prior to algebraic 2R2C SS at the first record.
 
-    Uses a (T_a, T_out) midpoint blend — a better default than T_wall = T_air
-    after long envelope transients — and falls back to measured air when
-    outdoor temperature is unavailable.
+    ``T_w^ss = ρ T_a + (1−ρ) T_out + Q_wall/g_sum`` from each room's
+    conductances (and solar slot when present).  Falls back to measured
+    air when that room's air reading is missing.
     """
     if not history:
         return
@@ -49,6 +50,9 @@ def _update_wall_init_prior_from_history(
         t_out = float(first.get("d_outdoor"))
     except (TypeError, ValueError):
         t_out = None
+    d_solar = first.get("d_solar")
+    d_arr = first.get("d")
+    rooms = getattr(est, "_rooms", [])
     for i in range(est._n):
         t_air: Optional[float] = None
         if i < len(first_y):
@@ -58,10 +62,24 @@ def _update_wall_init_prior_from_history(
                 t_air = None
         if t_air is None:
             continue
-        if t_out is not None and np.isfinite(t_out):
-            # Midpoint between air and outdoor is a robust cold-start for
-            # the hidden envelope when no filter history is available.
-            est._t_wall_init_prior[i] = 0.5 * (t_air + t_out)
+        q_s: Optional[float] = None
+        if isinstance(d_solar, dict) and i < len(est._room_names):
+            try:
+                q_s = float(d_solar.get(est._room_names[i]))
+            except (TypeError, ValueError):
+                q_s = None
+        elif d_arr is not None:
+            try:
+                slot = 1 + i
+                if slot < len(d_arr):
+                    q_s = float(d_arr[slot])
+            except (TypeError, ValueError, IndexError):
+                q_s = None
+        room = rooms[i] if i < len(rooms) else None
+        if room is not None:
+            est._t_wall_init_prior[i] = wall_ss_from_room(room, t_air, t_out, q_s)
+        elif t_out is not None and np.isfinite(t_out):
+            est._t_wall_init_prior[i] = t_air
         else:
             est._t_wall_init_prior[i] = t_air
 

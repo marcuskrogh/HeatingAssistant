@@ -241,6 +241,19 @@ class TestUpdateWallInitPriorFromHistory:
         _update_wall_init_prior_from_history(est, [{"y": [23.5]}])
         assert est._t_wall_init_prior[0] == pytest.approx(23.5)
 
+    def test_uses_rc_steady_state_when_outdoor_present(self):
+        from heatingassistant.engine.wall_physics import wall_ss_from_room
+
+        room = make_single_room()
+        est = make_kalman_ml_estimator([room], [], dt=60.0)
+        _update_wall_init_prior_from_history(
+            est, [{"y": [22.0], "d_outdoor": 10.0}],
+        )
+        assert est._t_wall_init_prior[0] == pytest.approx(
+            wall_ss_from_room(room, 22.0, 10.0),
+        )
+        assert est._t_wall_init_prior[0] != pytest.approx(16.0)
+
 
 class TestPinLockedParams:
     """_pin_locked_params collapses bounds to a single value."""

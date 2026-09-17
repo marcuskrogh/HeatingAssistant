@@ -104,10 +104,11 @@ One day of data can cover every recommended category.
 Several days of normal operation usually give a more reliable model.
 The page also supports one-step EKF reconstruction, open-loop simulation,
 and model-fit validation before you apply results.  The hidden wall/mass
-temperature is kept inside a physical envelope between indoor air and outdoor
-air (with a small solar overshoot allowance) during both live filtering and
-identification, so a fit cannot park the wall at an impossible temperature
-to explain the air measurements.
+temperature is reconstructed from the two-node room physics: in steady
+state it sits at a mix of indoor air and outdoor air (plus solar on the
+surfaces).  Live filtering and identification use that mix as a
+measurement of the wall, so a fit cannot park the wall at an impossible
+temperature to explain the air measurements.
 
 The App service `estimate_parameters_ml` performs the same joint optimisation if
 you call it programmatically; the panel is the supported workflow.
@@ -120,7 +121,7 @@ you call it programmatically; the panel is the supported workflow.
 | `r_external` | Thermal resistance to the outdoors [K/W] |
 | `internal_gain` | Steady background heat not from the controllable source [W] |
 | `power_scale` | Multiplier on the nominal heat-source rating (per source) |
-| `t_wall_initial` | Hidden wall/mass temperature at each dataset start; boxed to the air–outdoor envelope |
+| `t_wall_initial` | Hidden wall/mass temperature at each dataset start; MAP toward the 2R2C wall mix of air and outdoor |
 
 Lock individual parameters on the room detail page if you want the estimator to
 hold them fixed. **Parameter confidence** on each room tile summarises whether the

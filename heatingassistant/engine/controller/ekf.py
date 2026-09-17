@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from mbc.estimation import ContinuousDiscreteEKF
 
-from ..wall_constraints import project_wall_block
+from ..wall_physics import apply_wall_ss_fusion
 
 
 class _InnovationEKF(ContinuousDiscreteEKF):
@@ -17,6 +17,8 @@ class _InnovationEKF(ContinuousDiscreteEKF):
     which combines predict + update.  This subclass intercepts that call to
     compute and store ``ν = y − hm(x̂⁻)`` between the two phases, making the
     innovation available via the ``last_innovation`` property after each step.
+    After the air update, the wall block is fused with the 2R2C algebraic
+    steady state (Kalman measurement, not a clip).
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -42,9 +44,5 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         y_hat = self._model.hm(x_prior, u, d, p, 0.0)
         self._last_innovation = (np.asarray(y, dtype=float) - y_hat).tolist()
         self.update(y, u, d, p, mask=mask)
-        n = int(getattr(self._model, "_n_rooms", 0) or 0)
-        d_arr = np.asarray(d, dtype=float).reshape(-1)
-        t_out = float(d_arr[0]) if d_arr.size else None
-        project_wall_block(self._x, np.asarray(y, dtype=float), t_out, n)
+        apply_wall_ss_fusion(self, y, d)
         return np.asarray(self._x, dtype=float), np.asarray(self.P, dtype=float)
-

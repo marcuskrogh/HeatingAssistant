@@ -6,6 +6,7 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 
+from ..wall_physics import apply_wall_ss_param_grad, wall_ss_partials
 from .constants import (
     _MASS_PRIOR_WEIGHT,
     _SPLIT_PRIOR_STD,
@@ -13,7 +14,87 @@ from .constants import (
     _T_WALL_PRIOR_STD,
     _UA_OPEN_PRIOR_STD,
 )
+from .model_build import _theta_model_quantities
 from .theta_layout import _ThetaLayout
+
+
+def tw0_ss_means(est: Any, layout: _ThetaLayout, theta: np.ndarray) -> np.ndarray:
+    """MAP mean for each ``t_wall_init`` entry: algebraic ``T_w^ss(θ)`` at anchors."""
+    n = layout.n_rooms
+    n_segs = layout.n_wall_segs
+    fallback = np.tile(np.asarray(est._t_wall_init_prior, dtype=float), n_segs)
+    ta = getattr(est, "_tw0_ta", None)
+    if ta is None:
+        return fallback
+    tout = np.asarray(getattr(est, "_tw0_tout", np.array([])), dtype=float).ravel()
+    qsol = getattr(est, "_tw0_qsol", None)
+    quants = _theta_model_quantities(est, layout, theta)
+    means = np.empty(n * n_segs, dtype=float)
+    ta_arr = np.asarray(ta, dtype=float)
+    for s in range(n_segs):
+        ta_s = ta_arr[s] if ta_arr.ndim == 2 else ta_arr
+        to_s = float(tout[s]) if s < tout.size else (
+            float(tout[-1]) if tout.size else 20.0
+        )
+        qs = None
+        if qsol is not None:
+            q_arr = np.asarray(qsol, dtype=float)
+            qs = q_arr[s] if q_arr.ndim == 2 else q_arr
+        mu, _drf, _dlogr, _dlogs = wall_ss_partials(quants, ta_s, to_s, qs)
+        means[s * n:(s + 1) * n] = mu[:n]
+    return means
+
+
+def _tw0_map_value_and_grad(
+    est: Any,
+    theta: np.ndarray,
+    layout: _ThetaLayout,
+    lam_tw: float,
+    grad: Optional[np.ndarray] = None,
+) -> Tuple[float, Optional[np.ndarray]]:
+    """Gaussian MAP of Tw0 toward ``T_w^ss(θ)``; optional in-place *grad*."""
+    a, b = layout.idx_t_wall_init
+    tw = np.asarray(theta[a:b], dtype=float)
+    mu = tw0_ss_means(est, layout, theta)
+    if mu.size != tw.size:
+        mu = np.resize(mu, tw.size)
+    err = tw - mu
+    sigma2 = float(_T_WALL_PRIOR_STD) ** 2
+    reg = float(lam_tw) * float(np.sum(err ** 2)) / sigma2
+    if grad is None:
+        return reg, None
+    scale_vec = (2.0 * float(lam_tw) / sigma2) * err
+    grad[a:b] = grad[a:b] + scale_vec
+    ta = getattr(est, "_tw0_ta", None)
+    if ta is None:
+        return reg, grad
+    n = layout.n_rooms
+    n_segs = layout.n_wall_segs
+    quants = _theta_model_quantities(est, layout, theta)
+    tout = np.asarray(getattr(est, "_tw0_tout", np.array([])), dtype=float).ravel()
+    qsol = getattr(est, "_tw0_qsol", None)
+    ta_arr = np.asarray(ta, dtype=float)
+    for s in range(n_segs):
+        ta_s = ta_arr[s] if ta_arr.ndim == 2 else ta_arr
+        to_s = float(tout[s]) if s < tout.size else (
+            float(tout[-1]) if tout.size else 20.0
+        )
+        qs = None
+        if qsol is not None:
+            q_arr = np.asarray(qsol, dtype=float)
+            qs = q_arr[s] if q_arr.ndim == 2 else q_arr
+        _mu, dmu_drf, dmu_dlogr, dmu_dlogs = wall_ss_partials(
+            quants, ta_s, to_s, qs,
+        )
+        for i in range(n):
+            idx = s * n + i
+            if idx >= scale_vec.size:
+                break
+            apply_wall_ss_param_grad(
+                grad, float(scale_vec[idx]), i,
+                dmu_drf, dmu_dlogr, dmu_dlogs, layout,
+            )
+    return reg, grad
 
 
 def _compute_regularization_gradient(
@@ -42,13 +123,7 @@ def _compute_regularization_gradient(
     grad[a:b] = 2.0 * lam * (q_int - est._q_int_prior) / (100.0 ** 2)
 
     lam_tw = max(lam, _T_WALL_MIN_LAM)
-    a, b = layout.idx_t_wall_init
-    all_t_wall = theta[a:b]
-    all_t_wall_prior = np.tile(est._t_wall_init_prior, layout.n_wall_segs)
-    grad[a:b] = (
-        2.0 * lam_tw * (all_t_wall - all_t_wall_prior)
-        / (_T_WALL_PRIOR_STD ** 2)
-    )
+    _tw0_map_value_and_grad(est, theta, layout, lam_tw, grad=grad)
 
     a, b = layout.idx_log_alpha
     if a < b:
@@ -165,16 +240,10 @@ def _compute_regularization_theta(
     )
     lam = est._regularization
     lam_tw = max(lam, _T_WALL_MIN_LAM)
-    # Wall initial temperatures (all segments): Gaussian prior toward
-    # first air temp.  Uses lam_tw ≥ _T_WALL_MIN_LAM so even under the
-    # default weak regularisation the parameters stay in a physically
-    # plausible range.
-    a, b = layout.idx_t_wall_init
-    all_t_wall = theta[a:b]
-    all_t_wall_prior = np.tile(est._t_wall_init_prior, layout.n_wall_segs)
-    reg += lam_tw * float(
-        np.sum((all_t_wall - all_t_wall_prior) ** 2)
-    ) / (_T_WALL_PRIOR_STD ** 2)
+    # Wall initial temperatures: Gaussian MAP toward algebraic T_w^ss(θ)
+    # at the dataset-start air/outdoor/solar anchors (not a clip box).
+    tw_reg, _ = _tw0_map_value_and_grad(est, theta, layout, lam_tw)
+    reg += tw_reg
     if len(log_solar):
         prior = np.array([
             est._log_solar_prior_full[i] for i in layout.identifiable_solar

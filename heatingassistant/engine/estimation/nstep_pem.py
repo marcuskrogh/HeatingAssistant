@@ -12,10 +12,7 @@ from .constants import _EMPTY_IDX, _T_WALL_HI, _T_WALL_LO
 from .model_build import _build_parametric_system, _theta_model_quantities
 from .sensitivity import _dFdtheta_const, _dfdtheta_step
 from .theta_layout import _ThetaLayout
-from ..wall_constraints import (
-    accumulate_wall_envelope_penalty,
-    clip_wall_temperature,
-)
+from ..wall_physics import accumulate_wall_ss_penalty
 
 _SENTINEL = 1e10
 
@@ -285,16 +282,12 @@ def _seed_state(
         x = np.asarray(model.initial_state_from_measurement(ym0, u0, d0), dtype=float)
     sx = np.zeros((ntheta, nx))
     tw0, _ = layout.idx_t_wall_init
-    t_out0 = float(d0[0]) if len(d0) else None
     if inject_wall and wall_seg_idx is not None:
         tw_base = tw0 + wall_seg_idx * n
         for i in range(n):
             if n + i < nx:
-                raw = float(np.clip(theta[tw_base + i], _T_WALL_LO, _T_WALL_HI))
-                t_air0 = float(ym0[i]) if i < len(ym0) else raw
-                clipped = clip_wall_temperature(raw, t_air0, t_out0)
-                x[n + i] = clipped
-                sx[tw_base + i, n + i] = 0.0 if abs(clipped - raw) > 1e-12 else 1.0
+                x[n + i] = float(np.clip(theta[tw_base + i], _T_WALL_LO, _T_WALL_HI))
+                sx[tw_base + i, n + i] = 1.0
     return x, sx
 
 
@@ -443,9 +436,11 @@ def nstep_pem_and_grad(
                         residual[drop_j] = 0.0
                     total_sse += float(np.dot(residual, residual))
                     total_grad -= 2.0 * (sx_ol[:, :n] @ residual)
-                    t_out_j = float(d_j[0]) if len(d_j) else None
-                    total_sse, total_grad = accumulate_wall_envelope_penalty(
-                        total_sse, total_grad, x_ol, sx_ol, ym_jn, t_out_j, n,
+                    t_out_j = float(d_j[0]) if len(d_j) else 0.0
+                    q_sol_j = d_j[1:1 + n] if len(d_j) > 1 else None
+                    total_sse, total_grad = accumulate_wall_ss_penalty(
+                        total_sse, total_grad, x_ol, sx_ol, ym_jn, t_out_j,
+                        quants, q_solar=q_sol_j, n_rooms=n, layout=layout,
                     )
                     n_steps_used += 1
 

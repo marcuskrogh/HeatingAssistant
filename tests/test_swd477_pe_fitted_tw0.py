@@ -302,7 +302,7 @@ def test_loading_one_dataset_from_joint_pe_uses_that_block(monkeypatch):
     assert val["living_room"] == pytest.approx(15.0)
 
 
-def test_empty_window_opt_falls_back_to_midpoint_not_air(monkeypatch):
+def test_empty_window_opt_falls_back_to_wall_ss_not_air(monkeypatch):
     room = Room("living_room", 3.0e5, 0.05)
     runtime = SimpleNamespace(
         options={},
@@ -322,6 +322,9 @@ def test_empty_window_opt_falls_back_to_midpoint_not_air(monkeypatch):
         {},
         {"dataset_id": "unrelated"},
     )
+    from heatingassistant.engine.wall_physics import wall_ss_from_room
+    expect = round(wall_ss_from_room(room, 21.0, 8.0, 40.0), 2)
     assert source == "window_fit"
-    assert val["living_room"] == pytest.approx(14.5)
+    assert val["living_room"] == pytest.approx(expect)
     assert val["living_room"] != pytest.approx(21.0)
+    assert val["living_room"] != pytest.approx(14.5)

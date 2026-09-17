@@ -5,9 +5,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | In Progress | Relates SWD-554 | docs/agents/PLAN-wall-envelope.md | `/test SWD-564` — Dedicated test phase on PR #689 |
-| SWD-565 | Sub-task | EKF wall envelope projection and reduced wall process noise | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
-| SWD-566 | Sub-task | PE Tw0 envelope bounds and trajectory penalty | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
-| SWD-567 | Sub-task | Tests, THEORY, CalVer, changelog, App sync for wall envelope | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
+| SWD-565 | Sub-task | EKF wall SS fusion and reduced wall process noise | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
+| SWD-566 | Sub-task | PE Tw0 MAP and trajectory residual toward wall SS | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
+| SWD-567 | Sub-task | Tests, THEORY, CalVer, changelog, App sync for wall physics | Done | SWD-564 | docs/agents/PLAN-wall-envelope.md | — |
 | SWD-557 | Story | [Explore] Parameter estimation optimiser stall | Done | — | docs/pe-optimizer-stall.md (store) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/687 (`4e5d51c5`) |
 | SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | Done | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/687 (`4e5d51c5`) |
 | SWD-559 | Sub-task | PE origin stride, plateau stop, best-RMS overlay | Done | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
@@ -279,6 +279,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-17 — `/implement` SWD-564: replace envelope clip with 2R2C wall-SS fusion and θ-dependent MAP; PR https://github.com/marcuskrogh/HeatingAssistant/pull/689. Next `/test SWD-564`.
 - 2026-09-17 — `/implement` SWD-564: wall envelope in live EKF + PE; CalVer 2026.09.26; PR https://github.com/marcuskrogh/HeatingAssistant/pull/689. Next `/test SWD-564`.
 - 2026-09-17 — `/define` SWD-564: wall envelope in live EKF + PE; MODEL + ARCHITECTURE on `cursor/swd-564-wall-envelope-a891`; class bug / fix-fast; Next `/implement SWD-564`.
 - 2026-09-16 — `/ship` SWD-558 via PR #687 (`4e5d51c5`): PE origin stride 8 @ 15 min, η plateau on capped jobs, overlay best RMS; wait follows cap then cancel. Review CLEAN (focused). Changelog `# 2026.09.25`. Overnight 24 h PE was not a gate. Next: Done.

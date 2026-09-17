@@ -393,13 +393,13 @@ $$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{H}\bigr)\,\mathbf{P}
 | $\mathbf{P}$ | State error covariance — propagated at every step; determines the Kalman gain. |
 | $\mathbf{H} = \partial\mathbf{h}_m/\partial\mathbf{x}$ | Observation Jacobian — identity on the air block; the wall is unmeasured. |
 
-Only air temperature is measured.  After each update the wall nodes are **projected** onto a physical envelope
+Only air temperature is measured.  After each air update the filter fuses a second measurement of the wall block: the algebraic 2R2C steady state
 
-$$\min(T_{a,i}, T_{\mathrm{out}}) - 1.5\,\mathrm{K} \;\le\; \hat T_{w,i} \;\le\; \max(T_{a,i}, T_{\mathrm{out}}) + 8\,\mathrm{K}$$
+$$T_{w,i}^{\mathrm{ss}} = \rho_i T_{a,i} + (1-\rho_i) T_{\mathrm{out}} + Q_{\mathrm{wall},i}/(g_{\mathrm{aw},i}+g_{\mathrm{wout},i}), \qquad \rho_i = g_{\mathrm{aw},i}/(g_{\mathrm{aw},i}+g_{\mathrm{wout},i})$$
 
-so the hidden state cannot sit well below outdoor (or far above the warmer of air and outdoor) to soak up model mismatch.  Parameter estimation uses the same envelope as a data-dependent box on $T_{w}(t_0)$ and a quadratic penalty on open-loop wall paths that leave it.
+with measurement variance $\sigma_{\mathrm{lag}}^2 + (Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2$ (Joseph form on the wall block).  That is Bayesian use of the wall energy balance at $dT_w/dt=0$, not a clip of the posterior.  Parameter estimation uses the same $T_w^{\mathrm{ss}}(\theta)$ as the MAP mean for $T_w(t_0)$ (so the target moves with splits and UA) and as an open-loop path residual on simulated $T_w$.
 
-For the house thermal system the Kalman gain on the air block weights measurements heavily relative to the model prediction.  The wall gain stays small because wall process noise is reduced and the envelope clips residual unphysical updates.
+For the house thermal system the Kalman gain on the air block weights measurements heavily relative to the model prediction.  The wall follows air and outdoor through $\rho(\theta)$ and a reduced wall diffusion $\kappa\sigma_w$.
 
 ### 4.3 Optimal control problem — batch QP
 

@@ -68,6 +68,7 @@ from ..schedule_control import off_step_holds_heater_off
 from .ekf import _InnovationEKF
 from .linearised import HeatingLinearisedMPC
 from .sde import HouseThermalSDE
+from ..wall_physics import WALL_LAG_SIGMA_K
 
 
 def _diag_np(n: int, v: float) -> np.ndarray:
@@ -271,9 +272,10 @@ class HeatingMPCController:
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K^2]
-        # Wall is unmeasured; modest extra variance (not a free random walk).
+        # Unmeasured wall: prior variance matches the RC-lag measurement.
+        wall_p0 = float(WALL_LAG_SIGMA_K) ** 2
         for i in range(n_rooms):
-            P0[n_rooms + i, n_rooms + i] = 1.0
+            P0[n_rooms + i, n_rooms + i] = wall_p0
         self._ekf = _InnovationEKF(
             self._system, x0, P0,
             params=ContinuousDiscreteEKFParams(

@@ -13,7 +13,7 @@ import numpy as np
 from ..controller import HouseThermalSDE as HouseThermalSystem
 from ..heat_sources import HeatSource
 from ..thermal_model import Room
-from ..wall_constraints import apply_t_wall_init_envelope_bounds
+from ..wall_physics import capture_tw0_anchors_from_std
 from mbc.control import ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
@@ -67,6 +67,7 @@ from .regularization import (
     _compute_regularization,
     _compute_regularization_gradient,
     _compute_regularization_theta,
+    tw0_ss_means,
 )
 from .sensitivity import (
     _cd_ped_neg_ll_and_grad,
@@ -260,6 +261,9 @@ class KalmanMLEstimator:
         # Wall initial temperature prior: seeded at 20 °C; estimate() updates
         # it to a physics-informed value from the first record.
         self._t_wall_init_prior = np.full(len(rooms), 20.0)
+        self._tw0_ta = None
+        self._tw0_tout = None
+        self._tw0_qsol = None
         # Adaptive heater-scale prior weight; updated per estimate() call.
         self._alpha_prior_weight: float = _ALPHA_PRIOR_WEIGHT
         self._mass_prior_weight: float = _MASS_PRIOR_WEIGHT
@@ -663,11 +667,6 @@ class KalmanMLEstimator:
             + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
             + [(_UA_OPEN_LO, _UA_OPEN_HI)] * len(identifiable_ua)
         )
-        apply_t_wall_init_envelope_bounds(
-            bounds, layout, history, n,
-            dataset_start_timestamps=dataset_start_timestamps,
-            theta_prior=theta_prior,
-        )
 
         # ── Apply parameter locks (equality constraints via lb = ub) ──────
         if locked_params:
@@ -679,6 +678,11 @@ class KalmanMLEstimator:
 
         # ── Convert history (carries timestamps for gap detection) ────────
         std_history = self._convert_history_std(history, use_ym=True)
+        self._tw0_ta, self._tw0_tout, self._tw0_qsol = capture_tw0_anchors_from_std(
+            std_history, n, n_wall_segs, dataset_start_timestamps, meas_key="ym",
+        )
+        tw_a, tw_b = layout.idx_t_wall_init
+        theta_prior[tw_a:tw_b] = tw0_ss_means(self, layout, theta_prior)
 
         mse_cache = RegularizedMseCache(
             self,
@@ -989,7 +993,7 @@ class KalmanMLEstimator:
 
         ``prior_mean`` ``"air"`` seeds the MAP prior at the first measured
         air temperature (diagnostic simulate).  The default ``"midpoint"``
-        keeps the PE prior (air/outdoor blend).
+        keeps the PE prior (2R2C algebraic wall SS at the first sample).
 
         ``min_lam`` overrides ``_T_WALL_MIN_LAM`` so diagnostic simulate can
         let the window pull Tw0 farther from the prior.
@@ -1069,11 +1073,18 @@ class KalmanMLEstimator:
             + [(float(theta_prior[2 * n + i]), float(theta_prior[2 * n + i])) for i in range(n)]
             + [(_T_WALL_LO, _T_WALL_HI)] * n
         )
-        apply_t_wall_init_envelope_bounds(
-            bounds, layout, fit_history, n, theta_prior=theta_prior,
-        )
 
         std_history = self._convert_history_std(fit_history, use_ym=False)
+        if prior_mean == "air":
+            self._tw0_ta = None
+            self._tw0_tout = None
+            self._tw0_qsol = None
+        else:
+            self._tw0_ta, self._tw0_tout, self._tw0_qsol = (
+                capture_tw0_anchors_from_std(
+                    std_history, n, 1, None, meas_key="y",
+                )
+            )
 
         wall_cache = WallInitMseCache(self, layout, std_history, min_lam)
 

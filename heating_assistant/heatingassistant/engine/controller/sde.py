@@ -15,7 +15,7 @@ from ..const import (
 )
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel, _SG_FACTOR_TYPICAL
-from ..wall_constraints import WALL_PROCESS_NOISE_FRACTION
+from ..wall_physics import WALL_LAG_SIGMA_K, WALL_PROCESS_NOISE_FRACTION
 
 
 class HouseThermalSDE(ContinuousDiscreteSDE):
@@ -159,12 +159,22 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         # Used to seed wall states for open-loop starts and the QP
         # linearisation point.
         _ratios = []
+        _g_sum = []
+        _solar_to_q = []
         for name in self._room_list:
             room = model.rooms[name]
             _g_inf, g_aw, g_we = room.conductances()
             g_wout = g_we + float(room.sky_radiative_ua) + float(room.thermal_bridge_psi_l)
-            _ratios.append(g_aw / (g_aw + g_wout))
+            g_sum = max(float(g_aw + g_wout), 1e-12)
+            _g_sum.append(g_sum)
+            _ratios.append(float(g_aw) / g_sum)
+            facade = float(room.facade_solar_share) * float(room.facade_absorptance)
+            _solar_to_q.append(
+                (SOLAR_WALL_FRACTION + facade) * float(room.solar_scale)
+            )
         self._wall_eq_ratio: np.ndarray = np.array(_ratios, dtype=float)
+        self._wall_g_sum: np.ndarray = np.array(_g_sum, dtype=float)
+        self._wall_solar_to_q: np.ndarray = np.array(_solar_to_q, dtype=float)
 
         # Per-source first-order emitter filter (B2).
         # Each source with ``emitter_time_constant > 0`` gets a filter
@@ -977,16 +987,52 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         self,
         t_air: np.ndarray,
         t_out: float,
+        solar: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Steady-state wall temperatures for given air and outdoor temps.
 
-        ``T_w = ρ·T_a + (1 − ρ)·T_out`` with the per-room conductance
-        ratio ``ρ = g_aw / (g_aw + g_wout)`` (solar and inter-room flows
-        neglected).  Used to seed wall states for open-loop simulation
-        starts and the QP linearisation point.
+        ``T_w = ρ·T_a + (1 − ρ)·T_out + Q_wall/(g_aw+g_wout)`` with
+        ``ρ = g_aw / (g_aw + g_wout)``.  ``solar`` is unscaled room solar
+        [W] (disturbance slots 1…n).  Inter-room flow is neglected.
         """
         t_air = np.asarray(t_air, dtype=float).ravel()
-        return self._wall_eq_ratio * t_air + (1.0 - self._wall_eq_ratio) * float(t_out)
+        n = self._n_rooms
+        tw = (
+            self._wall_eq_ratio * t_air[:n]
+            + (1.0 - self._wall_eq_ratio) * float(t_out)
+        )
+        if solar is not None:
+            q_w = self._wall_solar_to_q * np.asarray(solar, dtype=float).ravel()[:n]
+            tw = tw + q_w / self._wall_g_sum
+        return tw
+
+    def wall_observation(
+        self,
+        t_air: np.ndarray,
+        d: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """RC-equilibrium wall measurement and its variance for the CD-EKF.
+
+        Returns ``(y_wall, r_diag)`` where ``y_wall`` is :meth:`wall_equilibrium`
+        including solar, and ``r_diag`` is lag variance plus
+        ``(Q_wall / g_sum)²`` so sun-driven offsets are not over-trusted.
+        """
+        n = self._n_rooms
+        ta = np.asarray(t_air, dtype=float).ravel()
+        d_arr = np.asarray(d, dtype=float).ravel()
+        t_out = float(d_arr[0]) if d_arr.size else 0.0
+        solar = np.zeros(n, dtype=float)
+        for i in range(n):
+            slot = 1 + i
+            if slot < d_arr.size:
+                solar[i] = float(d_arr[slot])
+        y_w = self.wall_equilibrium(ta, t_out, solar=solar)
+        q_w = self._wall_solar_to_q * solar
+        r = (
+            float(WALL_LAG_SIGMA_K) ** 2
+            + (q_w / self._wall_g_sum) ** 2
+        )
+        return y_w, np.maximum(r, 1e-6)
 
     def initial_state_from_measurement(
         self,
