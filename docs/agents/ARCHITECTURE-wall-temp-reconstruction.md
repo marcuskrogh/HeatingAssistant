@@ -9,4 +9,4 @@
 - Integrator `n_int_steps`, NMPC sample grid, PE origin stride, Tw clamps.
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`)
