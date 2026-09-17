@@ -9,4 +9,4 @@
 - Integrator `n_int_steps`, NMPC sample grid, PE origin stride, Tw clamps.
 
 ## Next
-`/implement SWD-564`
+`/test SWD-564` — https://github.com/marcuskrogh/HeatingAssistant/pull/690

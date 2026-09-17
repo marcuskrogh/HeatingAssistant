@@ -57,4 +57,4 @@ Canonical copy: project store `docs/wall-temp-reconstruction-plan.md`. Findings:
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-564`
+`/test SWD-564` — heat-pulse spec lock and controller EKF suite on https://github.com/marcuskrogh/HeatingAssistant/pull/690
