@@ -226,7 +226,7 @@ def accumulate_wall_ss_penalty(
     weight: float = WALL_SS_PENALTY,
     layout: Any = None,
 ) -> Tuple[float, np.ndarray]:
-    """Add ``w · ||T_w − T_w^ss(θ)||²`` and ``2 w (T_w − μ) ∂(T_w − μ)/∂θ``."""
+    """Add ``w · ( |T_w−μ| − σ_lag )_+²`` so ordinary wall lag is free."""
     n = int(n_rooms)
     if n <= 0 or weight <= 0.0:
         return float(total_sse), total_grad
@@ -241,12 +241,16 @@ def accumulate_wall_ss_penalty(
         if wi >= x.size or i >= mu.size:
             break
         viol = float(x[wi] - mu[i])
-        sse += w * viol * viol
+        excess = abs(viol) - float(WALL_LAG_SIGMA_K)
+        if excess <= 0.0:
+            continue
+        sse += w * excess * excess
+        signed = excess if viol >= 0.0 else -excess
         if wi < sx.shape[1]:
-            grad = grad + (2.0 * w * viol) * sx[:, wi]
+            grad = grad + (2.0 * w * signed) * sx[:, wi]
         if layout is not None:
             apply_wall_ss_param_grad(
-                grad, 2.0 * w * viol, i, dmu_drf, dmu_dlogr, dmu_dlogs, layout,
+                grad, 2.0 * w * signed, i, dmu_drf, dmu_dlogr, dmu_dlogs, layout,
             )
     return sse, grad
 

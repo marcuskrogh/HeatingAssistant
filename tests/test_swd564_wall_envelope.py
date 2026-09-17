@@ -113,19 +113,25 @@ def test_nstep_objective_penalises_wall_away_from_ss() -> None:
     }
     mu = wall_steady_state([22.0], 11.0, quants["g_aw"], quants["g_we"])
     x_ok = np.array([22.0, float(mu[0])])
+    x_lag = np.array([22.0, float(mu[0]) - 1.0])
     x_bad = np.array([22.0, 6.0])
     sx = np.zeros((2, 2))
     sx[1, 1] = 1.0
     sse0, g0 = accumulate_wall_ss_penalty(
         0.0, np.zeros(2), x_ok, sx, [22.0], 11.0, quants, n_rooms=1,
     )
+    sse_lag, g_lag = accumulate_wall_ss_penalty(
+        0.0, np.zeros(2), x_lag, sx, [22.0], 11.0, quants, n_rooms=1,
+    )
     sse1, g1 = accumulate_wall_ss_penalty(
         0.0, np.zeros(2), x_bad, sx, [22.0], 11.0, quants, n_rooms=1,
     )
     assert sse0 == pytest.approx(0.0, abs=1e-9)
+    assert sse_lag == pytest.approx(0.0, abs=1e-9)
     assert sse1 > 0.0
     assert g1[1] != pytest.approx(0.0)
     assert g0[1] == pytest.approx(0.0)
+    assert g_lag[1] == pytest.approx(0.0)
 
 
 def test_live_ekf_fuses_unphysical_wall_toward_ss() -> None:

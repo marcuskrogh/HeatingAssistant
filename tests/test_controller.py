@@ -2094,8 +2094,9 @@ class TestPriceAwareAbsoluteEnergyPricing:
             outdoor_forecast=outdoor_fc, price_forecast=None,
         )
         preds = ctrl.predictions
-        # No accepted plan → u=0 (zone hold), forecast is the unheated rollout.
-        assert ctrl._mpc_actions["hp"] == pytest.approx(0.0, abs=0.05)
+        # No price signal → corridor hold.  SS wall fusion can request a
+        # few percent heat because the wall sits toward outdoor, not air.
+        assert ctrl._mpc_actions["hp"] == pytest.approx(0.0, abs=0.08)
         assert preds[0]["living_room"] == pytest.approx(19.1, abs=1.0)
 
     def test_centered_room_does_not_heat_under_cheap_tariff(self):

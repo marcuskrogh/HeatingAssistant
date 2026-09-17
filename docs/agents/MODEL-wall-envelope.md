@@ -24,7 +24,7 @@ T_{w,i}^{\mathrm{ss}} = \rho_i T_{a,i} + (1-\rho_i) T_{\mathrm{out}} + Q_{\mathr
 
 **PE Tw0.** Safety box remains \([-30,60]^\circ\mathrm{C}\).  Gaussian MAP mean for each dataset-start segment is \(T_w^{\mathrm{ss}}(\theta)\) at that segment’s first \((T_a,T_{\mathrm{out}},Q_{\mathrm{solar}})\) sample, so \(\mu\) moves when splits / UA / solar scale move.  Gradient includes \(\partial\mu/\partial r_{\mathrm{aw}}\) and solar/UA terms.
 
-**PE N-step path.** At each open-loop origin step add \(\sum_i w(T_{w,i}-T_{w,i}^{\mathrm{ss}})^2\).  Gradient: \(2w(T_w-\mu)(\partial T_w/\partial\theta-\partial\mu/\partial\theta)\).  Do not fuse SS inside the N-step EKF (would distort `sx`).
+**PE N-step path.** At each open-loop origin step add \(\sum_i w\,(|T_{w,i}-T_{w,i}^{\mathrm{ss}}|-\sigma_{\mathrm{lag}})_+^2\).  Ordinary capacitive lag inside \(\sigma_{\mathrm{lag}}\) is free (it is the wall ODE, not an error).  Gradient uses the hinge residual times \((\partial T_w/\partial\theta-\partial\mu/\partial\theta)\).  Do not fuse SS inside the N-step EKF (would distort `sx`).
 
 ## Assumptions
 - The lumped wall node is thermally between indoor air and outdoor, plus solar on surfaces.

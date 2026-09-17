@@ -7,7 +7,7 @@
 ## Scope / Decisions / Constraints
 - Algebraic SS (no inter-room flow): $T_w^{\mathrm{ss}}=\rho T_a+(1-\rho)T_{\mathrm{out}}+Q_{\mathrm{wall}}/(g_{\mathrm{aw}}+g_{\mathrm{wout}})$, $\rho=g_{\mathrm{aw}}/(g_{\mathrm{aw}}+g_{\mathrm{wout}})$.
 - Live path: wall diffusion is `0.1 ×` air `σ_w`; after each CD-EKF air update, Joseph-form wall measurement with $R=\sigma_{\mathrm{lag}}^2+(Q_{\mathrm{wall}}/g_{\mathrm{sum}})^2$.
-- PE: Tw0 stays in the safety box −30…60 °C only; MAP mean is $T_w^{\mathrm{ss}}(\theta)$ at dataset-start air/outdoor/solar anchors (moves with splits/UA/solar). N-step penalty is $\|T_w-T_w^{\mathrm{ss}}(\theta)\|^2$ with gradient through `sx` and $\partial\mu/\partial\theta$.
+- PE: Tw0 stays in the safety box −30…60 °C only; MAP mean is $T_w^{\mathrm{ss}}(\theta)$ at dataset-start air/outdoor/solar anchors (moves with splits/UA/solar). N-step penalty is the hinge $(|T_w-T_w^{\mathrm{ss}}|-\sigma_{\mathrm{lag}})_+^2$ with gradient through `sx` and $\partial\mu/\partial\theta$.
 - Same fusion on sysid replay EKF and leading-window initial-state EKF.
 - Out of scope: extra RC nodes, measuring walls, changing the room-plot series style, retuning MPC weights, clipping.
 
@@ -41,7 +41,7 @@
 - After a live CD-EKF step that starts from an unphysical wall, each room’s wall estimate moves toward that step’s $T_w^{\mathrm{ss}}$ (not toward a hardcoded floor such as $\min(T_a,T_{\mathrm{out}})-1.5$).
 - SDE wall diffusion equals `WALL_PROCESS_NOISE_FRACTION ×` air diffusion (same q-scale).
 - PE `t_wall_init` MAP mean for a segment is $T_w^{\mathrm{ss}}(\theta)$ of that segment’s first air/outdoor/solar sample.
-- N-step PE SSE increases when a simulated wall node leaves $T_w^{\mathrm{ss}}$; on-SS walls add no penalty.
+- N-step PE SSE increases when a simulated wall node leaves \(T_w^{\mathrm{ss}}\) by more than \(\sigma_{\mathrm{lag}}\); lag inside that band adds no penalty.
 - The overnight case Tw=6 °C, Ta=22 °C, Tout=11 °C is pulled toward the RC mix (not treated as feasible, not clipped to ~9.5 °C).
 - `heatingassistant.engine.wall_constraints` is gone (no clip/envelope APIs).
 
