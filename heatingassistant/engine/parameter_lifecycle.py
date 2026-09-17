@@ -21,7 +21,7 @@ from .const import (
     ESTIMATION_HISTORY_SIZE,
 )
 from .history.window import select_recent_window
-from .nmpc_timing import pe_origin_stride, timing_from_options
+from .nmpc_timing import timing_from_options
 
 _LOGGER = logging.getLogger(__name__)
 PARAMETER_HISTORY_KEY = "parameter_history"
@@ -784,7 +784,7 @@ async def async_estimate_parameters_ml(
         sources=list(heat_sources),
         dt=timing.dt_s,
         n_horizon_steps=timing.n_fast,
-        origin_stride=pe_origin_stride(timing.dt_s),
+        origin_stride=timing.fast_substeps,
         max_compute_s=cap_s,
         use_nstep_pem=True,
         on_progress=on_progress,
