@@ -31,7 +31,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
     where
         f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d
-        sigma             = diag(sigma_w*I_n, sigma_b*I_n)
+        sigma             = diag(σ_air on T_a, σ_wall on T_w, σ_b on offsets)
+                            with σ_wall = σ_air · min(C_a/C_w, 1) so wall and
+                            air share Watt-level process noise
 
     and the observation model is:
         ym(tₖ) = hm(x) = T + b
@@ -401,17 +403,23 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         Block-diagonal layout matching the state vector
         ``[T_a (n), T_w (n), φ (m), b (n if augment_offsets)]``:
 
-        * physical blocks:  ``σ_w · √(q_scale)`` per room, applied to both
-          the air and the wall node of the room,
+        * air block:   ``σ_w · √(q_scale)`` per room,
+        * wall block:  the same intensity scaled by ``min(C_a/C_w, 1)`` so
+          unmodelled heat [W] is shared; the slow node is not given the
+          same kelvin diffusion as the fast air node,
         * filter block:     ``σ_w`` per filtered source,
         * offset block:     ``σ_b`` per room (random-walk bias).
         """
         n = self._n_rooms
         m = self._n_filtered
         physical_std = np.sqrt(np.maximum(self._room_q_scales, 0.0))
+        air_std = self._sigma_w * physical_std
+        c_air = np.maximum(self._C_cap[:n], 1e-12)
+        c_wall = np.maximum(self._C_cap[n: 2 * n], 1e-12)
+        wall_std = air_std * np.minimum(c_air / c_wall, 1.0)
         diag_parts = [
-            self._sigma_w * physical_std,          # air block
-            self._sigma_w * physical_std,          # wall block
+            air_std,
+            wall_std,
             self._sigma_w * np.ones(m, dtype=float),
         ]
         if self._augment_offsets:

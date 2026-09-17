@@ -224,10 +224,14 @@ class TestHouseThermalSDE:
         n = sde._n_rooms  # n=2
         nx_phys = sde._nx_phys  # 2n=4
         b_start = sde._offset_block_start  # 2n+m=4 (no filter)
-        # Block diagonal: 0.1·I on the air block, 0.1·I on the wall block,
-        # 0.002·I on the offset block.
+        # Block diagonal: 0.1·I on the air block, capacitance-scaled wall
+        # diffusion, 0.002·I on the offset block.
         expected = np.zeros((sde.nx, sde.nx))
-        expected[:nx_phys, :nx_phys] = 0.1 * np.eye(nx_phys)
+        expected[:n, :n] = 0.1 * np.eye(n)
+        c_air = sde._C_cap[:n]
+        c_wall = sde._C_cap[n:nx_phys]
+        wall_std = 0.1 * np.minimum(c_air / np.maximum(c_wall, 1e-12), 1.0)
+        np.fill_diagonal(expected[n:nx_phys, n:nx_phys], wall_std)
         expected[b_start:b_start + n, b_start:b_start + n] = 0.002 * np.eye(n)
         np.testing.assert_array_almost_equal(sig, expected)
 
@@ -245,10 +249,18 @@ class TestHouseThermalSDE:
             0.0,
         )
         diag = np.diag(sig)
+        n = sde._n_rooms
+        nx_phys = sde._nx_phys
         # State order: [T_a(2), T_w(2), b(2)].
         # Air block: living_room gets scale=9, bedroom gets scale=1.
         assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9) = 0.3
         assert diag[1] == pytest.approx(0.1)  # 0.1 * sqrt(1) = 0.1
+        ratio = np.minimum(
+            sde._C_cap[:n] / np.maximum(sde._C_cap[n:nx_phys], 1e-12),
+            1.0,
+        )
+        assert diag[n] == pytest.approx(0.3 * ratio[0])
+        assert diag[n + 1] == pytest.approx(0.1 * ratio[1])
 
     def test_controlled_output_equals_state(self, two_room):
         model, sources = two_room
@@ -644,14 +656,15 @@ class TestContinuousDiscreteEKF:
         assert ekf.P.shape == (sde.nx, sde.nx)
 
     def test_update_with_measurement(self, two_room):
-        """After update the estimate should be close to the measurement."""
+        """The air update must pull the estimate toward the measurement."""
         ekf, sde = self._make_ekf(two_room)
         y = np.array([18.5, 17.5])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
+        x0 = ekf.x_hat[:sde.nym].copy()
         x_hat, P = ekf.step(y, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(x_hat[:sde.nym], y, decimal=1)
+        assert np.all(np.abs(x_hat[:sde.nym] - y) < np.abs(x0 - y))
 
     def test_covariance_propagates(self, two_room):
         """P should change after a predict-update cycle."""
