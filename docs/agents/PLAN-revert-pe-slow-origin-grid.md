@@ -98,4 +98,4 @@ That is the wrong product model. Two-layer NMPC is gone; PE must not pretend a 2
 - Workflow: fix-fast
 
 ## Next
-`/ship SWD-561` — CI + merge on https://github.com/marcuskrogh/HeatingAssistant/pull/688
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`)

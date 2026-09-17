@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | In Review | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | `/ship SWD-561` |
-| SWD-562 | Sub-task | Wire PE origins to the single NMPC grid | To Do | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |
-| SWD-563 | Sub-task | Tests, CalVer, changelog, App sync for origin-grid revert | To Do | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |
+| SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
+| SWD-562 | Sub-task | Wire PE origins to the single NMPC grid | Done | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |
+| SWD-563 | Sub-task | Tests, CalVer, changelog, App sync for origin-grid revert | Done | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |
 | SWD-557 | Story | [Explore] Parameter estimation optimiser stall | Done | — | docs/pe-optimizer-stall.md (store) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/687 (`4e5d51c5`) |
 | SWD-558 | Task | [Bug] PE optimiser floors; extra time does not deepen the fit | Done | Relates SWD-557 | docs/agents/PLAN-pe-optimizer-stall.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/687 (`4e5d51c5`) |
 | SWD-559 | Sub-task | PE origin stride, plateau stop, best-RMS overlay | Done | SWD-558 | docs/agents/PLAN-pe-optimizer-stall.md | — |
@@ -278,6 +278,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-17 — `/ship` SWD-561 via PR #688 (`6e0798ce`): revert fake 2 h PE origin stride; keep η plateau, best-RMS overlay, wait/cancel. Review CLEAN (focused). CI green (6 checks). Overnight 24 h PE was not a gate. Next: Done.
 - 2026-09-17 — `/test`+`/restructure`+`/review` SWD-561: pytest 48 passed (stall, N-step grid, CalVer). No extra structure. CLEAN focused. Next `/ship SWD-561` on https://github.com/marcuskrogh/HeatingAssistant/pull/688.
 - 2026-09-17 — `/define`+`/architect` SWD-561: revert fake 2 h / stride-8 PE origins; keep η plateau, best-RMS overlay, wait/cancel. PLAN `docs/agents/PLAN-revert-pe-slow-origin-grid.md`. Relates SWD-558 / SWD-557. Sub-tasks SWD-562–563. Branch `cursor/swd-561-revert-pe-slow-origin-9845`. Overnight 24 h PE is parallel. Next `/implement SWD-561`.
 - 2026-09-16 — `/ship` SWD-558 via PR #687 (`4e5d51c5`): PE origin stride 8 @ 15 min, η plateau on capped jobs, overlay best RMS; wait follows cap then cancel. Review CLEAN (focused). Changelog `# 2026.09.25`. Overnight 24 h PE was not a gate. Next: Done.
