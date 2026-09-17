@@ -58,9 +58,9 @@
 - Sub-tasks: [SWD-565](https://marcusknielsen.atlassian.net/browse/SWD-565), [SWD-566](https://marcusknielsen.atlassian.net/browse/SWD-566), [SWD-567](https://marcusknielsen.atlassian.net/browse/SWD-567)
 - Relates: [SWD-554](https://marcusknielsen.atlassian.net/browse/SWD-554)
 - Branch: `cursor/swd-564-wall-envelope-a891`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/689
 - Classification: bug
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-564` — Build per PLAN.md and ARCHITECTURE.md (same branch/PR)
+`/test SWD-564` — Dedicated test phase on PR https://github.com/marcuskrogh/HeatingAssistant/pull/689
