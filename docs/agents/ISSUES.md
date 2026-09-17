@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | In Progress | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | `/implement SWD-564` |
 | SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
 | SWD-562 | Sub-task | Wire PE origins to the single NMPC grid | Done | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |
 | SWD-563 | Sub-task | Tests, CalVer, changelog, App sync for origin-grid revert | Done | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |

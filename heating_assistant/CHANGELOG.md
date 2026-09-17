@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.27
+
+- The room wall temperature estimate no longer dives toward freezing when
+  the heater pulses. Process noise on the slow mass node matches the air
+  node in watts, not in kelvin, so leftover heat stays in a physical range.
+
 # 2026.09.26
 
 - Parameter estimation places N-step origins on the same sample grid as the

@@ -224,10 +224,14 @@ class TestHouseThermalSDE:
         n = sde._n_rooms  # n=2
         nx_phys = sde._nx_phys  # 2n=4
         b_start = sde._offset_block_start  # 2n+m=4 (no filter)
-        # Block diagonal: 0.1·I on the air block, 0.1·I on the wall block,
-        # 0.002·I on the offset block.
+        # Block diagonal: 0.1·I on the air block, capacitance-scaled wall
+        # diffusion, 0.002·I on the offset block.
         expected = np.zeros((sde.nx, sde.nx))
-        expected[:nx_phys, :nx_phys] = 0.1 * np.eye(nx_phys)
+        expected[:n, :n] = 0.1 * np.eye(n)
+        c_air = sde._C_cap[:n]
+        c_wall = sde._C_cap[n:nx_phys]
+        wall_std = 0.1 * np.minimum(c_air / np.maximum(c_wall, 1e-12), 1.0)
+        np.fill_diagonal(expected[n:nx_phys, n:nx_phys], wall_std)
         expected[b_start:b_start + n, b_start:b_start + n] = 0.002 * np.eye(n)
         np.testing.assert_array_almost_equal(sig, expected)
 
