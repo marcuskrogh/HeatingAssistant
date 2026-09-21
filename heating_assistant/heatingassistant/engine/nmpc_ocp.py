@@ -426,6 +426,13 @@ def _signed_probe_if_idle(
     u_mat = np.asarray(u_mat, dtype=float).reshape(ocp.n, ocp.nu)
     if float(np.max(np.abs(u_mat))) >= 0.05:
         return u_mat, fun
+    # SLSQP ``fun`` may still be J of the Cauchy warm-start when the
+    # solver then reports u=0. Compare the probe to J(u_mat), not that
+    # leftover value.
+    try:
+        fun = float(ocp.cost(u_mat.reshape(-1)))
+    except TimeoutError:
+        return u_mat, fun
     lo = np.asarray(ocp.u_min, dtype=float).reshape(ocp.n, ocp.nu)
     hi = np.asarray(ocp.u_max, dtype=float).reshape(ocp.n, ocp.nu)
     probe = np.zeros_like(u_mat)

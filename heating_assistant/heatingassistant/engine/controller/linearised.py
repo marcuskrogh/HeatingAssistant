@@ -80,32 +80,28 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
         # steady-state values, giving a consistent (x_ss, u_ss) equilibrium
         # pair when the setpoint is feasible.
         x_ss = self._x_ref_abs.copy()
-        x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
+        if nx_phys > n:
+            x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
         u_ss = model.compute_u_eq(x_ss, d_now, p_, t)
         for j in range(nu):
             k_f = model._filter_idx_for_source[j]
             if k_f >= 0:
                 x_ss[nx_phys + k_f] = u_ss[j]
 
-        # ── Infeasibility correction ──────────────────────────────────────────
-        # When the HP cannot maintain the setpoint at full output, compute_u_eq
-        # clips u_ss to u_max and (x_ss=[setpoint], u_ss=u_max) is NOT a true
-        # equilibrium: the room actually cools even at max input.  The mbc
-        # deviation model assumes equilibrium and predicts stable temperatures,
-        # so the MPC never sees the room drop and suppresses actuation.
-        # One Newton step on the air-temperature drift finds the achievable
-        # equilibrium temperature, making (x_ss_corrected, u_ss) consistent.
         air_drift = model.f(x_ss, u_ss, d_now, p_, t)[:n]
         if np.any(air_drift < -1e-6):
             J = model.dfdx(x_ss, u_ss, d_now, p_, t)
-            rho = model._wall_eq_ratio          # (n,) per-room wall-to-air ratio
-            F_eff = J[:n, :n] + J[:n, n:2 * n] * rho.reshape(1, -1)
+            if nx_phys > n:
+                rho = model._wall_eq_ratio
+                F_eff = J[:n, :n] + J[:n, n:2 * n] * rho.reshape(1, -1)
+            else:
+                F_eff = J[:n, :n]
             try:
                 delta_air = np.linalg.solve(F_eff, -air_drift)
                 x_ss_air_orig = x_ss[:n].copy()
-                # Correction moves setpoint down; clip to [T_outdoor, setpoint].
                 x_ss[:n] = np.clip(x_ss[:n] + delta_air, float(d_now[0]), x_ss_air_orig)
-                x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
+                if nx_phys > n:
+                    x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
                 u_ss = model.compute_u_eq(x_ss, d_now, p_, t)
                 for j in range(nu):
                     k_f = model._filter_idx_for_source[j]

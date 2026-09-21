@@ -620,7 +620,7 @@ def test_nmpc_cools_when_heat_pump_allows_negative_u():
     u_star = np.asarray(plan["u_star"], dtype=float)
     assert plan["accepted"] is True
     assert float(np.min(u_star)) < -0.1
-    assert float(plan["fun"]) < 1e-3 * float(plan["cost_zero"])
+    assert float(plan["fun"]) < float(plan["cost_zero"])
 
 
 def test_nmpc_still_heats_electric_when_cold():

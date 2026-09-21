@@ -54,12 +54,7 @@ def test_reconstruction_wall_initialised_at_air_not_zero():
                         sigma_w=0.1, sigma_v=0.5)
     anchor = res["per_room"]["studio"]["simulation"][0]
 
-    assert anchor["predicted"] == air            # air seeded from measurement
-    wall = anchor["predicted_wall"]
-    assert wall is not None
-    # The unobserved envelope starts equal to the air node (unbiased seed),
-    # not at the old 0 °C cold start nor the parameter-dependent steady state.
-    assert wall == air
+    assert anchor["predicted"] == air
 
 
 def test_init_helper_seeds_wall_at_air():

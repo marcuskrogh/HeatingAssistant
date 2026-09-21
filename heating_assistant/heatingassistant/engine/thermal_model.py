@@ -1,46 +1,25 @@
 """
 Thermal model for the Heating Assistant integration.
 
-Each room is modelled as a lumped-parameter **2R2C** thermal circuit: a
-fast *air* node ``T_a`` (room air + light furnishings) and a slow
-*wall/mass* node ``T_w`` (walls, floor, ceiling, heavy furniture):
+Each room is modelled as a lumped-parameter **1R1C** thermal circuit: one
+air node ``T_a`` (measured and controlled):
 
-    C_a,i dT_a,i/dt = Q_heater_i + Q_int,i + (1 − w_s) s_i Q_solar_i
-                    + (T_w,i − T_a,i) / R_aw,i        # air ↔ wall coupling
-                    + (T_out − T_a,i) · g_inf,i        # infiltration (air exchange)
-
-    C_w,i dT_w,i/dt = (T_a,i − T_w,i) / R_aw,i
-                    + (T_out − T_w,i) · g_wout,i       # wall conduction + sky + bridge
-                    + (w_s + α_i · share_i) s_i Q_solar_i
-                    + Σ_{j adj i} (T_w,j − T_w,i) / R_ij   # inter-room (wall-to-wall)
+    C_i dT_a,i/dt = Q_heater_i + Q_int_i + s_i Q_solar_i
+                  + (T_out − T_a,i) · g_out,i
+                  + Σ_{j adj i} (T_a,j − T_a,i) / R_ij
 
 where
 
-    C_i      – total room thermal mass [J/K]  (user-facing, as before)
-    C_a,i    – c_air_fraction · C_i            (fast node)
-    C_w,i    – (1 − c_air_fraction) · C_i      (slow node)
-    R_ext,i  – total steady-state resistance to outdoors [K/W] (user-facing)
+    C_i      – room thermal mass [J/K]  (user-facing ``thermal_mass``)
+    R_ext,i  – total steady-state resistance to outdoors [K/W]
     g_inf,i  – infiltration_fraction / R_ext,i   (air → outdoor, wind-modulated)
-    g_cond,i – (1 − infiltration_fraction) / R_ext,i  (conductive path)
-    R_aw,i   – r_aw_fraction / g_cond,i⁻¹ split  (air ↔ wall share of the path)
-    R_we,i   – remainder of the conductive path  (wall ↔ outdoor)
-    g_wout,i – 1/R_we,i + sky_radiative_ua + thermal_bridge_psi_l
+    g_cond,i – (1 − infiltration_fraction) / R_ext,i
+    g_out,i  – g_inf,i + g_cond,i + sky_radiative_ua + thermal_bridge_psi_l
     s_i      – per-room solar-gain scale (identified from data; default 1)
-    w_s      – SOLAR_WALL_FRACTION, share of window solar landing on the mass
 
-The parametrisation is deliberately chosen so that the **user-facing
-parameters keep their 1R1C meaning**: at steady state with a constant heat
-input ``Q`` the air node settles at ``T_out + Q · R_ext`` exactly as the old
-single-node model did, because ``g_inf`` parallel with the series pair
-``(R_aw, R_we)`` reproduces ``1/R_ext``.  The two split fractions
-(``c_air_fraction``, ``r_aw_fraction``) are the only structural additions;
-in the limit ``r_aw_fraction → 0`` the nodes lock together and the model
-degenerates to the previous 1R1C with ``(C, R_ext)``.
-
-Measurements observe the **air node only**; the wall node is reconstructed
-by the EKF.  See ``model_diagnostics.wall_state_observability`` for the
-observability metric that monitors how well-conditioned that
-reconstruction is.
+At steady state with constant heat ``Q``, ``T_a → T_out + Q · R_ext``
+when sky/bridge UA is zero.  Split fractions and a hidden wall node are
+not part of the live plant (legacy kwargs still load and are ignored).
 """
 
 from __future__ import annotations
@@ -51,13 +30,11 @@ import numpy as np
 
 from .const import (
     AIR_RHO_CP,
-    DEFAULT_C_AIR_FRACTION,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_DELTA_T_SKY,
     DEFAULT_FACADE_ABSORPTANCE,
     DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_INFILTRATION_FRACTION,
-    DEFAULT_R_AW_FRACTION,
     DEFAULT_SKY_RADIATIVE_UA,
     DEFAULT_SOLAR_FACING,
     DEFAULT_SOLAR_SCALE,
@@ -67,7 +44,6 @@ from .const import (
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_V_TYPICAL,
     SHERMAN_GRIMSRUD_WIND_COEF,
-    SOLAR_WALL_FRACTION,
 )
 from .integrator import implicit_euler_step
 
@@ -124,26 +100,14 @@ class Window:
 
 
 class Room:
-    """Lumped-parameter 2R2C thermal model of a single room.
+    """Lumped-parameter 1R1C thermal model of a single room.
 
-    Two temperature nodes: ``temperature`` is the measured/controlled
-    **air** node; ``wall_temperature`` is the slow envelope/mass node
-    that the EKF reconstructs.  All heat sources and internal gains land
-    on the air node; solar gain is split between the nodes with the
-    fixed ``SOLAR_WALL_FRACTION``.
+    ``temperature`` is the measured/controlled air node.  Legacy
+    ``wall_temperature``, ``c_air_fraction``, and ``r_aw_fraction``
+    kwargs still load (configs from the 2R2C era) and are ignored.
 
-    ``thermal_mass`` and ``r_external`` keep their previous (1R1C)
-    meaning — total heat capacity and total steady-state resistance to
-    outdoors.  ``c_air_fraction`` / ``r_aw_fraction`` describe how that
-    total is split between the two nodes; both are bounded and have
-    typology defaults, and the parameter estimator refines them per room
-    when the data identify them.
-
-    The constructor accepts (and ignores) the slab-era keyword arguments
-    ``slab_temperature``, ``floor_type``, ``c_slab_fraction``, ``r_sa``
-    and ``r_sg`` so configurations written during the earlier 3-node
-    phase keep loading.  A slab node may return later for underfloor
-    heating with significant lag.
+    ``thermal_mass`` and ``r_external`` are total heat capacity and
+    total steady-state resistance to outdoors.
     """
 
     def __init__(
@@ -166,8 +130,8 @@ class Room:
         solar_facing: float = DEFAULT_SOLAR_FACING,
         solar_scale: float = DEFAULT_SOLAR_SCALE,
         temperature: Optional[float] = None,
-        c_air_fraction: float = DEFAULT_C_AIR_FRACTION,
-        r_aw_fraction: float = DEFAULT_R_AW_FRACTION,
+        c_air_fraction: float = 0.05,
+        r_aw_fraction: float = 0.5,
         air_temperature: Optional[float] = None,
         wall_temperature: Optional[float] = None,
         # Slab-era parameters — accepted but ignored (no slab node).
@@ -193,13 +157,9 @@ class Room:
         self.ua_open = max(0.0, float(ua_open))
         self.infiltration_fraction = float(infiltration_fraction)
 
-        # 2R2C split fractions (bounded; see module docstring).
-        self.c_air_fraction = float(np.clip(
-            c_air_fraction, _C_AIR_FRACTION_MIN, _C_AIR_FRACTION_MAX,
-        ))
-        self.r_aw_fraction = float(np.clip(
-            r_aw_fraction, _R_AW_FRACTION_MIN, _R_AW_FRACTION_MAX,
-        ))
+        # Legacy 2R2C split fractions — accepted, unused.
+        self.c_air_fraction = float(c_air_fraction)
+        self.r_aw_fraction = float(r_aw_fraction)
 
         # Long-wave to sky (wall node).
         self.sky_radiative_ua: float = max(0.0, float(sky_radiative_ua))
@@ -222,54 +182,41 @@ class Room:
         # applied exactly once, inside the model dynamics.
         self.solar_scale: float = max(0.0, float(solar_scale))
 
-        # Air node — initialise from ``temperature``, falling back to the
-        # legacy ``air_temperature`` keyword, then 20 °C.
+        # Air node.  Legacy wall_temperature aliases air (1R1C).
         if temperature is not None:
             self.temperature: float = float(temperature)
         elif air_temperature is not None:
             self.temperature = float(air_temperature)
         else:
             self.temperature = 20.0
-
-        # Wall node — defaults to the air temperature (thermal equilibrium).
-        self.wall_temperature: float = (
-            float(wall_temperature) if wall_temperature is not None
-            else self.temperature
-        )
+        self.wall_temperature: float = self.temperature
 
     # ── Derived split quantities ───────────────────────────────────────
 
     @property
     def c_air(self) -> float:
-        """Air-node heat capacity [J/K]."""
-        return self.c_air_fraction * self.thermal_mass
+        """Air-node heat capacity [J/K] — the full room mass."""
+        return self.thermal_mass
 
     @property
     def c_wall(self) -> float:
-        """Wall-node heat capacity [J/K]."""
-        return (1.0 - self.c_air_fraction) * self.thermal_mass
+        """Unused (1R1C). Kept so older callers do not AttributeError."""
+        return self.thermal_mass
 
     def conductances(self) -> Tuple[float, float, float]:
-        """Split the total UA into the three model conductances.
+        """Outdoor UA split as ``(g_inf, g_out, g_out)``.
 
-        Returns ``(g_inf, g_aw, g_we)`` [W/K]:
-
-        * ``g_inf`` — air ↔ outdoor (infiltration share, wind-modulated
-          at runtime via the Sherman–Grimsrud overlay),
-        * ``g_aw``  — air ↔ wall coupling,
-        * ``g_we``  — wall ↔ outdoor conduction (excluding sky/bridge).
-
-        Invariant: ``g_inf + 1/(1/g_aw + 1/g_we) == 1/r_external``, so the
-        steady-state heat balance matches the user-facing ``r_external``.
+        ``g_inf`` is the infiltration share of ``1/r_external``.
+        ``g_out`` is the rest of the outdoor UA including sky and
+        thermal-bridge terms.  The third value duplicates ``g_out`` so
+        call sites that still unpack three names keep working.
         """
         ua_tot = 1.0 / self.r_external
         f_inf = float(np.clip(self.infiltration_fraction, 0.0, MAX_INFILTRATION_FRACTION))
         g_inf = f_inf * ua_tot
         g_cond = (1.0 - f_inf) * ua_tot
-        rf = self.r_aw_fraction
-        g_aw = g_cond / rf
-        g_we = g_cond / (1.0 - rf)
-        return g_inf, g_aw, g_we
+        g_out = g_cond + float(self.sky_radiative_ua) + float(self.thermal_bridge_psi_l)
+        return g_inf, g_out, g_out
 
     def __repr__(self) -> str:
         return (
@@ -283,10 +230,9 @@ class Room:
 
 class HouseModel:
     """
-    Aggregated 2R2C thermal model of an entire house.
+    Aggregated 1R1C thermal model of an entire house.
 
-    State ordering: ``x = [T_a,1 … T_a,n, T_w,1 … T_w,n]`` (air block
-    first, wall block second).
+    State ordering: ``x = [T_a,1 … T_a,n]`` (one air node per room).
 
     Usage::
 
@@ -304,7 +250,7 @@ class HouseModel:
         self._room_list: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
 
-        # Per-room envelope-correction terms (attach to the wall node).
+        # Per-room envelope-correction terms (attach to the air node).
         self._sky_ua = np.array(
             [self._rooms[name].sky_radiative_ua for name in self._room_list],
             dtype=float,
@@ -334,8 +280,8 @@ class HouseModel:
         # Build state-space matrices once.
         self._C, self._A, self._B_ext = self._build_matrices()
 
-        # Sky cooling-drift bias (per state row; wall block only).
-        # Magnitude: −sky_radiative_ua · ΔT_sky / C_wall.
+        # Sky cooling-drift bias (per air row).
+        # Magnitude: −sky_radiative_ua · ΔT_sky / C.
         self._B_sky_offset = self._build_sky_offset(self._C)
 
         # Per-room effective leakage area L_i (m²), derived so that the
@@ -355,17 +301,17 @@ class HouseModel:
 
     def _build_sky_offset(self, C: np.ndarray) -> np.ndarray:
         n = self._n
-        offset = np.zeros(2 * n)
+        offset = np.zeros(n)
         for i in range(n):
-            if self._sky_ua[i] > 0.0 and C[n + i] > 0.0:
-                offset[n + i] = -self._sky_ua[i] * self._delta_t_sky / C[n + i]
+            if self._sky_ua[i] > 0.0 and C[i] > 0.0:
+                offset[i] = -self._sky_ua[i] * self._delta_t_sky / C[i]
         return offset
 
     def rebuild_derived_parameters(self) -> None:
         """Recompute all cached derived arrays from the current room attributes.
 
         Must be called whenever ``room.thermal_mass``, ``room.r_external``,
-        the split fractions, ``room.solar_scale``, or any connection's
+        ``room.solar_scale``, or any connection's
         ``r_value`` is updated (e.g. after parameter estimation).  Follow
         this with ``_build_matrices()`` to refresh the state-space matrices
         and assign the results back to ``_C``, ``_A``, and ``_B_ext``.
@@ -392,7 +338,7 @@ class HouseModel:
 
     @property
     def n(self) -> int:
-        """Number of rooms (the physical state-vector size is 2n)."""
+        """Number of rooms (physical state-vector size is n)."""
         return self._n
 
     @property
@@ -402,10 +348,8 @@ class HouseModel:
 
     @property
     def wall_temperatures(self) -> Dict[str, float]:
-        """Per-room wall/mass-node temperatures."""
-        return {
-            name: self._rooms[name].wall_temperature for name in self._room_list
-        }
+        """Legacy alias: 1R1C has no wall node, so this returns air temps."""
+        return {name: self._rooms[name].temperature for name in self._room_list}
 
     def set_temperatures(self, temps: Dict[str, float]) -> None:
         """Update the room air temperatures from measurements."""
@@ -414,10 +358,10 @@ class HouseModel:
                 self._rooms[name].temperature = float(temp)
 
     def set_wall_temperatures(self, temps: Dict[str, float]) -> None:
-        """Update the wall-node temperatures (e.g. from the EKF estimate)."""
-        for name, temp in temps.items():
+        """No-op on air. 1R1C aliases wall to the current air temperature."""
+        for name in temps:
             if name in self._rooms:
-                self._rooms[name].wall_temperature = float(temp)
+                self._rooms[name].wall_temperature = self._rooms[name].temperature
 
     def set_cloud_cover(self, cloud_cover: Optional[float]) -> None:
         """Attenuate the sky cooling drift by the current cloud cover.
@@ -470,60 +414,45 @@ class HouseModel:
         self,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Build the continuous-time state matrices for the 2R2C network.
+        Build the continuous-time state matrices for the 1R1C network.
 
-        State ordering: ``x = [T_a (n), T_w (n)]`` of length ``2n``.
+        State ordering: ``x = T_a (n)``.
 
-        Air rows (0 … n−1):
+        Air row i:
 
-            C_a,i dT_a,i/dt = Q_air,i + g_aw,i (T_w,i − T_a,i)
-                            + g_inf,i (T_out − T_a,i)
+            C_i dT_a,i/dt = Q_i + g_out,i (T_out − T_a,i)
+                          + Σ_j g_ij (T_a,j − T_a,i)
 
-        Wall rows (n … 2n−1):
-
-            C_w,i dT_w,i/dt = Q_wall,i + g_aw,i (T_a,i − T_w,i)
-                            + g_wout,i (T_out − T_w,i)
-                            + Σ_j g_ij (T_w,j − T_w,i)
-
-        with ``g_wout = g_we + sky_radiative_ua + thermal_bridge_psi_l``.
+        with ``g_out = g_inf + g_cond + sky_radiative_ua + thermal_bridge``.
 
         Returns
         -------
-        C : (2n,) thermal capacitance vector ``[C_a, C_w]``.
-        A : (2n, 2n) drift matrix (conductances, not yet divided by C).
-        B_ext : (2n,) outdoor input vector.
+        C : (n,) thermal capacitance vector.
+        A : (n, n) drift matrix (conductances, not yet divided by C).
+        B_ext : (n,) outdoor input vector.
         """
         n = self._n
-        C = np.zeros(2 * n)
-        A = np.zeros((2 * n, 2 * n))
-        B_ext = np.zeros(2 * n)
+        C = np.zeros(n)
+        A = np.zeros((n, n))
+        B_ext = np.zeros(n)
 
         idx = {name: i for i, name in enumerate(self._room_list)}
 
         for name, room in self._rooms.items():
             i = idx[name]
-            g_inf, g_aw, g_we = room.conductances()
-            g_wout = g_we + float(self._sky_ua[i]) + float(self._thermal_bridge[i])
+            g_inf, g_rest, _dup = room.conductances()
+            g_out = g_inf + g_rest
 
             C[i] = room.c_air
-            C[n + i] = room.c_wall
 
-            # Air row: infiltration to outdoor + coupling to own wall.
-            A[i, i] -= g_inf + g_aw
-            A[i, n + i] += g_aw
-            B_ext[i] = g_inf
+            A[i, i] -= g_out
+            B_ext[i] = g_out
 
-            # Wall row: coupling to own air + conduction/sky/bridge to outdoor.
-            A[n + i, i] += g_aw
-            A[n + i, n + i] -= g_aw + g_wout
-            B_ext[n + i] = g_wout
-
-            # Inter-room conduction: wall-to-wall.
             for conn in room.connections:
                 k = idx[conn.connected_room]
                 g = 1.0 / conn.r_value
-                A[n + i, n + k] += g
-                A[n + i, n + i] -= g
+                A[i, k] += g
+                A[i, i] -= g
 
         return C, A, B_ext
 
@@ -536,15 +465,14 @@ class HouseModel:
         heat_inputs: Dict[str, float],
         solar_gains: Dict[str, float],
     ) -> np.ndarray:
-        """Map heater/solar/internal gains onto the 2n state rows [W].
+        """Map heater/solar/internal gains onto the n air-state rows [W].
 
-        Heaters and internal gains heat the air node; solar gain (scaled
-        by the room's identified ``solar_scale``) splits between air and
-        wall with ``SOLAR_WALL_FRACTION``, and the sol-air facade share
-        adds to the wall node.
+        Heaters, internal gains, window solar (scaled by the room's
+        identified ``solar_scale``), and the sol-air facade share all
+        land on the air node.
         """
         n = self._n
-        Q = np.zeros(2 * n)
+        Q = np.zeros(n)
         idx = {name: i for i, name in enumerate(self._room_list)}
         for name, power in heat_inputs.items():
             i = idx.get(name)
@@ -555,11 +483,10 @@ class HouseModel:
             if i is None:
                 continue
             scaled = self._solar_scale[i] * float(gain)
-            Q[i] += (1.0 - SOLAR_WALL_FRACTION) * scaled
-            Q[n + i] += SOLAR_WALL_FRACTION * scaled
+            Q[i] += scaled
             share = self._facade_solar_share[i]
             if share > 0.0:
-                Q[n + i] += self._facade_absorptance[i] * share * scaled
+                Q[i] += self._facade_absorptance[i] * share * scaled
         for i, name in enumerate(self._room_list):
             Q[i] += self._rooms[name].internal_gain
         return Q
@@ -602,14 +529,13 @@ class HouseModel:
         Returns
         -------
         dict
-            New room **air** temperatures {name: temp °C}.  Wall states
-            are updated on the ``Room`` objects.
+            New room **air** temperatures {name: temp °C}.
         """
         n = self._n
-        x = np.concatenate([
+        x = np.array(
             [self._rooms[name].temperature for name in self._room_list],
-            [self._rooms[name].wall_temperature for name in self._room_list],
-        ])
+            dtype=float,
+        )
 
         Q = self.dispatch_heat(heat_inputs, solar_gains)
 
@@ -646,9 +572,10 @@ class HouseModel:
 
         new_temps: Dict[str, float] = {}
         for i, name in enumerate(self._room_list):
-            self._rooms[name].temperature = float(x_new[i])
-            self._rooms[name].wall_temperature = float(x_new[n + i])
-            new_temps[name] = float(x_new[i])
+            t = float(x_new[i])
+            self._rooms[name].temperature = t
+            self._rooms[name].wall_temperature = t
+            new_temps[name] = t
 
         return new_temps
 
@@ -683,7 +610,7 @@ class HouseModel:
             Solar heat gain [W] per room for each future time step.
         initial_temps : dict, optional
             Starting room air temperatures; defaults to current model
-            state.  Wall nodes start from their current values.
+            state.
         wind_speeds : list of float, optional
             Outdoor wind speed [m/s] per step.
 
@@ -692,11 +619,7 @@ class HouseModel:
         list of dict
             Predicted air temperatures {name: °C} for each step 1…horizon.
         """
-        # Save both node states, run prediction, restore.
-        saved = {
-            n: (r.temperature, r.wall_temperature)
-            for n, r in self._rooms.items()
-        }
+        saved = {n: r.temperature for n, r in self._rooms.items()}
         if initial_temps is not None:
             for name, temp in initial_temps.items():
                 if name in self._rooms:
@@ -716,10 +639,9 @@ class HouseModel:
             )
             predictions.append(dict(temps))
 
-        # Restore original state.
-        for name, (t_air, t_wall) in saved.items():
+        for name, t_air in saved.items():
             self._rooms[name].temperature = t_air
-            self._rooms[name].wall_temperature = t_wall
+            self._rooms[name].wall_temperature = t_air
 
         return predictions
 
@@ -737,9 +659,9 @@ class HouseModel:
         For each room the returned dict contains:
 
         * ``external_loss`` – heat flow to outdoor [W] (positive = losing
-          heat): air-node infiltration + wall-node conduction.
+          heat): air-node outdoor UA.
         * ``<other_room>`` – heat flow to/from each connected room [W]
-          (wall-to-wall; positive = losing heat to that room)
+          (air-to-air; positive = losing heat to that room)
         * ``total_loss`` – algebraic sum of all loss terms [W]
 
         Parameters
@@ -756,18 +678,16 @@ class HouseModel:
 
         for name, room in self._rooms.items():
             breakdown: Dict[str, float] = {}
-            g_inf, _g_aw, g_we = room.conductances()
+            g_inf, g_rest, _dup = room.conductances()
+            g_out = g_inf + g_rest
 
-            external_loss = (
-                g_inf * (room.temperature - outdoor_temp)
-                + g_we * (room.wall_temperature - outdoor_temp)
-            )
+            external_loss = g_out * (room.temperature - outdoor_temp)
             breakdown["external_loss"] = round(external_loss, 2)
 
             total = external_loss
             for conn in room.connections:
-                other_wall = self._rooms[conn.connected_room].wall_temperature
-                flow = (room.wall_temperature - other_wall) / conn.r_value
+                other = self._rooms[conn.connected_room].temperature
+                flow = (room.temperature - other) / conn.r_value
                 breakdown[conn.connected_room] = round(flow, 2)
                 total += flow
 
@@ -781,7 +701,7 @@ class HouseModel:
         Return the dominant (slow) thermal time constant τ = C × R_eff
         [seconds] for a room, where C is the **total** room mass and
         R_eff combines the external and inter-room paths in parallel —
-        the same aggregate quantity the 1R1C model reported.
+        the same aggregate quantity the lumped 1R1C model reports.
         """
         room = self._rooms[room_name]
         g_total = 1.0 / room.r_external
@@ -801,9 +721,9 @@ class HouseModel:
         constant heating power, assuming all connected rooms are at the
         outdoor temperature (worst case).
 
-        Because the split conductances preserve ``1/r_external`` as the
-        total air→outdoor steady-state conductance, this is identical to
-        the 1R1C result.
+        Because outdoor UA is ``1/r_external`` plus sky/bridge terms that
+        default to zero, this matches ``T_out + Q · R_ext`` for the
+        isolated-room pass criterion.
         """
         room = self._rooms[room_name]
         g_total = 1.0 / room.r_external

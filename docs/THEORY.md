@@ -9,6 +9,8 @@ This document is for readers who want to understand *why* the App behaves the
 way it does. For installation and day-to-day use, start with the
 [main README](../README.md). For estimating the parameters these models need,
 and for tuning the controller, see the [Tuning guide](TUNING.md).
+The **live** control loop (one-sample MPC, no P tracker) is
+[CONTROL.md](agents/CONTROL.md).  The live plant is 1R1C (SWD-570).
 
 **Contents**
 
@@ -20,69 +22,47 @@ and for tuning the controller, see the [Tuning guide](TUNING.md).
 
 ## 3. Physics and Mathematical Models
 
-### 3.1 Lumped RC thermal model (2R2C)
+### 3.1 Lumped RC thermal model (1R1C)
 
-Each room is treated as a **two-node** lumped-parameter thermal circuit:
+Each room is one air node ``Ta`` (measured and controlled).  There is no
+hidden wall state.
 
-- A fast **air node** $T_{a,i}$ — room air plus light furnishings.  This is the temperature you measure, perceive, and set.
-- A slow **wall node** $T_{w,i}$ — walls, floor, ceiling and heavy furniture.  Never measured directly; the state estimator reconstructs it (§4.2).
-- An internal coupling resistance $R_{aw,i}$ between the two nodes.
-- A conduction resistance $R_{we,i}$ from the wall to the outdoor air, plus a direct air↔outdoor **infiltration** conductance $g_{\text{inf},i}$ (air exchange does not pass through the wall mass).
-- Optional inter-room resistances $R_{ij}$ coupling adjacent rooms **wall-to-wall**.
+```text
+C * dTa/dt = Qa(u, Tout)
+           + s * Qsol
+           + q_int
+           + (Tout - Ta) / R_eff
+           + sum_j (Ta_j - Ta) / R_ij
+           + Qsky_air
 
-The continuous-time energy balance per room is:
+R_eff^{-1} = R^{-1} + sky_ua + thermal_bridge
+Qsky_air   = -sky_ua * dT_sky * clear_fraction
+ym         = Ta + b + v
+```
 
-$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i} + Q_{\text{int},i} + (1 - w_s)\, s_i\, Q_{\text{solar},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + g_{\text{inf},i} \,(T_{\text{outdoor}} - T_{a,i})$$
+``C`` is user-facing ``thermal_mass``.  ``R`` is ``r_external``.  Inter-room
+``R_ij`` couples air nodes.  All solar lands on air.  Split fractions
+``c_air_fraction`` / ``r_aw_fraction`` and ``Tw0`` load from old configs and
+are ignored.
 
-$$C_{w,i} \cdot \frac{dT_{w,i}}{dt} = \frac{T_{a,i} - T_{w,i}}{R_{aw,i}} + \frac{T_{\text{outdoor}} - T_{w,i}}{R_{we,i}} + w_s\, s_i\, Q_{\text{solar},i} + \sum_{j \in \text{adj}(i)} \frac{T_{w,j} - T_{w,i}}{R_{ij}}$$
-
-**Why two nodes.**  A single node has a single time constant, but real rooms respond on two: a fast air response (½–1½ h) and a slow envelope response (5–30 h).  That second mode is precisely what price-driven anticipatory heating exploits — pre-heating during cheap hours stores energy in the walls and releases it later — so a model that cannot represent storage-then-release systematically mispredicts the multi-hour trajectories the optimiser plans over.
-
-**How the user-facing parameters keep their old meaning.**  You still configure (and the estimator still identifies) a single total `thermal_mass` $C_i$ and total `r_external` $R_{i,\text{ext}}$ per room.  Two bounded **split fractions** derive the node-level quantities:
-
-| Derived quantity | Formula | Source |
-|------------------|---------|--------|
-| $C_{a,i}$ | `c_air_fraction` · $C_i$ | split fraction (default 0.05; identified when the data allow) |
-| $C_{w,i}$ | $(1 - $`c_air_fraction`$)$ · $C_i$ | — |
-| $g_{\text{inf},i}$ | `infiltration_fraction` $/ R_{i,\text{ext}}$ | envelope-tightness preset (wind-modulated at runtime, §3.1b) |
-| $g_{\text{cond},i}$ | $(1 - $`infiltration_fraction`$) / R_{i,\text{ext}}$ | the conductive remainder |
-| $R_{aw,i}$ | `r_aw_fraction` $/\, g_{\text{cond},i}$ | split fraction (default 0.05; identified when the data allow) |
-| $R_{we,i}$ | $(1 - $`r_aw_fraction`$) /\, g_{\text{cond},i}$ | — |
-
-By construction $g_{\text{inf}} + (R_{aw} + R_{we})^{-1} = 1/R_{\text{ext}}$, so at steady state the air node settles at exactly $T_{\text{outdoor}} + Q \cdot R_{\text{ext}}$ — identical to the previous single-node model.  In the limit `r_aw_fraction` → 0 the two nodes lock together and the model degenerates to the old 1R1C with $(C, R_{\text{ext}})$.  Existing configurations and previously identified parameters therefore carry over unchanged.
-
-**Symbol table**
-
-| Symbol | Unit | Meaning |
-|--------|------|---------|
-| $C_i$ | J/K | Total thermal mass of room $i$ (user input `thermal_mass`). |
-| $T_{a,i}$, $T_{w,i}$ | °C | Air-node and wall-node temperatures (state variables; only $T_{a,i}$ is measured). |
-| $R_{i,\text{ext}}$ | K/W | Total steady-state resistance to outdoors (user input `r_external`). |
-| $R_{ij}$ | K/W | Inter-room (wall-to-wall) resistance (user input `r_value` on connections). |
-| $Q_{\text{heater},i}$ | W | Heat-source power — lands on the **air** node. |
-| $Q_{\text{int},i}$ | W | Identified internal heat gain — air node. |
-| $Q_{\text{solar},i}$ | W | Modelled solar gain (§3.4), split between the nodes. |
-| $s_i$ | – | Per-room **solar scale**, identified from data (default 1; §3.4 Step 6). |
-| $w_s$ | – | `SOLAR_WALL_FRACTION` = 0.5 — the share of transmitted solar absorbed by floor/wall surfaces rather than the air.  Fixed, not identified (nearly collinear with the split fractions). |
-
-Three optional envelope corrections attach to the **wall** node: a linearised long-wave radiative conductance to the sky (`sky_radiative_ua`, with a constant cooling drift $-\text{UA}_{\text{sky}} \cdot \Delta T_{\text{sky}}$ attenuated by the live cloud cover), the sol-air facade share (`facade_absorptance` · `facade_solar_share` of the solar gain), and a thermal-bridge correction (`thermal_bridge_psi_l`).  All default to off.
-
-**Observability.**  The wall node is reconstructed by the EKF from the air measurement alone.  Two diagnostics watch the health of that reconstruction: the per-room *wall-temperature* sensor exposes the EKF posterior std (should contract after start-up and stay bounded) and an *observability* metric — the conditioning of the room's observability Gramian (1 = ideal, ≈ 0 = the wall is practically invisible).  Rooms whose split fractions cannot be identified simply keep their typology defaults; the identification gates and tight priors (§14) prevent the estimator from chasing parameters the data cannot constrain — the failure mode that sank the first 2R2C attempt.
+At steady state with constant ``Q`` and zero sky/bridge UA:
+``Ta_ss = Tout + Q * R``.
 
 ### 3.2 State-space matrix form
 
-For a house with *n* rooms, the 2R2C network assembles into a compact matrix form once at startup.  The physical state vector stacks the air block first, then the wall block: $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n},\; T_{w,1}, \ldots, T_{w,n}]$ of length $2n$:
+For ``n`` rooms the physical state is ``x = [Ta_1, …, Ta_n]`` of length ``n``:
 
-$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
+```text
+C_diag * dx/dt = A x + B_ext * Tout + Q(t)
+```
 
-where:
+``C_diag`` is the ``n``-vector of room masses.  ``A`` is the ``n x n``
+conductance matrix (outdoor UA on the diagonal, ``1/R_ij`` off-diagonal).
+``B_ext`` is outdoor UA.  ``Q(t)`` is heater + internal + solar on air.
+Measurement stays the leading air block, so EKF, comfort constraints, and
+dashboards keep the same room indices.
 
-- $\mathbf{C}$ is a $2n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, C_{w,1}, \ldots, C_{w,n}]$.
-- $\mathbf{A}$ is a $2n \times 2n$ conductance matrix.  Air row $i$: diagonal $-(g_{\text{inf},i} + 1/R_{aw,i})$ and coupling $+1/R_{aw,i}$ to its own wall column.  Wall row $n{+}i$: coupling $+1/R_{aw,i}$ to its air column, diagonal $-(1/R_{aw,i} + 1/R_{we,i} + \text{UA}_{\text{sky},i} + \Psi L_i + \sum_j 1/R_{ij})$, and $+1/R_{ij}$ to connected rooms' wall columns.
-- $\mathbf{B}_{\text{ext}}$ is a $2n$-vector: $g_{\text{inf},i}$ on the air rows, $1/R_{we,i} + \text{UA}_{\text{sky},i} + \Psi L_i$ on the wall rows.
-- $\mathbf{Q}(t)$ is the $2n$-vector of heat inputs: heater + internal gains + the air share of solar on the air rows; the wall share of solar (plus the sol-air facade term) on the wall rows.
-
-Keeping the measured air block in positions $0\ldots n{-}1$ means the measurement model stays the identity on the leading block, and everything downstream (EKF update, comfort constraints, dashboards) keeps addressing rooms by the same indices as before.  Each `step()` call remains a single $2n \times 2n$ linear solve — the per-room eigenvalue pair (one fast, one slow, stiffness ratio $10^2$–$10^4$) is exactly the regime the implicit-Euler integrator in §3.3 was adopted for.
+The CD-SDE for filtering is ``x = [Ta (n), phi (m), b (n)]``.  ``hm = Ta + b``.
 
 ### 3.3 Continuous-discrete integration
 
@@ -100,7 +80,7 @@ $$R(\mathbf{x}_{k+1}) = \mathbf{x}_{k+1} - \mathbf{x}_k - h\,\mathbf{f}(\mathbf{
 
 with Jacobian $\mathbf{I} - h\,\partial \mathbf{f}/\partial \mathbf{x}$.  For the residential thermal model the drift is affine in the state (heat-pump COP varies with the *disturbance* $T_{\text{out}}$, not with the state itself), so the residual is linear in $\mathbf{x}_{k+1}$ and Newton converges in a single iteration — i.e. one $n \times n$ linear solve per sub-step.
 
-**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This matters concretely for the 2R2C model: the per-room fast/slow eigenvalue spread of $10^2$–$10^4$ would make explicit Euler conditionally stable at best, while the implicit scheme integrates it at the full 15-minute step.
+**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This matters for stiff plants: implicit Euler stays L-stable at the 15-minute step.
 
 The CD-EKF propagates both the mean state and the error covariance matrix using the same scheme.  In the implementation, the EKF reuses `mbc`'s native `scheme="implicit-euler"` mode (Newton iteration on the mean ODE; covariance propagated by the one-step sensitivity matrix $\Phi = (I - h\,A_{n+1})^{-1}$).  The `HouseModel.step()` / `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`heatingassistant/engine/integrator.py`) so the integration scheme is uniform across the codebase.
 
@@ -338,9 +318,15 @@ The signed cooling power is exposed as a negative value on the per-room **Heatin
 
 ### 4.1 Overview
 
-The controller (`heatingassistant/engine/controller/`) implements a **linearised
-model-predictive control (MPC)** architecture built on the `mbc` (model-based
-control) package:
+**Live loop:** each sample the CD-EKF runs, then **one** planner
+(Nonlinear MPC by default, or Linear QP) solves a receding-horizon
+problem on that same grid and the house is commanded with `u = U*[k]`.
+There is **no** inner P controller. See [CONTROL.md](agents/CONTROL.md).
+
+The controller (`heatingassistant/engine/controller/`) is built on the `mbc`
+package. Linear mode still uses a linearised QP; Nonlinear mode uses the
+mean ODE / NLP. Both apply the first/current plan sample, not a
+`u_ref + Kp` tracker:
 
 | Component | Class (from `mbc`) | Role |
 |-----------|-------|------|
@@ -358,11 +344,11 @@ The house-heating application provides these classes in
 
 At each control step the controller:
 
-1. Reads room temperatures from HA sensors via the MQTT bridge (measurement vector **y**).
-2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
-3. Runs the CD-EKF to obtain the state estimate **x̂**.
-4. Solves the QP to find the optimal continuous input sequence **U***.
-5. Applies only the **first step** u*[0] of the optimal sequence (receding horizon).
+1. Reads room temperatures (measurement vector **y**).
+2. Builds an *N*-step disturbance forecast **D** (outdoor + solar).
+3. Runs the CD-EKF to obtain **x̂**.
+4. Solves the **active** planner: Nonlinear NLP or Linear QP.
+5. Applies the current plan sample `u = U*[k]` (receding horizon).
 
 ### 4.2 State estimation — Continuous-Discrete EKF
 

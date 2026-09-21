@@ -280,8 +280,8 @@ def _seed_state(
     except TypeError:
         x = np.asarray(model.initial_state_from_measurement(ym0, u0, d0), dtype=float)
     sx = np.zeros((ntheta, nx))
-    tw0, _ = layout.idx_t_wall_init
-    if inject_wall and wall_seg_idx is not None:
+    tw0, tw1 = layout.idx_t_wall_init
+    if inject_wall and wall_seg_idx is not None and tw1 > tw0:
         tw_base = tw0 + wall_seg_idx * n
         for i in range(n):
             if n + i < nx:

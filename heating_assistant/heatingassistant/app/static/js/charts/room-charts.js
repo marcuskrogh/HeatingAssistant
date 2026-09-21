@@ -51,8 +51,8 @@ export function buildTemperatureChart(
   options = {},
 ) {
   const forecastOnly = options.forecastOnly === true;
-  const wallHistory = options.wallHistory || [];
-  const wallForecast = options.wallForecast || [];
+  const wallHistory = [];
+  const wallForecast = [];
   const combinedSetpoint = forecastOnly
     ? setpointForecast
     : [...setpointHistory, ...setpointForecast];

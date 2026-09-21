@@ -75,7 +75,6 @@ def _theta_with_ua(est: KalmanMLEstimator, layout: _ThetaLayout, ua: float) -> n
         est._log_mass_prior,
         est._log_r_prior,
         est._q_int_prior,
-        np.array([est._t_wall_init_prior[0]]),
     ]
     if layout.identifiable_sources:
         blocks.append(

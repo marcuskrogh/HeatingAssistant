@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.28
+
+- The live house model is one air node per room. Room plots no longer
+  show a wall-temperature series. Identification fits air mass, outdoor
+  resistance, and internal gain — not a hidden wall start temperature.
+
 # 2026.09.27
 
 - The room wall temperature estimate no longer dives toward freezing when

@@ -1,5 +1,9 @@
 # Model: Hierarchical mean OCP + P tracking
 
+**Historical (SWD-393).** The two-rate NMPC + P tracker is **not** the
+live controller. See [CONTROL.md](CONTROL.md). Do not use this file as
+the current control spec.
+
 ## Problem statement
 
 Replace the linearised QP in the happy path with a **two-rate** controller on the

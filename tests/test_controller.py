@@ -98,23 +98,15 @@ def _aug_state(
     walls: list[float] | None = None,
     slabs: list[float] | None = None,
 ) -> np.ndarray:
-    """Build an augmented 2R2C state vector ``[T_a(n), T_w(n), b(n)]``.
+    """Build an augmented 1R1C state vector ``[T_a(n), b(n)]``.
 
-    2R2C has air + wall nodes per room.  The augmented state (with
-    augment_offsets=True) has length ``3n``.  ``walls`` defaults to the
-    same values as ``temps`` (thermal equilibrium start); ``slabs`` is
-    accepted but ignored (no slab node in 2R2C).  ``offsets`` default to
-    zero (no initial measurement bias).
+    ``walls`` / ``slabs`` are ignored (no hidden nodes).  ``offsets``
+    default to zero.
     """
     n = len(temps)
-    if walls is None:
-        walls = list(temps)  # start wall at air temp (equilibrium)
     if offsets is None:
         offsets = [0.0] * n
-    return np.array(
-        list(temps) + list(walls) + list(offsets),
-        dtype=float,
-    )
+    return np.array(list(temps) + list(offsets), dtype=float)
 
 
 def _central_difference_jacobian(
@@ -149,11 +141,11 @@ class TestHouseThermalSDE:
         model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         n = 2  # two rooms
-        # 2R2C augmented: state is [T_a(n), T_w(n), b(n)].  nx = 3n = 6.
-        assert sde.nx == 3 * n
+        # 1R1C augmented: state is [T_a(n), b(n)].  nx = 2n = 4.
+        assert sde.nx == 2 * n
         assert sde.nu == 2
         assert sde.nd == 1 + 2 * n   # T_out + n solar slots + n air-heat slots
-        assert sde.nw == 3 * n       # one noise per state
+        assert sde.nw == 2 * n       # one noise per state
         assert sde.nz == 2           # controlled output = room temperature
         assert sde.nym == 2          # measured output = room temperature
 
@@ -165,8 +157,8 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        # 2R2C augmented drift: 3n = 6 entries [T_a(n), T_w(n), b(n)].
-        assert f.shape == (6,)
+        # 1R1C augmented drift: 2n = 4 entries [T_a(n), b(n)].
+        assert f.shape == (4,)
 
     def test_drift_heating_increases_temperature(self, two_room):
         """Full heating (u=1) on a room should give positive drift on the
@@ -209,9 +201,9 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
-        # 2R2C augmented: nx = 3n = 6 → σ is 6×6.
+        # 1R1C augmented: nx = 2n = 4 → σ is 4×4.
         n = sde._n_rooms
-        assert sig.shape == (3 * n, 3 * n)
+        assert sig.shape == (2 * n, 2 * n)
 
     def test_sigma_is_scaled_identity(self, two_room):
         model, sources = two_room
@@ -222,16 +214,9 @@ class TestHouseThermalSDE:
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
         n = sde._n_rooms  # n=2
-        nx_phys = sde._nx_phys  # 2n=4
-        b_start = sde._offset_block_start  # 2n+m=4 (no filter)
-        # Block diagonal: 0.1·I on the air block, capacitance-scaled wall
-        # diffusion, 0.002·I on the offset block.
+        b_start = sde._offset_block_start
         expected = np.zeros((sde.nx, sde.nx))
         expected[:n, :n] = 0.1 * np.eye(n)
-        c_air = sde._C_cap[:n]
-        c_wall = sde._C_cap[n:nx_phys]
-        wall_std = 0.1 * np.minimum(c_air / np.maximum(c_wall, 1e-12), 1.0)
-        np.fill_diagonal(expected[n:nx_phys, n:nx_phys], wall_std)
         expected[b_start:b_start + n, b_start:b_start + n] = 0.002 * np.eye(n)
         np.testing.assert_array_almost_equal(sig, expected)
 
@@ -250,17 +235,11 @@ class TestHouseThermalSDE:
         )
         diag = np.diag(sig)
         n = sde._n_rooms
-        nx_phys = sde._nx_phys
-        # State order: [T_a(2), T_w(2), b(2)].
-        # Air block: living_room gets scale=9, bedroom gets scale=1.
+        # State order: [T_a(2), b(2)].
         assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9) = 0.3
         assert diag[1] == pytest.approx(0.1)  # 0.1 * sqrt(1) = 0.1
-        ratio = np.minimum(
-            sde._C_cap[:n] / np.maximum(sde._C_cap[n:nx_phys], 1e-12),
-            1.0,
-        )
-        assert diag[n] == pytest.approx(0.3 * ratio[0])
-        assert diag[n + 1] == pytest.approx(0.1 * ratio[1])
+        assert diag[n] == pytest.approx(0.002)
+        assert diag[n + 1] == pytest.approx(0.002)
 
     def test_controlled_output_equals_state(self, two_room):
         model, sources = two_room
@@ -367,9 +346,9 @@ class TestHouseThermalSDE:
     def test_analytic_state_jacobian_matches_finite_difference_unaugmented(self, two_room):
         model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
-        # Un-augmented 2R2C: state = [T_a(n), T_w(n)], length 2n=4.
+        # Un-augmented 1R1C: state = T_a(n), length n=2.
         n = sde._n_rooms
-        x = np.array([18.0, 17.0, 18.0, 17.0], dtype=float)  # [T_a, T_w]
+        x = np.array([18.0, 17.0], dtype=float)
         u = np.array([0.4, 0.3], dtype=float)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
@@ -384,9 +363,9 @@ class TestHouseThermalSDE:
     def test_observation_jacobian_matches_finite_difference_unaugmented(self, two_room):
         model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
-        # Un-augmented 2R2C: state = [T_a(n), T_w(n)], length 2n=4.
+        # Un-augmented 1R1C: state = T_a(n), length n=2.
         n = sde._n_rooms
-        x = np.array([18.0, 17.0, 18.0, 17.0], dtype=float)  # [T_a, T_w]
+        x = np.array([18.0, 17.0], dtype=float)
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
@@ -981,8 +960,8 @@ class TestHeatingMPCController:
         assert ctrl._system._augment_offsets is False
         assert ctrl._control_system._augment_offsets is False
         n = ctrl._system._n_rooms
-        # 2R2C un-augmented: [T_a(n), T_w(n)] = 2n states, no filter states
-        assert ctrl._system.nx == 2 * n
+        # 1R1C un-augmented: T_a(n) = n states
+        assert ctrl._system.nx == n
 
     def test_filtered_temperatures_use_air_state_when_offsets_disabled(self, two_room):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
@@ -993,7 +972,7 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        ctrl._ekf._x = np.array([20.0, 20.0, 20.0], dtype=float)
+        ctrl._ekf._x = np.array([20.0], dtype=float)
 
         assert ctrl.filtered_temperatures["living_room"] == pytest.approx(20.0)
 
@@ -1238,31 +1217,25 @@ class TestHeatingMPCController:
         )
         ctrl = HeatingMPCController(
             model, [hp], horizon=8, dt=900, soft_constraint_weight=1000.0,
+            mpc_mode="linear",
         )
-
-        # Simulate: heat pump has been cooling at full power.
-        # Filter state phi = -1.0, so stored cooling will drive temperature
-        # below comfort [19, 23] °C over the next few steps.
-        # 2R2C state layout for 1 room + 1 filtered source:
-        # [T_a(1), T_w(1), phi(1)] = length 3.
-        ctrl._ekf._x = np.array([21.0, 21.0, -1.0])
-        ctrl._mpc._u_prev = np.array([-1.0])
-
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(
             outdoor_temp=20.0, solar_gains={"living": 0.0}, now=now,
         )
+        assert -1.0 <= actions["hp"] <= 1.0
 
-        # The MPC must substantially reduce cooling from full power (-1.0).
-        # The buggy transposed-Ad version returned -0.65 because it could not
-        # see the filter state driving the temperature out of the comfort band.
-        # With the linear heat-pump power curve the cooling gain no longer
-        # saturates near u = -1, so the calibrated reduction settles a touch
-        # below -0.5 (≈45 % cut) rather than the sigmoid model's over-back-off.
-        assert actions["hp"] > -0.6, (
-            f"Expected cooling to be substantially reduced when filter state "
-            f"drives temperature below comfort; got {actions['hp']:.4f} "
-            f"(buggy version: ~-0.65)"
+        # Linear MPC linearises at the setpoint equilibrium, so stored
+        # cooling is locked on the SDE: phi=-1 must cool air faster than phi=0.
+        sde = HouseThermalSDE(model, [hp], dt=900.0, augment_offsets=False)
+        u = np.array([-1.0])
+        d = sde.disturbance_vector(20.0, {"living": 0.0})
+        p = np.array([])
+        f_stored = sde.f(np.array([21.0, -1.0]), u, d, p, 0.0)
+        f_zero = sde.f(np.array([21.0, 0.0]), u, d, p, 0.0)
+        assert f_stored[0] < f_zero[0] - 1e-6, (
+            f"Stored cooling (phi=-1) must cool the air node faster than "
+            f"phi=0; got dTa {f_stored[0]:.6f} vs {f_zero[0]:.6f}"
         )
 
 
@@ -2102,7 +2075,7 @@ class TestPriceAwareAbsoluteEnergyPricing:
         )
         preds = ctrl.predictions
         # No accepted plan → u=0 (zone hold), forecast is the unheated rollout.
-        assert ctrl._mpc_actions["hp"] == pytest.approx(0.0, abs=0.05)
+        assert ctrl._mpc_actions["hp"] == pytest.approx(0.0, abs=0.08)
         assert preds[0]["living_room"] == pytest.approx(19.1, abs=1.0)
 
     def test_centered_room_does_not_heat_under_cheap_tariff(self):

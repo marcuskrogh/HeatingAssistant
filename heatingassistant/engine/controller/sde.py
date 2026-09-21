@@ -11,7 +11,6 @@ from ..const import (
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
-    SOLAR_WALL_FRACTION,
 )
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel, _SG_FACTOR_TYPICAL
@@ -31,9 +30,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
     where
         f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d
-        sigma             = diag(σ_air on T_a, σ_wall on T_w, σ_b on offsets)
-                            with σ_wall = σ_air · min(C_a/C_w, 1) so wall and
-                            air share Watt-level process noise
+        sigma             = diag(σ_air on T_a, σ_b on offsets)
 
     and the observation model is:
         ym(tₖ) = hm(x) = T + b
@@ -106,73 +103,52 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         }
         n = len(self._room_list)
         self._n_rooms = n
-        self._nx_phys = 2 * n   # 2R2C: [T_a (n), T_w (n)]
+        self._nx_phys = n   # 1R1C: [T_a (n)]
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
         # Per-room covariance scaling for process noise (Phase 3 W1).
         # Values are covariance multipliers; 1.0 means no inflation.
         self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
         self._window_open: np.ndarray = np.zeros(n, dtype=bool)
 
-        # 2R2C state layout: ``x_phys = [T_a (n), T_w (n)]`` with
-        # ``nx_phys = 2n`` — air block first so the measured/controlled
-        # temperatures stay at ``x[:n]`` exactly as before.
-        # Capacitance, drift, and disturbance matrices are all derived
-        # from the 2n-state ``HouseModel`` so they share a single source
-        # of truth.
-        self._C_cap = np.array(model._C, dtype=float)                # (2n,) [C_a, C_w]
-        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (2n,)
-        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (2n, 2n)
+        # 1R1C state layout: ``x_phys = T_a (n)`` with ``nx_phys = n``.
+        # Capacitance, drift, and disturbance matrices come from HouseModel.
+        self._C_cap = np.array(model._C, dtype=float)                # (n,)
+        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (n,)
+        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (n, n)
 
-        # Continuous disturbance matrix G_d shape (2n, 1 + 2n):
-        # column 0:        outdoor temperature coupling via B_ext (both blocks);
-        # columns 1..n:    per-room solar gain, scaled by the identified
-        #                  ``solar_scale`` and split between the air node
-        #                  (1 − SOLAR_WALL_FRACTION) and the wall node
-        #                  (SOLAR_WALL_FRACTION + sol-air facade share);
-        # columns 1+n..2n: per-room direct air-node heat [W] — the identified
-        #                  internal gain q_int.
-        self._G_d: np.ndarray = np.zeros((2 * n, 1 + 2 * n))
+        # Continuous disturbance matrix G_d shape (n, 1 + 2n):
+        # column 0:        outdoor temperature coupling via B_ext;
+        # columns 1..n:    per-room solar gain (all on air), scaled by
+        #                  identified ``solar_scale`` plus sol-air facade;
+        # columns 1+n..2n: per-room direct air-node heat [W] (q_int).
+        self._G_d: np.ndarray = np.zeros((n, 1 + 2 * n))
         self._G_d[:, 0] = model._B_ext * self._inv_C_cap
         for i in range(n):
             room = model.rooms[self._room_list[i]]
             s_i = float(room.solar_scale)
-            wall_frac = SOLAR_WALL_FRACTION
             facade = float(room.facade_solar_share) * float(room.facade_absorptance)
-            self._G_d[i, 1 + i] = (1.0 - wall_frac) * s_i * self._inv_C_cap[i]
-            self._G_d[n + i, 1 + i] = (wall_frac + facade) * s_i * self._inv_C_cap[n + i]
-            # Air-node heat channel (q_int / Δg): air row only.
+            self._G_d[i, 1 + i] = (1.0 + facade) * s_i * self._inv_C_cap[i]
             self._G_d[i, 1 + n + i] = self._inv_C_cap[i]
 
-        # Sky cooling-drift bias (wall rows).  Mirrors the HouseModel-side
-        # constant (–sky_ua · ΔT_sky / C_w per room), attenuated at runtime
-        # by the cloud clear-sky fraction.  Added directly to the drift in
-        # ``f``; doesn't enter ``dfdx``.
-        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)  # (2n,)
+        # Sky cooling-drift bias (air rows).  Mirrors HouseModel
+        # (−sky_ua · ΔT_sky / C per room), attenuated at runtime
+        # by the cloud clear-sky fraction.  Added in ``f``; not in ``dfdx``.
+        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)  # (n,)
         self._sky_clear_fraction: float = 1.0
 
         # Sherman–Grimsrud per-room effective leakage area [m²] for the
         # air-node infiltration overlay; single source of truth in HouseModel.
         self._leakage_area = np.array(model._leakage_area, dtype=float)
 
-        # Wall-node equilibrium mixing ratio: at steady state (no solar,
-        # no inter-room flow) the wall sits at
-        #     T_w = ρ·T_a + (1 − ρ)·T_out,   ρ = g_aw / (g_aw + g_wout).
-        # Used to seed wall states for open-loop starts and the QP
-        # linearisation point.
-        _ratios = []
-        for name in self._room_list:
-            room = model.rooms[name]
-            _g_inf, g_aw, g_we = room.conductances()
-            g_wout = g_we + float(room.sky_radiative_ua) + float(room.thermal_bridge_psi_l)
-            _ratios.append(g_aw / (g_aw + g_wout))
-        self._wall_eq_ratio: np.ndarray = np.array(_ratios, dtype=float)
+        # Legacy ratio kept so linearised MPC can skip a wall correction.
+        self._wall_eq_ratio: np.ndarray = np.ones(n, dtype=float)
 
         # Per-source first-order emitter filter (B2).
         # Each source with ``emitter_time_constant > 0`` gets a filter
         # state ``φ_j`` that lags the commanded fraction ``u_j`` with
         # time constant ``τ_em,j``.  The state-vector layout becomes
         #
-        #     [T_a (n), T_w (n), φ (m), b (n)]
+        #     [T_a (n), φ (m), b (n)]
         #
         # where ``m`` is the number of filtered sources and the b block
         # is optional (``augment_offsets``).
@@ -223,7 +199,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         self._offset_block_start: int = nx_phys + m
 
         # Total state dimension.  Layout:
-        #   [T_a (n), T_w (n), φ (m), b (n if augment_offsets)]
+        #   [T_a (n), φ (m), b (n if augment_offsets)]
         self._nx: int = (nx_phys + n + m) if augment_offsets else (nx_phys + m)
 
         # Per-source fixed lookups — replace per-call dict/cast overhead.
@@ -252,8 +228,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         )
 
         # Constant measurement/output Jacobian H = dhm/dx = dgm/dx.
-        # Only the air block is measured; the wall, filter, and gain blocks
-        # contribute nothing, so their columns stay zero.
+        # Only the air block is measured; filter and offset columns stay zero.
         b_start = self._offset_block_start
         _H = np.zeros((n, self._nx))
         _H[:, :n] = np.eye(n)
@@ -296,13 +271,10 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
     @property
     def nx(self) -> int:
-        # 2R2C state layout:
-        # * Physical block: ``2n`` states (air + wall node per room).
-        # * Filter block: ``m`` states (emitter lags).
-        # * With offset augmentation we append per-room measurement
-        #   biases (``+n``).
-        # * With internal-gain augmentation we append per-room gain
-        #   deviation states (``+n``).
+        # 1R1C state layout:
+        # * Physical block: ``n`` air temperatures.
+        # * Filter block: ``m`` emitter lags.
+        # * Offset augmentation appends per-room measurement biases (``+n``).
         return self._nx
 
     @property
@@ -351,8 +323,8 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     ) -> None:
         """Update per-room process-noise covariance multipliers.
 
-        ``scales_by_room[room]`` scales Q for that room's physical states
-        (air and wall nodes). Values <= 0 are ignored.
+        ``scales_by_room[room]`` scales Q for that room's air node.
+        Values <= 0 are ignored.
         """
         scales = np.ones(self._n_rooms, dtype=float)
         for room_name, value in scales_by_room.items():
@@ -401,12 +373,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         scales.
 
         Block-diagonal layout matching the state vector
-        ``[T_a (n), T_w (n), φ (m), b (n if augment_offsets)]``:
+        ``[T_a (n), φ (m), b (n if augment_offsets)]``:
 
         * air block:   ``σ_w · √(q_scale)`` per room,
-        * wall block:  the same intensity scaled by ``min(C_a/C_w, 1)`` so
-          unmodelled heat [W] is shared; the slow node is not given the
-          same kelvin diffusion as the fast air node,
         * filter block:     ``σ_w`` per filtered source,
         * offset block:     ``σ_b`` per room (random-walk bias).
         """
@@ -414,12 +383,8 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         m = self._n_filtered
         physical_std = np.sqrt(np.maximum(self._room_q_scales, 0.0))
         air_std = self._sigma_w * physical_std
-        c_air = np.maximum(self._C_cap[:n], 1e-12)
-        c_wall = np.maximum(self._C_cap[n: 2 * n], 1e-12)
-        wall_std = air_std * np.minimum(c_air / c_wall, 1.0)
         diag_parts = [
             air_std,
-            wall_std,
             self._sigma_w * np.ones(m, dtype=float),
         ]
         if self._augment_offsets:
@@ -514,14 +479,11 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         t: float,
     ) -> np.ndarray:
         """
-        Drift for the 2R2C state ``x = [T_a (n), T_w (n), φ (m), b?, Δg?]``.
+        Drift for the 1R1C state ``x = [T_a (n), φ (m), b?]``.
 
-        Heat-source power, internal gains, and the Sherman–Grimsrud
-        infiltration overlay land on the **air** node; conduction, sky
-        radiative cooling, thermal bridges, the sol-air facade share and
-        inter-room coupling act on the **wall** node; solar gain splits
-        between the two via ``G_d``.  The measurement-offset block ``b``
-        has zero drift — it's a slowly-varying random-walk bias state.
+        Heat-source power, internal gains, solar, sky, outdoor UA, and
+        inter-room coupling all land on the **air** node.  The
+        measurement-offset block ``b`` has zero drift.
 
         Heat-source dispatch:
 
@@ -567,7 +529,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
             )
             self._accumulate_source_heat(heat_contrib, j, eff_u, outdoor_temp)
 
-        # Physical 2R2C drift on [T_a, T_w].
+        # Physical 1R1C drift on T_a.
         dT_phys = (
             self._F @ T_phys
             + heat_contrib
@@ -695,7 +657,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         t: float,
     ) -> np.ndarray:
         """``∂f/∂x`` for the augmented state
-        ``[T_a (n), T_w (n), φ (m), b (n)?, Δg (n)?]``.
+        ``[T_a (n), φ (m), b (n)?]``.
 
         Block structure (rows in same order as state):
 
@@ -930,18 +892,12 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     def x(self) -> list[float]:
         """Current state vector as a list of floats.
 
-        Layout: un-augmented ``[T_a (n), T_w (n), φ (m)]``; augmented
-        adds a ``b (n)`` block at the end.  ``m`` is the
-        number of filtered heat sources (``self._n_filtered``).  ``φ`` is
-        initialised from the filter cache (zero on cold start); the wall
-        block round-trips through ``Room.wall_temperature``.
+        Layout: un-augmented ``[T_a (n), φ (m)]``; augmented
+        adds a ``b (n)`` block at the end.
         """
         temps = [self._model.rooms[name].temperature for name in self._room_list]
-        walls = [
-            self._model.rooms[name].wall_temperature for name in self._room_list
-        ]
         phi = self._filter_state.tolist() if self._n_filtered > 0 else []
-        out = temps + walls + phi
+        out = temps + phi
         if self._augment_offsets:
             out = out + self._offset_state.tolist()
         return out
@@ -956,14 +912,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         for i, name in enumerate(self._room_list):
             self._model.rooms[name].temperature = float(val[i])
-
-        if len(val) >= nx_phys:
-            for i, name in enumerate(self._room_list):
-                self._model.rooms[name].wall_temperature = float(val[n + i])
-        else:
-            # Short (air-only) vector: walls follow the air node.
-            for i, name in enumerate(self._room_list):
-                self._model.rooms[name].wall_temperature = float(val[i])
+            self._model.rooms[name].wall_temperature = float(val[i])
 
         if m > 0:
             if len(val) >= nx_phys + m:
@@ -984,15 +933,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         t_air: np.ndarray,
         t_out: float,
     ) -> np.ndarray:
-        """Steady-state wall temperatures for given air and outdoor temps.
-
-        ``T_w = ρ·T_a + (1 − ρ)·T_out`` with the per-room conductance
-        ratio ``ρ = g_aw / (g_aw + g_wout)`` (solar and inter-room flows
-        neglected).  Used to seed wall states for open-loop simulation
-        starts and the QP linearisation point.
-        """
+        """Identity map: 1R1C has no hidden wall node."""
         t_air = np.asarray(t_air, dtype=float).ravel()
-        return self._wall_eq_ratio * t_air + (1.0 - self._wall_eq_ratio) * float(t_out)
+        return t_air.copy()
 
     def initial_state_from_measurement(
         self,
@@ -1077,21 +1020,6 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         y_arr = np.asarray(y, dtype=float).ravel()
         n_copy = min(n, y_arr.size)
         x[:n_copy] = y_arr[:n_copy]
-
-        # Wall warm start.  ``"air"`` (diagnostics) seeds the envelope at the air
-        # node; ``"steady_state"`` (estimator) uses the (T_a, T_out) equilibrium.
-        if wall_seed == "air":
-            x[n: 2 * n] = x[:n]
-        else:
-            t_out: Optional[float] = None
-            if d is not None:
-                d_arr = np.asarray(d, dtype=float).ravel()
-                if d_arr.size > 0 and np.isfinite(d_arr[0]):
-                    t_out = float(d_arr[0])
-            if t_out is None:
-                x[n: 2 * n] = x[:n]
-            else:
-                x[n: 2 * n] = self.wall_equilibrium(x[:n], t_out)
 
         if m > 0 and u is not None:
             u_arr = np.asarray(u, dtype=float).ravel()
