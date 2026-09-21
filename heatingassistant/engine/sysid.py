@@ -270,7 +270,7 @@ def run_sysid_ekf(
     # Record the initial anchor point.  Rooms whose window was open at the first
     # sample are rendered as a gap (null) — the open-window measurement is
     # excluded data, so neither the point nor the prediction is shown.
-    _has_wall = n_x > n  # 2R2C: wall states at x[n:2n]
+    _has_wall = _has_wall_block(sde, n, n_x)
     ts0 = float(window[0].get("timestamp", 0.0))
     open0 = record_window_open(window[0], room_names)
     for i, name in enumerate(room_names):
@@ -483,6 +483,11 @@ run_sysid_simulation = run_sysid_ekf
 # ---------------------------------------------------------------------------
 
 
+def _has_wall_block(sde: Any, n: int, n_x: int) -> bool:
+    nx_phys = int(getattr(sde, "_nx_phys", n) or n)
+    return nx_phys > n and n_x >= 2 * n
+
+
 def _init_state_from_measurement(
     sde: Any,
     y_vals: List[Any],
@@ -540,26 +545,27 @@ def _init_state_from_measurement(
         except Exception:
             x = None
     if x is not None:
-        if x.shape[0] >= 2 * n:
-            if t_wall_init is not None:
-                # Use identified wall initial temperatures.
-                for i in range(n):
-                    if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
-                        x[n + i] = float(t_wall_init[i])
-            else:
-                # Default: wall starts at the measured air temperature.
-                x[n:2 * n] = air[:n]
-        return x
-    # Fallback (no helper): air temperatures measured, wall block seeded.
-    x = np.zeros(n_x, dtype=float)
-    x[:n] = air
-    if n_x >= 2 * n:
-        if t_wall_init is not None:
+        if _has_wall_block(sde, n, int(x.shape[0])) and t_wall_init is not None:
             for i in range(n):
                 if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
                     x[n + i] = float(t_wall_init[i])
-        else:
-            x[n:2 * n] = air
+        return x
+    # Fallback (no helper): air temperatures measured.  A hidden wall
+    # block (``nx_phys > n``) is seeded to air, or to ``t_wall_init``
+    # when provided.  1R1C leaves ``x[n:]`` at zero so emitter lag is
+    # not treated as a wall.
+    x = np.zeros(n_x, dtype=float)
+    x[:n] = air
+    if _has_wall_block(sde, n, n_x):
+        for i in range(n):
+            if (
+                t_wall_init is not None
+                and i < len(t_wall_init)
+                and np.isfinite(float(t_wall_init[i]))
+            ):
+                x[n + i] = float(t_wall_init[i])
+            else:
+                x[n + i] = float(air[i])
     return x
 
 

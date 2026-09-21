@@ -116,7 +116,6 @@ def test_sysid_detail_markup_keeps_query_ids() -> None:
     for needle in (
         "param-thermal-mass",
         "param-ua-open",
-        "param-t-wall-initial",
         "btn-apply-params",
         "fit-comparison-kpis",
         "param-history-list",

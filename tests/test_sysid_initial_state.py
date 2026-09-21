@@ -73,7 +73,7 @@ def test_init_helper_seeds_wall_at_air():
 
 
 def test_init_helper_fallback_without_sde_helper():
-    """Legacy/monkeypatched SDEs (no helper) still get wall = air, never 0."""
+    """1R1C: no helper and no wall block — do not write air into x[n:]."""
     class _Bare:
         nx = 2
 
@@ -81,4 +81,19 @@ def test_init_helper_fallback_without_sde_helper():
                                      u_vec=np.array([0.0]),
                                      d_vec=np.array([0.0]))
     assert x[0] == 18.0
-    assert x[1] == 18.0   # wall falls back to air temperature, not 0
+    assert x[1] == 0.0
+
+
+def test_init_helper_fallback_seeds_wall_when_nx_phys_gt_n():
+    """Legacy 2R2C SDE without a helper still seeds wall = air."""
+    class _TwoNode:
+        nx = 2
+        _nx_phys = 2
+
+    x = _init_state_from_measurement(
+        _TwoNode(), [18.0], n=1, n_x=2,
+        u_vec=np.array([0.0]),
+        d_vec=np.array([0.0]),
+    )
+    assert x[0] == 18.0
+    assert x[1] == 18.0
