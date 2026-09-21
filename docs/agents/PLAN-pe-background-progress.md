@@ -107,4 +107,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/test SWD-573` — dedicated test phase after implement (https://github.com/marcuskrogh/HeatingAssistant/pull/694)
+`/review SWD-573` — lasers then code review (https://github.com/marcuskrogh/HeatingAssistant/pull/694)
