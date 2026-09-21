@@ -29,4 +29,4 @@
 - Branch: cursor/swd-573-pe-background-progress-6f70
 
 ## Next
-`/implement SWD-573` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/694 (`843739e4`)

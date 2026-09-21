@@ -107,4 +107,4 @@
 - Workflow: feature-standard
 
 ## Next
-`/review SWD-573` — lasers then code review (https://github.com/marcuskrogh/HeatingAssistant/pull/694)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/694 (`843739e4`)

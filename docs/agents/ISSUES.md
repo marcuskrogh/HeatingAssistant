@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | In Review | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | `/review SWD-573` — https://github.com/marcuskrogh/HeatingAssistant/pull/694 |
-| SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
-| SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
+| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | Done | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/694 (`843739e4`) |
+| SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
+| SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
 | SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | Done | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/693 (`d875c8f9`) |
 | SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | Done | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691 (`cc1977f9`) |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
