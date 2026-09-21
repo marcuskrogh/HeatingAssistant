@@ -71,7 +71,7 @@
 - Task: SWD-571
 - Sub-tasks: —
 - Branch: cursor/mpc-load-uncap-5de1
-- PR: (draft after first push)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/692
 - Classification: tweak
 - Workflow: delta-fast
 
