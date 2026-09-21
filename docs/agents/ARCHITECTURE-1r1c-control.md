@@ -5,12 +5,13 @@
   and `heatingassistant/engine/controller/sde.py` (`HouseThermalSDE`).
   Same types; state dimension `n` instead of `2n`.
 - Depends on: existing `HeatSource` maps, integrator, PE `KalmanMLEstimator`
-  theta packing, NMPC `MeanOcp` roll, App chart datasets.
+  theta packing, NMPC/Linear receding-horizon apply of `U*[k]`, App charts.
+  Not a P tracker (`refresh_p_command` only holds `U*`).
 - Seams: `HouseModel.step` / `_build_matrices`; SDE `f`, `dfdx`, `hm`,
   `sigma`; PE theta layout; room chart dataset labels `Wall` /
   `Wall Forecast`.
-- Will not add: a second plant, a wall observer module, a new filter
-  package, or a compatibility 2R2C simulator in production.
+- Will not add: a second plant, a wall observer, a new filter package, a
+  2R2C simulator in production, or a restored P-layer.
 
 ## Neighbourhood
 - Opened: thermal model, SDE, EKF facade, NMPC roll, PE, room plots,

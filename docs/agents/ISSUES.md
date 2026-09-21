@@ -280,6 +280,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-21 — `/define` SWD-570: live control is NMPC (`U*[k]`), not NMPC+P. Canonical `docs/agents/CONTROL.md`. Stale two-rate docs marked historical. Next `/implement SWD-570`.
 - 2026-09-21 — `/model`+`/define`+`/architect` SWD-570: live plant is 1R1C (user). MODEL `docs/agents/MODEL-1r1c.md`, PLAN `docs/agents/PLAN-1r1c-control.md`, ARCH `docs/agents/ARCHITECTURE-1r1c-control.md`. Next `/implement SWD-570`.
 - 2026-09-20 — `/model` SWD-570: CD-Kalman with \(K_w=0\) (latent wall ODE); not UKF. Artifact `docs/agents/MODEL-state-estimation.md`. Branch `cursor/constrained-cdkf-wall-5de1` (no PR). Relates SWD-564. Next `/define SWD-570`. Superseded by 1R1C plant.
 - 2026-09-17 — `/ship` SWD-561 via PR #688 (`6e0798ce`): revert fake 2 h PE origin stride; keep η plateau, best-RMS overlay, wait/cancel. Review CLEAN (focused). CI green (6 checks). Overnight 24 h PE was not a gate. Next: Done.

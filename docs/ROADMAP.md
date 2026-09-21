@@ -1,5 +1,11 @@
 # Roadmap: Hierarchical nonlinear OCP + P tracking
 
+**Superseded as the live control loop.** Production is receding-horizon
+MPC (Nonlinear by default, Linear optional) on **one sample grid**,
+applying `U*[k]`. There is no P tracker. Canonical:
+[CONTROL.md](agents/CONTROL.md). This file is the SWD-392 explore map as
+shipped, then later replaced.
+
 ## Destination
 A two-rate controller. A nonlinear OCP on a slow grid (**2 h**, sandbox choice) produces the nominal path `(T_ref(t), u_ref(t))`. Between solves, a P-controller with feedforward `u = clip(u_ref(t) + K_p (T_ref(t) − T_filtered))` tracks that path. One heater per room. A failed OCP keeps the last path. Five hours of consecutive failures (including timeouts) set every heater to `u = 0` and raise a persistent notification. The linearised QP is not in the happy path.
 

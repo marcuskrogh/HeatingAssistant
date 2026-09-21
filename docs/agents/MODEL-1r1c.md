@@ -1,12 +1,14 @@
-# Model: 1R1C plant for control (PE + EKF + NMPC + P)
+# Model: 1R1C plant for control (PE + EKF + NMPC)
 
 ## Problem statement
 
 Replace the live 2R2C house (hidden wall node) with a 1R1C air-node plant
-so parameter estimation, state estimation, and the two-rate controller
+so parameter estimation, state estimation, and **receding-horizon MPC**
 share one identifiable, fully observed thermal state. The objective is
-control quality (trackable `T_ref`, honest `u_ref`), not physical wall
-reconstruction or open-loop 2R2C RMSE.
+control quality (honest `U*` on air), not wall reconstruction.
+
+The live controller is **not** two-rate NMPC + P. Each sample: EKF, then
+NMPC (or Linear MPC), then `u = U*[k]`. See `docs/agents/CONTROL.md`.
 
 ## Notation
 
@@ -14,22 +16,22 @@ reconstruction or open-loop 2R2C RMSE.
 |--------|---------|
 | `Ta` | Indoor air temperature (state, measured, controlled) |
 | `Tout` | Outdoor air (disturbance) |
-| `C` | Room thermal mass [J/K] (user-facing, same as today’s `thermal_mass`) |
+| `C` | Room thermal mass [J/K] (`thermal_mass`) |
 | `R` | Steady-state resistance to outdoors [K/W] (`r_external`) |
 | `Qa` | Heater/cooler thermal power on air [W] |
 | `Qsol` | Window solar gain [W], scaled by identified `s` |
 | `q_int` | Internal gain [W] |
-| `b` | Slow air bias / disturbance observer [K] (optional offset state) |
-| `phi` | Emitter filter state (actuator lag; keep if the source is filtered) |
-| `u` | Heater fraction |
+| `b` | Slow air bias [K] |
+| `phi` | Emitter filter state (actuator lag) |
+| `u` | Heater fraction = current plan sample `U*[k]` |
 | `ym` | Air measurement |
 
 Dropped from the live plant: `Tw`, `c_air_fraction`, `r_aw_fraction`,
-`Tw0`, `SOLAR_WALL_FRACTION`, Kalman wall gain.
+`Tw0`, `SOLAR_WALL_FRACTION`.
 
 ## Formulation
 
-Plant (one room; house is the stacked rooms plus air–air `R_ij`):
+Plant (one room; house stacks rooms plus air–air `R_ij`):
 
 ```text
 C * dTa/dt = Qa(u, Tout)
@@ -39,84 +41,78 @@ C * dTa/dt = Qa(u, Tout)
            + sum_j (Ta_j - Ta) / R_ij
            + Qsky_air
 
-R_eff^{-1} = R^{-1} + sky_ua + thermal_bridge   # outdoor UA on air
-Qsky_air   = -sky_ua * dT_sky * clear_fraction  # former wall sky term
+R_eff^{-1} = R^{-1} + sky_ua + thermal_bridge
+Qsky_air   = -sky_ua * dT_sky * clear_fraction
 
 ym = Ta + b + v
 ```
 
-`Qa` stays the existing heat-pump map (`smooth_thermal_power` when the
-source can cool). `phi` dynamics unchanged: `dphi/dt = (u - phi) / tau`.
+`Qa` is the existing heat-pump map. `dphi/dt = (u - phi) / tau`.
 
 SDE for the CD-Kalman filter:
 
 ```text
 dx = f(x, u, d) dt + sigma dw
-x  = [Ta (n), phi (m), b (n)]     # no Tw block
+x  = [Ta (n), phi (m), b (n)]     # no Tw
 hm = Ta + b
 ```
 
-Equal-kelvin `sigma_w` on air only. No wall diffusion row.
-
-PE decision vector (per room, shared structure across windows):
+PE:
 
 ```text
 theta = { C, R, s, alpha, q_int, ua_open? }
-# not in theta: c_air, r_aw, Tw0, solar_wall split
+# not in theta: c_air, r_aw, Tw0
 ```
 
-NMPC: same two-rate law. `x0` is the EKF air (+ `phi`, `b`). `T_ref` is
-still the mean air path. P-law unchanged:
+Control (live, unchanged by this plant swap):
 
 ```text
-u = clip(u_ref + Kp * (T_ref - Ta_hat), u_min, u_max)
+each sample:
+  EKF(x, y, u_applied)
+  U* = planner(x_hat, d_forecast)    # nmpc or linear
+  u  = clip(U*[k], u_min, u_max)    # NOT u_ref + Kp*(T_ref - Ta)
 ```
 
-Steady-state invariant (unchanged from the 1R1C era):
+Steady-state:
 
 ```text
-Ta_ss = Tout + Q * R     # with sky/bridge folded into R_eff as above
+Ta_ss = Tout + Q * R
 ```
 
 ## Assumptions
 
-- One thermal state per room is enough for price-aware comfort control.
-- Unmodelled envelope lag is absorbed by `b` / `q_int` and by P tracking.
-- Inter-room `R_ij` couples air nodes (not a hidden wall mesh).
-- Config keys `c_air_fraction`, `r_aw_fraction`, `wall_temperature` load
-  and are ignored (same pattern as slab-era kwargs).
+- One thermal state per room is enough for price-aware comfort MPC.
+- Unmodelled envelope lag is absorbed by `b` / `q_int` and by replanning.
+- Inter-room `R_ij` couples air nodes.
+- Old split / wall config keys load and are ignored.
 
 ## Algorithmic choices
 
-- Live PE, EKF, NMPC, P, and room plots all use this 1R1C SDE. No
-  parallel 2R2C “truth” model in production.
-- Room Temperature plot drops Wall / Wall Forecast series.
-- Do not switch filter class (UKF/MHE). 1R1C air is linear-Gaussian
-  given `u`, `d`.
+- Live PE, EKF, NMPC/Linear, and room plots use this 1R1C SDE.
+- Room Temperature plot drops Wall / Wall Forecast.
+- Do not restore a P tracker. Do not switch to UKF/MHE.
 
 ## Numerical considerations
 
-- `HouseModel` state size `n` (was `2n`). Integrator and Jacobians stay
-  implicit Euler / analytic `dfdx`.
+- `HouseModel` state size `n` (was `2n`). Implicit Euler / analytic `dfdx`.
 - Dual package tree: `heatingassistant/` and
   `heating_assistant/heatingassistant/`.
 
 ## Open items
 
-- None for the plant class (user chose 1R1C). Display of leftover PE
-  split fields in old saved configs is ignored-on-load.
+- None for the plant class. Ignored-on-load for leftover split fields.
 
 ## Role in pipeline
 
-Finding docs for `/define` and `/implement`. Supersedes
-`MODEL-state-estimation.md` (`Kw = 0` / small `Q_wall` on 2R2C).
+Finding docs for implement. Supersedes `MODEL-state-estimation.md`.
+Control-loop source of truth: `docs/agents/CONTROL.md`.
 
 ## Tracker
 
 - Task: [SWD-570](https://marcusknielsen.atlassian.net/browse/SWD-570)
 - Relates: [SWD-564](https://marcusknielsen.atlassian.net/browse/SWD-564)
 - Branch: `cursor/constrained-cdkf-wall-5de1`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/691 (define opened)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/691
 - Artifact: `docs/agents/MODEL-1r1c.md`
 
 ## Next

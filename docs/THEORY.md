@@ -9,6 +9,9 @@ This document is for readers who want to understand *why* the App behaves the
 way it does. For installation and day-to-day use, start with the
 [main README](../README.md). For estimating the parameters these models need,
 and for tuning the controller, see the [Tuning guide](TUNING.md).
+The **live** control loop (one-sample MPC, no P tracker) is
+[CONTROL.md](agents/CONTROL.md) — §4 below still mixes older linearised-QP
+prose and is brought in line under SWD-570.
 
 **Contents**
 
@@ -338,9 +341,15 @@ The signed cooling power is exposed as a negative value on the per-room **Heatin
 
 ### 4.1 Overview
 
-The controller (`heatingassistant/engine/controller/`) implements a **linearised
-model-predictive control (MPC)** architecture built on the `mbc` (model-based
-control) package:
+**Live loop:** each sample the CD-EKF runs, then **one** planner
+(Nonlinear MPC by default, or Linear QP) solves a receding-horizon
+problem on that same grid and the house is commanded with `u = U*[k]`.
+There is **no** inner P controller. See [CONTROL.md](agents/CONTROL.md).
+
+The controller (`heatingassistant/engine/controller/`) is built on the `mbc`
+package. Linear mode still uses a linearised QP; Nonlinear mode uses the
+mean ODE / NLP. Both apply the first/current plan sample, not a
+`u_ref + Kp` tracker:
 
 | Component | Class (from `mbc`) | Role |
 |-----------|-------|------|
@@ -358,11 +367,11 @@ The house-heating application provides these classes in
 
 At each control step the controller:
 
-1. Reads room temperatures from HA sensors via the MQTT bridge (measurement vector **y**).
-2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
-3. Runs the CD-EKF to obtain the state estimate **x̂**.
-4. Solves the QP to find the optimal continuous input sequence **U***.
-5. Applies only the **first step** u*[0] of the optimal sequence (receding horizon).
+1. Reads room temperatures (measurement vector **y**).
+2. Builds an *N*-step disturbance forecast **D** (outdoor + solar).
+3. Runs the CD-EKF to obtain **x̂**.
+4. Solves the **active** planner: Nonlinear NLP or Linear QP.
+5. Applies the current plan sample `u = U*[k]` (receding horizon).
 
 ### 4.2 State estimation — Continuous-Discrete EKF
 
