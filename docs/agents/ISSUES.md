@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | In Review | — | docs/agents/PLAN-mpc-load-uncap.md | `/review-fix SWD-571` |
+| SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | In Review | — | docs/agents/PLAN-mpc-load-uncap.md | `/ship SWD-571` closeout |
 | SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | Done | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691 (`cc1977f9`) |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
 | SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
@@ -281,6 +281,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-21 — `/review-fix` SWD-571 CLEAN (focused): 0 blockers / 0 should-fix. COMMENT review (cannot APPROVE own PR). Next `/ship SWD-571`.
 - 2026-09-21 — `/implement` SWD-571: uncap `mpcLoadPercent`; 108.8 s / 90 s → 121%. Gauge bar still saturates at 100% width. Dual tree synced. Next `/review-fix SWD-571`.
 - 2026-09-21 — `/define` SWD-571: uncap Overview MPC Load percent when the planner overruns 10% of the sample interval. Gauge bar may stay full. PLAN `docs/agents/PLAN-mpc-load-uncap.md`. Class tweak / delta-fast. Next `/implement SWD-571`.
 - 2026-09-21 — `/define` SWD-570: live control is NMPC (`U*[k]`), not NMPC+P. Canonical `docs/agents/CONTROL.md`. Stale two-rate docs marked historical. Next `/implement SWD-570`.

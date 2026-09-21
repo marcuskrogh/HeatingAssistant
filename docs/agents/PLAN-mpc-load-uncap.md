@@ -76,4 +76,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-571` — implement complete; focused review on the uncap
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/692
