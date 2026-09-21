@@ -305,8 +305,8 @@ def test_pe_guides_are_plain_dataset_requirements():
     assert "window or door actually open" in datasets
     assert "no window or door contact configured" in datasets
     assert "getPeInputs" in detail
-    assert "t_wall_locked" in detail
-    assert "applySimulatedTw0" in detail
+    assert "t_wall_locked" not in detail
+    assert "applySimulatedTw0" not in detail
     assert "refreshAuxFromWindow" in detail
     assert "tWallInitialInput.value = '—'" not in detail
     assert "onAuxRefresh" not in detail

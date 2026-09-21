@@ -133,8 +133,8 @@ def test_room_charts_import_cache_bust() -> None:
             disturb = disturb[:next_export]
         outdoor_hist = _dataset_block(disturb, "Outdoor Temperature")
         _assert_solid_history_line(outdoor_hist, colour="#90a4ae")
-        assert "room-charts.js?v=158" in room_detail
-        assert "room-charts.js?v=158" in mpc_preview
+        assert "room-charts.js?v=159" in room_detail
+        assert "room-charts.js?v=159" in mpc_preview
         assert "mpc-preview-charts.js?v=158" in tuning
         assert "industrial-dashboard.js?v=169" in index
         assert "return '169'" in dashboard

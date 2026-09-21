@@ -550,13 +550,22 @@ def _init_state_from_measurement(
                 if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
                     x[n + i] = float(t_wall_init[i])
         return x
-    # Fallback (no helper): air temperatures measured.
+    # Fallback (no helper): air temperatures measured.  A hidden wall
+    # block (``nx_phys > n``) is seeded to air, or to ``t_wall_init``
+    # when provided.  1R1C leaves ``x[n:]`` at zero so emitter lag is
+    # not treated as a wall.
     x = np.zeros(n_x, dtype=float)
     x[:n] = air
-    if _has_wall_block(sde, n, n_x) and t_wall_init is not None:
+    if _has_wall_block(sde, n, n_x):
         for i in range(n):
-            if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
+            if (
+                t_wall_init is not None
+                and i < len(t_wall_init)
+                and np.isfinite(float(t_wall_init[i]))
+            ):
                 x[n + i] = float(t_wall_init[i])
+            else:
+                x[n + i] = float(air[i])
     return x
 
 
