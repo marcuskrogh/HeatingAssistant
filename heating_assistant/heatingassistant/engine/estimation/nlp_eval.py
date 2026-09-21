@@ -8,7 +8,13 @@ from typing import Any, Callable, List, Optional, Tuple
 import numpy as np
 from mbc.control import NLPProblem, ScipyNLPBackend
 
-from .constants import _T_WALL_MIN_LAM, _T_WALL_PRIOR_STD
+from .constants import (
+    PE_LBFGS_FTOL,
+    PE_LBFGS_GTOL,
+    PE_LBFGS_MAXITER,
+    _T_WALL_MIN_LAM,
+    _T_WALL_PRIOR_STD,
+)
 from .nstep_pem import PeCancelled, PeComputeTimeout, PeEtaPlateau, _check_deadline
 
 _LOGGER = logging.getLogger("heatingassistant.engine.estimation.kalman_ml")
@@ -142,6 +148,15 @@ class WallInitMseCache:
         return np.asarray(self._cache[2], dtype=float)  # type: ignore[arg-type]
 
 
+def lbfgs_rel_reduction(f_prev: float, f_curr: float) -> float:
+    """SciPy L-BFGS-B relative cost drop used with ``ftol``."""
+
+    prev = float(f_prev)
+    curr = float(f_curr)
+    denom = max(abs(prev), abs(curr), 1.0)
+    return (prev - curr) / denom
+
+
 def lbfgs_exit_label(res: Any) -> str:
     """Map a SciPy L-BFGS-B result to a short operator sentence."""
 
@@ -176,7 +191,11 @@ def solve_lbfgs(
     if backend is None:
         backend = ScipyNLPBackend(
             method="L-BFGS-B",
-            options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-6},
+            options={
+                "maxiter": int(PE_LBFGS_MAXITER),
+                "ftol": float(PE_LBFGS_FTOL),
+                "gtol": float(PE_LBFGS_GTOL),
+            },
         )
     problem = NLPProblem(
         objective=fun,

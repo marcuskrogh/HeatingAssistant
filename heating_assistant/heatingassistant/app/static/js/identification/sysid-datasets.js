@@ -246,13 +246,16 @@ export function setupDatasetsAndExperiments(ctx) {
     const n = selectedIds.size;
     const statuses = _unionSelectedStatuses(lastDatasets, selectedIds);
     const ready = n > 0 && _requiredReady(statuses);
-    if (ready) {
+    const busy = Boolean(ctx.connection && ctx.connection.peSession && ctx.connection.peSession.isRunning());
+    if (busy) {
+      btnIdentifySelected.textContent = 'Estimation running';
+    } else if (ready) {
       btnIdentifySelected.textContent = 'Run recommended estimation';
     } else {
       btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
     }
-    btnIdentifySelected.disabled = n === 0;
-    btnIdentifySelected.classList.toggle('btn--accent', ready || n > 0);
+    btnIdentifySelected.disabled = n === 0 || busy;
+    btnIdentifySelected.classList.toggle('btn--accent', !busy && (ready || n > 0));
     btnClearSelection.disabled = n === 0;
     refreshCoverage();
   }
@@ -400,6 +403,12 @@ export function setupDatasetsAndExperiments(ctx) {
 
   btnIdentifySelected.addEventListener('click', async () => {
     if (selectedIds.size === 0) return;
+    const session = ctx.connection && ctx.connection.peSession;
+    if (session && session.isRunning()) {
+      session.show();
+      setStatus(dsIdStatus, 'An estimation is already running. Stop it before starting another.', '');
+      return;
+    }
     btnIdentifySelected.disabled = true;
     await ctx.runAutoIdentification(
       { dataset_ids: [...selectedIds] }, dsIdStatus,
@@ -572,9 +581,16 @@ export function setupDatasetsAndExperiments(ctx) {
   const timer = setInterval(() => {
     refreshDatasets();
   }, 30000);
+  const peSession = ctx.connection && ctx.connection.peSession;
+  const unsubPe = peSession && typeof peSession.subscribe === 'function'
+    ? peSession.subscribe(() => updateSelectionToolbar())
+    : () => {};
 
   return {
-    destroy() { clearInterval(timer); },
+    destroy() {
+      clearInterval(timer);
+      unsubPe();
+    },
     refreshCoverage,
   };
 }

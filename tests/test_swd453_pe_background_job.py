@@ -265,6 +265,10 @@ def test_panel_js_polls_pe_job_status() -> None:
         root / "heatingassistant" / "app" / "static" / "js" / "identification"
         / "sysid-detail.js"
     ).read_text(encoding="utf-8")
+    session = (
+        root / "heatingassistant" / "app" / "static" / "js" / "identification"
+        / "pe-session.js"
+    ).read_text(encoding="utf-8")
     connection = (
         root / "heatingassistant" / "app" / "static" / "js" / "ha-connection.js"
     ).read_text(encoding="utf-8")
@@ -272,7 +276,7 @@ def test_panel_js_polls_pe_job_status() -> None:
         root / "heatingassistant" / "app" / "static" / "js" / "app-hass-shim.js"
     ).read_text(encoding="utf-8")
     assert "waitForPeJob" in detail
-    assert "getPeJob" in detail
+    assert "getPeJob" in session
     assert "getPeJob" in connection
     assert "heating_assistant/get_pe_job" in connection
     assert "api/pe_job" in shim

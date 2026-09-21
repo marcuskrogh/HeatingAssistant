@@ -308,6 +308,46 @@
 }
 
 /* ── Live indicator (next to on/off button) ──────────────────────────── */
+.panel-nav__pe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: var(--type-kicker);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.panel-nav__pe-chip[hidden] {
+  display: none !important;
+}
+
+.panel-nav__pe-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pe-nav-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pe-nav-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+ha-industrial-panel app-toolbar .panel-nav__pe-chip {
+  align-self: center;
+}
+
 .panel-nav__live-indicator {
   display: flex;
   flex: none;

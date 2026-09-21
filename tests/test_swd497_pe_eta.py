@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from heatingassistant.engine.estimation.constants import PE_ETA_NOISE, PE_ETA_TOL
+from heatingassistant.engine.estimation.constants import PE_ETA_NOISE, PE_ETA_TOL, PE_LBFGS_FTOL
 from tests.helpers.estimation_fixtures import (
     generate_history,
     make_electric_heaters,
@@ -45,16 +45,30 @@ def test_nstep_progress_publishes_eta_from_data_mse() -> None:
     assert last["rmse_c"] is not None and math.isfinite(last["rmse_c"])
     assert last["eta_tol"] == PE_ETA_TOL
     assert last["eta_noise"] == PE_ETA_NOISE
+    assert last["ftol"] == pytest.approx(PE_LBFGS_FTOL)
     expected = math.sqrt(float(last["data_mse"]) / float(last["n_obs"]))
     assert last["eta"] == pytest.approx(expected, rel=1e-9, abs=1e-12)
     sigma = math.sqrt(float(last["r_var"]))
     assert last["rmse_c"] == pytest.approx(last["eta"] * sigma, rel=1e-9, abs=1e-12)
-    for point in last["f_hist"]:
+    from heatingassistant.engine.estimation.nlp_eval import lbfgs_rel_reduction
+
+    rel_points = [p for p in last["f_hist"] if p.get("rel_red") is not None]
+    assert rel_points
+    hist = last["f_hist"]
+    for i, point in enumerate(hist):
         assert point["n_obs"] > 0
         assert math.isfinite(point["eta"])
         assert math.isfinite(point["data_mse"])
         assert point["eta"] == pytest.approx(
             math.sqrt(point["data_mse"] / point["n_obs"]),
+            rel=1e-9,
+            abs=1e-12,
+        )
+        if i == 0:
+            assert point["rel_red"] is None
+            continue
+        assert point["rel_red"] == pytest.approx(
+            lbfgs_rel_reduction(hist[i - 1]["f"], point["f"]),
             rel=1e-9,
             abs=1e-12,
         )
@@ -73,12 +87,15 @@ def test_panel_overlay_shows_rms_and_stays_in_view() -> None:
         ROOT / "heatingassistant" / "app" / "static" / "css" / "pages"
         / "identification.css"
     ).read_text(encoding="utf-8")
+    session = (
+        ROOT / "heatingassistant" / "app" / "static" / "js" / "identification"
+        / "pe-session.js"
+    ).read_text(encoding="utf-8")
     assert "RMS error" in progress
     assert "Normalised RMS" in progress
-    assert "ftol" not in progress
-    assert "overlayHost.appendChild" in detail
-    assert "instanceof ShadowRoot" in detail
-    assert "getRootNode" in detail
+    assert "Fit error" in progress
+    assert "Optimiser convergence" in progress
+    assert "overlayHost.appendChild" in session
     overlay_css = css.split(".pe-progress-overlay {", 1)[1].split("}", 1)[0]
     dialog_css = css.split(".pe-progress {", 1)[1].split("}", 1)[0]
     assert "position: fixed" in overlay_css
