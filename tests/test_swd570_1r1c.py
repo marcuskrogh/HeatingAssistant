@@ -173,6 +173,6 @@ def test_room_chart_source_drops_wall_series() -> None:
         encoding="utf-8"
     )
     assert "replaceChartDataset(ds, 'Wall Forecast'" not in detail
-    assert "makeDataset('Wall'" not in charts or "wallHistory.length > 0" in charts
-    assert "const wallHistory = [];" in charts
-    assert "const wallForecast = [];" in charts
+    assert "makeDataset('Wall'" not in charts
+    assert "Wall Forecast" not in charts
+    assert "temperature_wall" not in detail

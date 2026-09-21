@@ -124,14 +124,7 @@
           r_external: coerceNumber(room.r_external),
           internal_gain: coerceNumber(room.internal_gain) ?? 0,
           solar_scale: coerceNumber(room.solar_scale) ?? 1,
-          c_air_fraction: coerceNumber(room.c_air_fraction) ?? 0.05,
-          r_aw_fraction: coerceNumber(room.r_aw_fraction) ?? 0.05,
         },
-      );
-      states[`sensor.heating_assistant_${slug}_temperature_wall`] = entityState(
-        `sensor.heating_assistant_${slug}_temperature_wall`,
-        temperature ?? 'unknown',
-        { room: name, unit_of_measurement: '°C' },
       );
       states[`sensor.heating_assistant_${slug}_setpoint`] = entityState(
         `sensor.heating_assistant_${slug}_setpoint`,

@@ -74,6 +74,32 @@ class _ThetaLayout:
         """Empty: wall ICs are not in θ."""
         return np.zeros(self.n_rooms, dtype=float)
 
+    def apply_identified_wall_ic(
+        self,
+        x: np.ndarray,
+        sx: np.ndarray,
+        theta: np.ndarray,
+        n: int,
+        nx: int,
+        wall_seg_idx: Optional[int],
+        t_lo: float,
+        t_hi: float,
+    ) -> None:
+        """Write identified Tw0 into a hidden wall block when θ still has one.
+
+        On 1R1C ``idx_t_wall_init`` is empty, so this is a no-op and must not
+        touch ``x[n:]`` (emitter lag / offset).
+        """
+        tw0, tw1 = self.idx_t_wall_init
+        if wall_seg_idx is None or tw1 <= tw0:
+            return
+        tw_base = tw0 + int(wall_seg_idx) * n
+        for i in range(n):
+            idx = tw_base + i
+            if n + i < nx and tw0 <= idx < tw1:
+                x[n + i] = float(np.clip(theta[idx], t_lo, t_hi))
+                sx[idx, n + i] = 1.0
+
     def unpack(self, theta: np.ndarray):
         a, b = self.idx_log_mass
         log_mass = theta[a:b]

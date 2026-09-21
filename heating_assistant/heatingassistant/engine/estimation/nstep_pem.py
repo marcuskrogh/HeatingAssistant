@@ -280,13 +280,10 @@ def _seed_state(
     except TypeError:
         x = np.asarray(model.initial_state_from_measurement(ym0, u0, d0), dtype=float)
     sx = np.zeros((ntheta, nx))
-    tw0, tw1 = layout.idx_t_wall_init
-    if inject_wall and wall_seg_idx is not None and tw1 > tw0:
-        tw_base = tw0 + wall_seg_idx * n
-        for i in range(n):
-            if n + i < nx:
-                x[n + i] = float(np.clip(theta[tw_base + i], _T_WALL_LO, _T_WALL_HI))
-                sx[tw_base + i, n + i] = 1.0
+    if inject_wall:
+        layout.apply_identified_wall_ic(
+            x, sx, theta, n, nx, wall_seg_idx, _T_WALL_LO, _T_WALL_HI,
+        )
     return x, sx
 
 

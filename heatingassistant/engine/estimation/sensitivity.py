@@ -207,8 +207,6 @@ def _simulation_mse_and_grad(
     n_steps_used = 0
 
     ra0, _ = layout.idx_r_aw
-    tw0, _ = layout.idx_t_wall_init
-    n_wall_segs = layout.n_wall_segs
 
     # Pre-process dataset start timestamps for O(1) segment-to-dataset
     # lookup.  Each detected contiguous segment whose first record's
@@ -271,7 +269,12 @@ def _simulation_mse_and_grad(
             # Match diagnostics: air seed for the first window of a
             # dataset segment (wall override applied next); interior
             # windows use the parameter-dependent steady-state directly.
-            _inject_wall = is_first_window and _wall_seg_idx is not None
+            tw0, tw1 = layout.idx_t_wall_init
+            _inject_wall = (
+                is_first_window
+                and _wall_seg_idx is not None
+                and tw1 > tw0
+            )
             _wall_seed = "air" if _inject_wall else "steady_state"
             try:
                 x = np.asarray(
@@ -289,15 +292,9 @@ def _simulation_mse_and_grad(
             is_first_window = False
 
             if _inject_wall:
-                # Identified per-dataset t_wall_init from θ;
-                # ∂x₀[n+i]/∂θ[tw_base+i] = 1.
-                tw_base = tw0 + _wall_seg_idx * n  # type: ignore[operator]
-                for i in range(n):
-                    if n + i < nx:
-                        x[n + i] = float(
-                            np.clip(theta[tw_base + i], _T_WALL_LO, _T_WALL_HI)
-                        )
-                        sx[tw_base + i, n + i] = 1.0
+                layout.apply_identified_wall_ic(
+                    x, sx, theta, n, nx, _wall_seg_idx, _T_WALL_LO, _T_WALL_HI,
+                )
                 # From the second window onward the remaining segment
                 # windows use steady-state, so clear the dataset index to
                 # avoid accidental re-injection.

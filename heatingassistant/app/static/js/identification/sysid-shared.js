@@ -7,8 +7,6 @@ export const DEFAULTS = {
   r_external: 0.05,
   internal_gain: 0,
   solar_scale: 1.0,
-  c_air_fraction: 0.05,
-  r_aw_fraction: 0.05,
   heater_scale: 1.0,
   horizon_hours: 6,
 };

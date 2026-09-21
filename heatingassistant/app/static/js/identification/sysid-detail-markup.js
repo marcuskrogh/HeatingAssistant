@@ -57,39 +57,6 @@ export function paramsCardHtml(defaults) {
             step="0.01" min="0" value="${defaults.solar_scale}">
           <span class="form-hint">&times; &mdash; multiplier on modelled solar gain (1.0 = model)</span>
         </div>
-      </div>
-    </div>
-
-    <div class="params-subsection">
-      <div class="params-subsection__title">Envelope Split (2R2C)</div>
-      <div class="tuning-params-grid">
-        <div class="form-group">
-          <div class="form-group__header">
-            <label class="form-label" for="param-c-air-fraction">Air-node Mass Fraction</label>
-            <button class="param-lock-btn" data-param="c_air_fraction" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
-          </div>
-          <input class="form-input" type="number" id="param-c-air-fraction"
-            step="0.001" min="0" max="1" value="${defaults.c_air_fraction}">
-          <span class="form-hint">0&ndash;1 &mdash; share of mass on the fast air node</span>
-        </div>
-        <div class="form-group">
-          <div class="form-group__header">
-            <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
-            <button class="param-lock-btn" data-param="r_aw_fraction" title="Lock: hold fixed during parameter estimation">Fix</button>
-          </div>
-          <input class="form-input" type="number" id="param-r-aw-fraction"
-            step="0.001" min="0" max="1" value="${defaults.r_aw_fraction}">
-          <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
-        </div>
-        <div class="form-group">
-          <div class="form-group__header">
-            <label class="form-label" for="param-t-wall-initial">Wall Initial Temp (T<sub>wall,0</sub>)</label>
-            <button class="param-lock-btn" data-param="t_wall_initial" title="Lock: hold fixed during parameter estimation">Fix</button>
-          </div>
-          <input class="form-input form-input--readonly" type="text" id="param-t-wall-initial"
-            readonly value="&mdash;" tabindex="-1">
-          <span class="form-hint" id="param-t-wall-initial-hint">&deg;C &mdash; hidden envelope temperature at the start of this window. After parameter estimation this is the fitted initial state for the current parameter set; otherwise it is fitted on this window when you simulate.</span>
-        </div>
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-ua-open">Open-contact UA</label>
