@@ -323,8 +323,8 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     ) -> None:
         """Update per-room process-noise covariance multipliers.
 
-        ``scales_by_room[room]`` scales Q for that room's physical states
-        (air and wall nodes). Values <= 0 are ignored.
+        ``scales_by_room[room]`` scales Q for that room's air node.
+        Values <= 0 are ignored.
         """
         scales = np.ones(self._n_rooms, dtype=float)
         for room_name, value in scales_by_room.items():

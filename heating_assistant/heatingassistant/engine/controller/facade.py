@@ -523,7 +523,7 @@ class HeatingMPCController:
 
     @property
     def wall_temperatures(self) -> Dict[str, float]:
-        """Per-room EKF-reconstructed wall/mass-node temperatures."""
+        """Per-room EKF temperatures. 1R1C has no wall node, so this aliases air."""
         x_hat = self._ekf.x_hat
         room_list = self._system._room_list
         n = self._system._n_rooms
