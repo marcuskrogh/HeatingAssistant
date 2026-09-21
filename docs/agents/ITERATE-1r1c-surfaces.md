@@ -45,6 +45,7 @@ Live θ is already C, R, q_int, solar scale, heater α, R_ij, ua_open.
 ## Tracker
 - Task: SWD-572
 - Relates: SWD-570
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/693
 
 ## Next
-`/review-fix SWD-572` — leftover 1R1C surfaces implemented; review the delivery PR
+Done — CalVer 2026.09.29; Identification and room plots are air-only 1R1C.
