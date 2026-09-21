@@ -89,8 +89,8 @@
    row + tests/CalVer/changelog/App sync
 
 ## Open items
-- Whether HA still registers `temperature_wall` entities (prefer stop
-  publishing).
+- HA `temperature_wall` entities: stop publishing (done in
+  `runtime_states`).
 
 ## Tracker
 - Provider: jira
@@ -103,4 +103,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/691
 
 ## Next
-`/implement SWD-570` — 1R1C plant; keep NMPC-only apply path
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691

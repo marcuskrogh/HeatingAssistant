@@ -25,4 +25,4 @@
 - Branch: `cursor/constrained-cdkf-wall-5de1`
 
 ## Next
-`/implement SWD-570` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691
