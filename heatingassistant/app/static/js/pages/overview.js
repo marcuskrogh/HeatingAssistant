@@ -30,9 +30,11 @@ import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue, entityAttr,
 } from '../utils.js?v=127';
+import { peSessionOf, mountPeRunningBanner } from '../identification/pe-session.js?v=170';
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
+  const unmountPeBanner = mountPeRunningBanner(container, peSessionOf(connection));
 
   const kpiSection = document.createElement('div');
   kpiSection.innerHTML = '<div class="section-header">SYSTEM STATUS</div>';
@@ -145,6 +147,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
     },
     _countdownInterval: countdownInterval,
     destroy() {
+      unmountPeBanner();
       clearInterval(countdownInterval);
       clearInterval(experimentInterval);
       clearTimeout(_scheduleRefreshTimer);

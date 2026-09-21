@@ -587,6 +587,66 @@
   line-height: 1.4;
 }
 
+.pe-progress__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 18px 16px;
+}
+
+.pe-progress__stop {
+  color: var(--alarm);
+}
+
+.pe-running-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-dim);
+}
+
+.pe-running-banner[hidden] {
+  display: none !important;
+}
+
+.pe-running-banner__copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pe-running-banner__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pe-running-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pe-running-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.pe-running-banner__text {
+  font-size: var(--type-ui);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pe-running-banner__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 768px) {
   .pe-progress-overlay {
     align-items: flex-start;

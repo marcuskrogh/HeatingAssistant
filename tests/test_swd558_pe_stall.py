@@ -21,14 +21,14 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 LIFECYCLE = ROOT / "heatingassistant" / "engine" / "parameter_lifecycle.py"
-DETAIL = (
+SESSION = (
     ROOT
     / "heatingassistant"
     / "app"
     / "static"
     / "js"
     / "identification"
-    / "sysid-detail.js"
+    / "pe-session.js"
 )
 PROGRESS = (
     ROOT
@@ -128,12 +128,12 @@ def test_best_eta_survives_a_worse_last_eval(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_wait_for_pe_job_follows_cap_and_cancels() -> None:
-    source = DETAIL.read_text(encoding="utf-8")
-    start = source.index("async function waitForPeJob")
-    chunk = source[start : start + 1800]
-    assert "job.cap_s" in chunk
+    source = SESSION.read_text(encoding="utf-8")
+    start = source.index("async function waitUntilSettled")
+    chunk = source[start : start + 2200]
+    assert "current.cap_s" in chunk
     assert "Date.now() + 30 * 60 * 1000" not in source
-    assert "await cancelParameterEstimation(hass)" in chunk
+    assert "await stopJob()" in chunk
     progress = PROGRESS.read_text(encoding="utf-8")
     assert "eta_best" in progress
     assert "rmse_c_best" in progress

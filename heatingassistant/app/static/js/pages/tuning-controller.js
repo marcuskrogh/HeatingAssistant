@@ -14,6 +14,7 @@ import {
   updateControllerTuning,
   updateEstimationParams,
 } from '../ha-services.js?v=124';
+import { peSessionOf, mountPeRunningBanner } from '../identification/pe-session.js?v=170';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -116,6 +117,7 @@ function valuesEqual(a, b) {
 
 function renderTuningIndex(container, rooms, connection, hass) {
   container.innerHTML = '';
+  const unmountPeBanner = mountPeRunningBanner(container, peSessionOf(connection));
 
   const header = document.createElement('div');
   header.className = 'section-header';
@@ -797,6 +799,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       }
     },
     destroy() {
+      unmountPeBanner();
       destroyed = true;
       previewCharts.temp.destroy();
       previewCharts.power.destroy();

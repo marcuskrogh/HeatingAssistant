@@ -90,6 +90,10 @@ def test_pe_job_start_includes_compute_cap(tmp_path, monkeypatch) -> None:
 
 
 def test_panel_js_renders_pe_progress_overlay() -> None:
+    session = (
+        ROOT / "heatingassistant" / "app" / "static" / "js" / "identification"
+        / "pe-session.js"
+    ).read_text(encoding="utf-8")
     detail = (
         ROOT / "heatingassistant" / "app" / "static" / "js" / "identification"
         / "sysid-detail.js"
@@ -102,8 +106,8 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
         ROOT / "heatingassistant" / "app" / "static" / "css" / "pages"
         / "identification.css"
     ).read_text(encoding="utf-8")
-    assert "renderPeProgress" in detail
-    assert "pe-progress-overlay" in detail
+    assert "renderPeProgress" in session
+    assert "pe-progress-overlay" in session
     assert "waitForPeJob" in detail
     assert "RMS error" in progress
     assert "Normalised RMS" in progress
@@ -111,8 +115,6 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
     assert "pe-progress-overlay" in css
     assert "position: fixed" in css
     assert "overflow-y: auto" in css
-    assert "overlayHost.appendChild" in detail
-    assert "instanceof ShadowRoot" in detail
-    assert "getRootNode" in detail
+    assert "overlayHost.appendChild" in session
     assert "ftol" not in progress
     assert "L-BFGS" not in progress

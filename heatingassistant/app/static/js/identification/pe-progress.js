@@ -206,7 +206,7 @@ export function renderPeProgress(overlay, snap) {
 
   overlay.innerHTML = `
     <div class="pe-progress" role="dialog" aria-live="polite" aria-label="Parameter estimation progress">
-      <button type="button" class="pe-progress__close" data-pe-close aria-label="Close">×</button>
+      <button type="button" class="pe-progress__close" data-pe-close aria-label="Hide progress">×</button>
       <div class="pe-progress__head">
         <div class="pe-progress__kicker">Parameter estimation</div>
         <p class="pe-progress__title">${phaseLabel(snap)}</p>
@@ -242,6 +242,7 @@ export function renderPeProgress(overlay, snap) {
         </div>
       </div>
       ${exitLine ? `<p class="pe-progress__timeout">${exitLine}</p>` : ''}
+      ${running ? `<div class="pe-progress__actions"><button type="button" class="btn btn--ghost pe-progress__stop" data-pe-stop>Stop estimation</button></div>` : ''}
     </div>
   `;
   const canvas = overlay.querySelector('.pe-progress__plot');

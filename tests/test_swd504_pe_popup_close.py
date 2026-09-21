@@ -70,13 +70,13 @@ def test_overlay_stays_open_and_has_close_control() -> None:
     ).read_text(encoding="utf-8")
     assert "data-pe-close" in progress
     assert "pe-progress__close" in css
-    assert "cancelParameterEstimation" in detail
-    assert "hidePeOverlay();" in detail
+    assert "data-pe-stop" in progress
+    assert "hidePeOverlay();" not in detail
     assert "finally {\n      hidePeOverlay();" not in detail
+    assert "pe-session.js?v=170" in detail
     assert "exit_label" in progress
     assert "Finished" in progress
     assert "Stopped" in progress
-    assert "if (running)" in detail
     assert "Maximum iterations reached" not in progress
     assert "lbfgs_exit_label" not in progress
 

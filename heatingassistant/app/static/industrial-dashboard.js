@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '169';
+  return '170';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -465,6 +465,10 @@ class HaIndustrialPanel extends HTMLElement {
     }
 
     window.removeEventListener('hashchange', this._onHashChange);
+    if (this._peSession) {
+      this._peSession.destroy();
+      this._peSession = null;
+    }
     this._renderShell();
 
     try {
@@ -479,6 +483,7 @@ class HaIndustrialPanel extends HTMLElement {
         { renderControllerTuning },
         { renderSchedules },
         { renderConfiguration },
+        { attachPeSession },
       ] = await Promise.all([
         import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
@@ -490,6 +495,7 @@ class HaIndustrialPanel extends HTMLElement {
         import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/configuration.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/identification/pe-session.js?v=${PANEL_VERSION}`),
       ]);
 
       if (generation !== this._bootGeneration || !this.isConnected) {
@@ -498,6 +504,19 @@ class HaIndustrialPanel extends HTMLElement {
       }
 
       this._connection = new HaConnection(this._hass);
+      if (this._peSession) {
+        this._peSession.destroy();
+        this._peSession = null;
+      }
+      this._peSession = attachPeSession({
+        overlayHost: this.shadowRoot,
+        chips: [
+          this.shadowRoot.getElementById('pe-top-chip'),
+          this.shadowRoot.getElementById('pe-nav-chip'),
+        ],
+        connection: this._connection,
+        getHass: () => this._hass,
+      });
 
       // Read state from the LATEST hass (may have been updated via set hass()
       // while modules were loading) rather than the stored connection snapshot.
@@ -657,6 +676,7 @@ class HaIndustrialPanel extends HTMLElement {
           </div>
           <span class="panel-nav__fill"></span>
           <div class="panel-nav__controls">
+            <button type="button" class="panel-nav__pe-chip" id="pe-nav-chip" hidden data-pe-open aria-label="Show parameter estimation progress">Estimating</button>
             <div class="panel-nav__live-indicator" id="live-indicator" title="System health">
               <span class="live-dot" id="live-dot"></span>
               <span class="live-label" id="live-label">HEALTHY</span>
@@ -752,6 +772,15 @@ class HaIndustrialPanel extends HTMLElement {
     this._menuButton = menuBtn;
 
     toolbar.appendChild(menuBtn);
+    const peChip = document.createElement('button');
+    peChip.type = 'button';
+    peChip.id = 'pe-top-chip';
+    peChip.className = 'panel-nav__pe-chip';
+    peChip.hidden = true;
+    peChip.setAttribute('data-pe-open', '');
+    peChip.setAttribute('aria-label', 'Show parameter estimation progress');
+    peChip.textContent = 'Estimating';
+    toolbar.appendChild(peChip);
     container.appendChild(toolbar);
   }
 
@@ -856,6 +885,10 @@ class HaIndustrialPanel extends HTMLElement {
     if (this._unsubState) {
       this._unsubState();
       this._unsubState = null;
+    }
+    if (this._peSession) {
+      this._peSession.destroy();
+      this._peSession = null;
     }
     this._connection = null;
     this._menuButton = null;

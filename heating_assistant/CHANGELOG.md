@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.30
+
+- Parameter estimation keeps running if you close the progress window. Overview,
+  Controller Tuning, and Parameter Estimation show that a fit is in progress and
+  reopen it. The top bar shows Estimating while a job is running. Start another
+  fit only after you stop the one that is already going.
+
 # 2026.09.29
 
 - Identification and room plots show air temperature only. Parameter

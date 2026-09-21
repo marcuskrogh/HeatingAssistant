@@ -73,12 +73,14 @@ def test_panel_overlay_shows_rms_and_stays_in_view() -> None:
         ROOT / "heatingassistant" / "app" / "static" / "css" / "pages"
         / "identification.css"
     ).read_text(encoding="utf-8")
+    session = (
+        ROOT / "heatingassistant" / "app" / "static" / "js" / "identification"
+        / "pe-session.js"
+    ).read_text(encoding="utf-8")
     assert "RMS error" in progress
     assert "Normalised RMS" in progress
     assert "ftol" not in progress
-    assert "overlayHost.appendChild" in detail
-    assert "instanceof ShadowRoot" in detail
-    assert "getRootNode" in detail
+    assert "overlayHost.appendChild" in session
     overlay_css = css.split(".pe-progress-overlay {", 1)[1].split("}", 1)[0]
     dialog_css = css.split(".pe-progress {", 1)[1].split("}", 1)[0]
     assert "position: fixed" in overlay_css

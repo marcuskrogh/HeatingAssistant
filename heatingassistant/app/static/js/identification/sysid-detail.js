@@ -9,7 +9,6 @@ import {
   deleteDataset,
   deleteParameterHistory,
   estimateParametersMl,
-  cancelParameterEstimation,
   runOpenLoopSimulation,
   runSysidSimulation,
   storeIdentifiedParameters,
@@ -24,7 +23,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=151';
-import { renderPeProgress } from './pe-progress.js?v=160';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=170';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -35,6 +34,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
   container.innerHTML = '';
   container.classList.add('sysid-detail-host');
+  const peSession = peSessionOf(connection);
+  const unmountPeBanner = mountPeRunningBanner(container, peSession);
 
   // Back navigation
   const nav = document.createElement('button');
@@ -178,76 +179,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
   const actionStatusEl = container.querySelector('#action-status');
-  const peOverlay = document.createElement('div');
-  peOverlay.className = 'pe-progress-overlay';
-  peOverlay.hidden = true;
-  // Sit on the shadow root, as a sibling of .shell. On mobile .shell is the
-  // scroll container; an overlay inside the Identification page would live at
-  // the top of that long page, off screen from the Estimate button.
-  const overlayRoot = container.getRootNode();
-  const overlayHost = overlayRoot instanceof ShadowRoot
-    ? overlayRoot
-    : document.body;
-  overlayHost.appendChild(peOverlay);
-  peOverlay.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('[data-pe-close]');
-    if (!btn || !peOverlay.contains(btn)) return;
-    const running = peOverlayJob && peOverlayJob.status === 'running';
-    hidePeOverlay();
-    if (running) {
-      cancelParameterEstimation(hass).catch(() => {});
-    }
-  });
-  let peOverlayJob = null;
-  let peOverlayTimer = null;
-  let peOverlayDismissed = false;
-
-  function peShell() {
-    if (!(overlayRoot instanceof ShadowRoot)) return null;
-    return overlayRoot.querySelector('.shell');
-  }
-
-  function lockPeBackground(on) {
-    const shell = peShell();
-    if (!shell) return;
-    if (on) shell.style.overflowY = 'hidden';
-    else shell.style.overflowY = '';
-  }
-
-  function paintPeOverlay(job) {
-    if (peOverlayDismissed) return;
-    peOverlayJob = job;
-    peOverlay.hidden = false;
-    lockPeBackground(true);
-    peOverlay.scrollTop = 0;
-    renderPeProgress(peOverlay, job);
-    const status = job && job.status;
-    if (status && status !== 'running' && peOverlayTimer != null) {
-      window.clearInterval(peOverlayTimer);
-      peOverlayTimer = null;
-    }
-  }
-
-  function hidePeOverlay() {
-    peOverlayDismissed = true;
-    if (peOverlayTimer != null) {
-      window.clearInterval(peOverlayTimer);
-      peOverlayTimer = null;
-    }
-    peOverlayJob = null;
-    peOverlay.hidden = true;
-    peOverlay.innerHTML = '';
-    lockPeBackground(false);
-  }
-
-  function startPeOverlay(job) {
-    peOverlayDismissed = false;
-    paintPeOverlay(job || { status: 'running' });
-    if (peOverlayTimer != null) window.clearInterval(peOverlayTimer);
-    peOverlayTimer = window.setInterval(() => {
-      if (peOverlayJob) renderPeProgress(peOverlay, peOverlayJob);
-    }, 250);
-  }
   const ekfStatusEl = container.querySelector('#ekf-status');
   const olStatusEl = container.querySelector('#ol-status');
 
@@ -1119,47 +1050,18 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // fields from the result for review. Used by Stored Datasets "Run
   // recommended estimation". Returns true on success.
   async function waitForPeJob() {
-    const fallbackMs = 30 * 60 * 1000;
-    startPeOverlay({ status: 'running' });
-    let originMs = Date.now();
-    let capMs = fallbackMs;
-    while (Date.now() - originMs < capMs) {
-      if (!connection || typeof connection.getPeJob !== 'function') {
-        throw new Error('Parameter estimation status is unavailable.');
-      }
-      const job = await connection.getPeJob();
-      if (job != null) {
-        paintPeOverlay(job);
-        const capS = Number(job.cap_s);
-        if (Number.isFinite(capS) && capS > 0) {
-          capMs = capS * 1000;
-        }
-        const startedAt = Number(job.started_at);
-        if (Number.isFinite(startedAt) && startedAt > 1e9) {
-          originMs = startedAt * 1000;
-        }
-        const status = job.status || 'idle';
-        if (status === 'success') return job;
-        if (status === 'cancelled') {
-          const err = new Error(job.message || 'Estimation stopped');
-          err.peCancelled = true;
-          throw err;
-        }
-        if (status === 'error') {
-          throw new Error(job.message || 'Estimation failed');
-        }
-      }
-      await new Promise((res) => setTimeout(res, 1000));
+    if (peSession && typeof peSession.waitUntilSettled === 'function') {
+      return peSession.waitUntilSettled();
     }
-    try {
-      await cancelParameterEstimation(hass);
-    } catch (cancelErr) {
-      /* job may already have finished */
-    }
-    throw new Error('Parameter estimation timed out');
+    throw new Error('Parameter estimation status is unavailable.');
   }
 
   async function runAutoIdentification(idData, statusEl) {
+    if (peSession && peSession.isRunning()) {
+      peSession.show();
+      setStatus(statusEl, 'An estimation is already running. Stop it before starting another.', '');
+      return false;
+    }
     setStatus(statusEl, 'Running parameter estimation…', 'running');
     try {
       const lp = buildLockedParams();
@@ -1170,6 +1072,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       });
       const payload = started?.response ?? started;
       if (payload && payload.status === 'running') {
+        if (peSession) peSession.noteStarted(payload);
         await waitForPeJob();
       } else if (payload && payload.success === false) {
         throw new Error(payload.message || 'Estimation failed');
@@ -1368,8 +1271,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       olInputsChart.destroy();
       olDisturbChart.destroy();
       if (refreshHandles && refreshHandles.destroy) refreshHandles.destroy();
-      hidePeOverlay();
-      peOverlay.remove();
+      unmountPeBanner();
     },
   };
 }

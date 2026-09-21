@@ -4,6 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | In Progress | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | `/test SWD-573` — dedicated test phase after implement |
+| SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
+| SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
 | SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | Done | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/693 (`d875c8f9`) |
 | SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | Done | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691 (`cc1977f9`) |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
@@ -281,6 +284,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-21 — `/define`+`/architect`+`/implement` SWD-573: background PE overlay session; close hides; Stop cancels; Overview/Tuning/PE banners + Estimating nav chip; exclusive start. PLAN `docs/agents/PLAN-pe-background-progress.md`. Next `/test SWD-573`.
 - 2026-09-21 — `/ship` SWD-572 via PR #693 (`d875c8f9`): 1R1C Identification, room plots, wall IC; review CLEAN (focused); changelog `# 2026.09.29`. Next: Done.
 - 2026-09-21 — `/iterate` SWD-572 from SWD-570: Identification still 2R2C splits/Tw0; room/ID plots still had wall series; Tw0 could write into `x[n:]`. Artifact `docs/agents/ITERATE-1r1c-surfaces.md`. Relates SWD-570. Next `/implement SWD-572`.
 - 2026-09-21 — `/define` SWD-570: live control is NMPC (`U*[k]`), not NMPC+P. Canonical `docs/agents/CONTROL.md`. Stale two-rate docs marked historical. Next `/implement SWD-570`.
