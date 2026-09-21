@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | In Progress | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | `/implement SWD-572` |
+| SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | In Review | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | `/review-fix SWD-572` — https://github.com/marcuskrogh/HeatingAssistant/pull/693 |
 | SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | Done | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691 (`cc1977f9`) |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
 | SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
@@ -281,7 +281,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-09-21 — `/implement` SWD-572: strip leftover 2R2C PE/UI/plots; guard wall IC on 1R1C emitter lag. Branch `cursor/1r1c-surfaces-5de1`. Next `/review-fix SWD-572`.
+- 2026-09-21 — `/implement` SWD-572 In Review: leftover 2R2C PE/UI/plots stripped; wall IC guarded. pytest 42 passed. PR https://github.com/marcuskrogh/HeatingAssistant/pull/693. Next `/review-fix SWD-572`.
 - 2026-09-21 — `/iterate` SWD-572 from SWD-570: Identification still 2R2C splits/Tw0; room/ID plots still had wall series; Tw0 could write into `x[n:]`. Artifact `docs/agents/ITERATE-1r1c-surfaces.md`. Relates SWD-570. Next `/implement SWD-572`.
 - 2026-09-21 — `/define` SWD-570: live control is NMPC (`U*[k]`), not NMPC+P. Canonical `docs/agents/CONTROL.md`. Stale two-rate docs marked historical. Next `/implement SWD-570`.
 - 2026-09-21 — `/model`+`/define`+`/architect` SWD-570: live plant is 1R1C (user). MODEL `docs/agents/MODEL-1r1c.md`, PLAN `docs/agents/PLAN-1r1c-control.md`, ARCH `docs/agents/ARCHITECTURE-1r1c-control.md`. Next `/implement SWD-570`.
