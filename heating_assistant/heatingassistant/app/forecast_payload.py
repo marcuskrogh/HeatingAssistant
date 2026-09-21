@@ -51,10 +51,6 @@ def build_app_forecast_payload(
     filtered_temps = snapshot.get("filtered_temperatures") or {}
     if not isinstance(filtered_temps, Mapping):
         filtered_temps = {}
-    wall_temps = snapshot.get("wall_temperatures") or {}
-    if not isinstance(wall_temps, Mapping):
-        wall_temps = {}
-    wall_preds = list(snapshot.get("wall_predictions") or [])
     power_meta = room_power_meta or {}
 
     n_pred = len(predictions)
@@ -87,7 +83,6 @@ def build_app_forecast_payload(
                 bridge_temp = float(estimated)
             except (TypeError, ValueError):
                 bridge_temp = float(current_temp)
-        bridge_wall = _optional_round_temp(wall_temps.get(name))
         meta = dict(power_meta.get(name) or {})
 
         bridge_capacity = _capacity_at(
@@ -116,8 +111,6 @@ def build_app_forecast_payload(
                 "enabled": now_on,
             }
         ]
-        if bridge_wall is not None:
-            forecast[0]["wall_temperature"] = bridge_wall
         if bridge_capacity is not None:
             forecast[0]["heating_capacity"] = bridge_capacity
 
@@ -175,9 +168,6 @@ def build_app_forecast_payload(
                 lin = linearised[i].get(name)
                 if lin is not None:
                     entry["linearised_temperature"] = round(float(lin), 2)
-            wall_step = _step_named_temp(wall_preds, i, name)
-            if wall_step is not None:
-                entry["wall_temperature"] = wall_step
             forecast.append(entry)
 
         # Hold final actuation flat when the plot horizon exceeds the MPC horizon.
@@ -206,9 +196,6 @@ def build_app_forecast_payload(
                 fallback_offset=base_comfort,
                 fallback_enabled=room_enabled,
             )
-            last_wall = _step_named_temp(wall_preds, main_n - 1, name)
-            if last_wall is None:
-                last_wall = bridge_wall
             last_on = last_on and room_enabled
             for k in range(extra):
                 step_time = now + timedelta(seconds=dt * (main_n + k + 1))
@@ -231,8 +218,6 @@ def build_app_forecast_payload(
                     entry["outdoor_temp"] = round(float(last_outdoor), 2)
                 if last_capacity is not None:
                     entry["heating_capacity"] = last_capacity
-                if last_wall is not None:
-                    entry["wall_temperature"] = last_wall
                 forecast.append(entry)
                 trajectory.append(last_temp)
 

@@ -61,39 +61,32 @@ def test_default_sky_radiative_ua_is_zero() -> None:
     assert room.sky_radiative_ua == pytest.approx(0.0)
 
 
-def test_sky_ua_adds_to_wall_node_conductance() -> None:
-    """When ``sky_radiative_ua > 0`` the WALL node's B_ext entry grows
-    by that amount, and the wall A diagonal becomes more negative.
-    (Long-wave radiation leaves through the envelope surfaces, so the
-    sky conductance attaches to the wall node in the 2R2C model.)"""
+def test_sky_ua_adds_to_air_node_conductance() -> None:
+    """When ``sky_radiative_ua > 0`` outdoor UA on the air node grows
+    by that amount, and the A diagonal becomes more negative."""
     sky_ua = 2.0
     room = Room(
         name="a", thermal_mass=5e6, r_external=0.05,
         sky_radiative_ua=sky_ua,
     )
     model = HouseModel([room])
-    _g_inf, g_aw, g_we = room.conductances()
-    # Wall row (index n + 0 = 1): g_we + sky_ua + thermal_bridge.
-    expected_b = g_we + sky_ua + 0.0
-    assert model._B_ext[1] == pytest.approx(expected_b)
-    # Wall A diagonal: -(g_aw + g_we + sky_ua), no inter-room.
-    expected_diag = -(g_aw + g_we + sky_ua)
-    assert model._A[1, 1] == pytest.approx(expected_diag, rel=1e-9)
+    g_inf, g_rest, _dup = room.conductances()
+    expected_b = g_inf + g_rest
+    assert model._B_ext[0] == pytest.approx(expected_b)
+    assert model._A[0, 0] == pytest.approx(-expected_b, rel=1e-9)
 
 
-def test_sky_offset_pulls_wall_node_down_on_clear_night() -> None:
-    """The constant sky cooling-drift bias ``−sky_ua · ΔT_sky / C_w``
-    appears on the WALL node of ``_B_sky_offset`` (the air row stays 0)."""
+def test_sky_offset_pulls_air_node_down_on_clear_night() -> None:
+    """The constant sky cooling-drift bias ``−sky_ua · ΔT_sky / C``
+    appears on the air node of ``_B_sky_offset``."""
     sky_ua = 3.0
     room = Room(
         name="a", thermal_mass=5e6, r_external=0.05,
         sky_radiative_ua=sky_ua,
     )
     model = HouseModel([room])
-    # Wall node (index 1): -sky_ua · ΔT_sky / C_wall.
-    expected = -sky_ua * DEFAULT_DELTA_T_SKY / room.c_wall
-    assert model._B_sky_offset[0] == pytest.approx(0.0, abs=1e-15)
-    assert model._B_sky_offset[1] == pytest.approx(expected, rel=1e-9)
+    expected = -sky_ua * DEFAULT_DELTA_T_SKY / room.c_air
+    assert model._B_sky_offset[0] == pytest.approx(expected, rel=1e-9)
 
 
 def test_sky_offset_is_zero_when_sky_ua_is_zero() -> None:
@@ -221,18 +214,16 @@ def test_default_thermal_bridge_psi_l_is_zero() -> None:
     assert room.thermal_bridge_psi_l == pytest.approx(0.0)
 
 
-def test_thermal_bridge_increases_wall_node_outdoor_conductance() -> None:
-    """``thermal_bridge_psi_l > 0`` adds to the wall→outdoor
-    conductance (B_ext[n]) — thermal bridges live in the envelope."""
+def test_thermal_bridge_increases_air_node_outdoor_conductance() -> None:
+    """``thermal_bridge_psi_l > 0`` adds to outdoor UA on the air node."""
     psi_l = 4.0
     room = Room(
         name="a", thermal_mass=5e6, r_external=0.05,
         thermal_bridge_psi_l=psi_l,
     )
     model = HouseModel([room])
-    _g_inf, _g_aw, g_we = room.conductances()
-    expected_b = g_we + 0.0 + psi_l
-    assert model._B_ext[1] == pytest.approx(expected_b)
+    g_inf, g_rest, _dup = room.conductances()
+    assert model._B_ext[0] == pytest.approx(g_inf + g_rest)
 
 
 def test_thermal_bridge_cools_room_faster() -> None:
@@ -279,22 +270,22 @@ def test_controller_sees_sky_offset_in_drift() -> None:
     sde_no = HouseThermalSDE(HouseModel([no_sky]), [src], dt=900.0)
     sde_sky = HouseThermalSDE(HouseModel([sky]), [src], dt=900.0)
 
-    # 2R2C state: [T_a (1), T_w (1), b (1)] augmented.
-    x = np.array([20.0, 20.0, 0.0])
+    # 1R1C state: [T_a (1), b (1)] augmented.
+    x = np.array([20.0, 0.0])
     u = np.array([0.0])
     d = sde_no.disturbance_vector(20.0, {})
     p = np.array([])
 
     f_no = sde_no.f(x, u, d, p, 0.0)
     f_sky = sde_sky.f(x, u, d, p, 0.0)
-    # The sky offset acts on the wall node (index n = 1).
-    assert f_sky[1] < f_no[1] - 1e-9
+    # The sky offset acts on the air node.
+    assert f_sky[0] < f_no[0] - 1e-9
 
 
-def test_controller_sees_facade_solar_on_wall_node() -> None:
+def test_controller_sees_facade_solar_on_air_node() -> None:
     """A facade-solar-equipped room has a larger solar channel gain on the
-    WALL row (``G_d[n, 1]``) than a room with facade_solar_share = 0; the
-    air row is unchanged (the sol-air heat lands on the envelope)."""
+    air row than a room with facade_solar_share = 0.
+    """
     facade_room = Room(
         name="a", thermal_mass=5e6, r_external=0.05,
         temperature=20.0,
@@ -308,25 +299,13 @@ def test_controller_sees_facade_solar_on_wall_node() -> None:
     sde_facade = HouseThermalSDE(HouseModel([facade_room]), [src], dt=900.0)
     sde_base = HouseThermalSDE(HouseModel([base_room]), [src], dt=900.0)
 
-    # G_d[1, 1] is the wall row of room 0's solar channel.
-    # With facade sol-air it should be larger than the base.
-    assert sde_facade._G_d[1, 1] > sde_base._G_d[1, 1] + 1e-9
-    # The air-row coupling is the plain (1 − wall_fraction)/C_a share.
-    assert sde_facade._G_d[0, 1] == pytest.approx(sde_base._G_d[0, 1], rel=1e-9)
+    assert sde_facade._G_d[0, 1] > sde_base._G_d[0, 1] + 1e-9
 
 
 def test_controller_no_facade_solar_when_share_zero() -> None:
-    """Default ``facade_solar_share = 0`` keeps the solar channel at the
-    plain air/wall split (scaled by solar_scale = 1): the air row couples
-    (1 − SOLAR_WALL_FRACTION)/C_a, the wall row SOLAR_WALL_FRACTION/C_w."""
-    from heatingassistant.engine.const import SOLAR_WALL_FRACTION
-
+    """Default ``facade_solar_share = 0`` puts all solar on the air node."""
     room = Room(name="a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     src = ElectricHeater("h", "a", max_power=1000.0)
     sde = HouseThermalSDE(HouseModel([room]), [src], dt=900.0)
-    assert sde._G_d[0, 1] == pytest.approx(
-        (1.0 - SOLAR_WALL_FRACTION) / sde._C_cap[0], rel=1e-9
-    )
-    assert sde._G_d[1, 1] == pytest.approx(
-        SOLAR_WALL_FRACTION / sde._C_cap[1], rel=1e-9
-    )
+    assert sde._G_d[0, 1] == pytest.approx(1.0 / sde._C_cap[0], rel=1e-9)
+    assert sde._G_d.shape[0] == 1

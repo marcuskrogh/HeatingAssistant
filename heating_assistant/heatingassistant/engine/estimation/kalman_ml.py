@@ -22,8 +22,6 @@ from .constants import (
     PE_ETA_TOL,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
-    _C_AIR_HI,
-    _C_AIR_LO,
     _LOG_ALPHA_HI,
     _LOG_ALPHA_LO,
     _LOG_R_HI,
@@ -37,14 +35,9 @@ from .constants import (
     _MIN_SEGMENT_TIME_S,
     _Q_INT_HI,
     _Q_INT_LO,
-    _R_AW_HI,
-    _R_AW_LO,
-    _T_WALL_HI,
-    _T_WALL_LO,
     _UA_OPEN_HI,
     _UA_OPEN_LO,
     _log_mass_bounds,
-    _nelder_mead,
 )
 from .history_std import convert_history_std
 from .identifiability import (
@@ -54,7 +47,6 @@ from .identifiability import (
     _check_identifiable_open_ua,
     _check_identifiable_sources,
     _check_identifiable_solar,
-    _identifiable_split_rooms,
 )
 from .model_build import (
     _build_parametric_system,
@@ -73,7 +65,7 @@ from .sensitivity import (
     _dfdtheta_step,
     _simulation_mse_and_grad,
 )
-from .nlp_eval import RegularizedMseCache, WallInitMseCache, solve_lbfgs
+from .nlp_eval import RegularizedMseCache, solve_lbfgs
 from .nstep_pem import (
     CANCEL_USER_MESSAGE,
     PeCancelled,
@@ -302,12 +294,11 @@ class KalmanMLEstimator:
             identifiable_pairs=[],
         )
 
-        # Theta is [log_mass, log_r, q_int, t_wall_init] at the prior
+        # Theta is [log_mass, log_r, q_int] at the prior (1R1C).
         theta_prior = np.concatenate([
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
-            self._t_wall_init_prior,
         ])
 
         # Convert history to CD-EKF format (use "ym" key)
@@ -392,7 +383,6 @@ class KalmanMLEstimator:
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
-            self._t_wall_init_prior,
         ])
 
         center_log_mass = float(self._log_mass_prior[room_idx])
@@ -593,15 +583,12 @@ class KalmanMLEstimator:
             history, self._room_names,
             min_history_steps=self._min_history_steps,
         )
-        identifiable_splits = _identifiable_split_rooms(
-            excited_sources, self._sources, self._room_names,
-        )
+        identifiable_splits: List[int] = []
         identifiable_ua = _check_identifiable_open_ua(
             history, self._room_names, self._min_segment_steps,
         )
 
-        # One t_wall_init block per distinct dataset start timestamp (minimum 1).
-        n_wall_segs = max(1, len(dataset_start_timestamps)) if dataset_start_timestamps else 1
+        n_wall_segs = 0
 
         layout = _ThetaLayout(
             n_rooms=self._n,
@@ -624,27 +611,16 @@ class KalmanMLEstimator:
         log_solar_prior = np.array([
             self._log_solar_prior_full[i] for i in identifiable_solar
         ])
-        c_air_prior = np.array([
-            self._c_air_prior_full[i] for i in identifiable_splits
-        ])
-        r_aw_prior = np.array([
-            self._r_aw_prior_full[i] for i in identifiable_splits
-        ])
         ua_open_prior = np.array([
             self._ua_open_prior_full[i] for i in identifiable_ua
         ])
-        # t_wall_init prior: one block per wall segment (tiled from the single prior).
-        t_wall_prior_all = np.tile(self._t_wall_init_prior, n_wall_segs)
         theta_prior = np.concatenate([
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
-            t_wall_prior_all,
             log_alpha_prior,
             log_r_ij_prior,
             log_solar_prior,
-            c_air_prior,
-            r_aw_prior,
             ua_open_prior,
         ])
 
@@ -654,12 +630,9 @@ class KalmanMLEstimator:
             [_log_mass_bounds(float(self._log_mass_prior[i])) for i in range(n)]
             + [(_LOG_R_LO, _LOG_R_HI)] * n
             + [(_Q_INT_LO, _Q_INT_HI)] * n
-            + [(_T_WALL_LO, _T_WALL_HI)] * (n * n_wall_segs)
             + [(_LOG_ALPHA_LO, _LOG_ALPHA_HI)] * len(identifiable_sources)
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
             + [(_LOG_SOLAR_LO, _LOG_SOLAR_HI)] * len(identifiable_solar)
-            + [(_C_AIR_LO, _C_AIR_HI)] * len(identifiable_splits)
-            + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
             + [(_UA_OPEN_LO, _UA_OPEN_HI)] * len(identifiable_ua)
         )
 
@@ -791,12 +764,9 @@ class KalmanMLEstimator:
         ], dtype=float)
         log_r = np.clip(log_r, _LOG_R_LO, _LOG_R_HI)
         q_int = np.clip(q_int, _Q_INT_LO, _Q_INT_HI)
-        t_wall_init = np.clip(t_wall_init, _T_WALL_LO, _T_WALL_HI)
         log_alpha = np.clip(log_alpha, _LOG_ALPHA_LO, _LOG_ALPHA_HI)
         log_r_ij = np.clip(log_r_ij, _LOG_R_IJ_LO, _LOG_R_IJ_HI)
         log_solar = np.clip(log_solar, _LOG_SOLAR_LO, _LOG_SOLAR_HI)
-        c_air = np.clip(c_air, _C_AIR_LO, _C_AIR_HI)
-        r_aw = np.clip(r_aw, _R_AW_LO, _R_AW_HI)
         ua_open = np.clip(layout.get_ua_open(best_theta), _UA_OPEN_LO, _UA_OPEN_HI)
 
         # Build result dict ------------------------------------------------
@@ -841,35 +811,6 @@ class KalmanMLEstimator:
             estimated_solar_scales[self._room_names[i]] = round(
                 float(math.exp(log_solar[k])), 4
             )
-        estimated_splits: Dict[str, Dict[str, float]] = {
-            self._room_names[i]: {
-                "c_air_fraction": float(self._c_air_prior_full[i]),
-                "r_aw_fraction": float(self._r_aw_prior_full[i]),
-            }
-            for i in range(self._n)
-        }
-        for k, i in enumerate(identifiable_splits):
-            estimated_splits[self._room_names[i]] = {
-                "c_air_fraction": round(float(c_air[k]), 4),
-                "r_aw_fraction": round(float(r_aw[k]), 4),
-            }
-
-        # Per-room wall initial temperatures — first dataset segment for backward compat.
-        estimated_t_wall_initial: Dict[str, float] = {
-            self._room_names[i]: round(float(t_wall_init[i]), 2)
-            for i in range(self._n)
-        }
-        # All dataset-segment wall temperatures (populated when n_wall_segs > 1).
-        if n_wall_segs > 1:
-            estimated_t_wall_per_dataset: Optional[List[Dict[str, float]]] = [
-                {
-                    self._room_names[i]: round(float(layout.get_t_wall_seg(best_theta, seg)[i]), 2)
-                    for i in range(self._n)
-                }
-                for seg in range(n_wall_segs)
-            ]
-        else:
-            estimated_t_wall_per_dataset = None
 
         # Report negative normalised MSE (higher → better fit).
         # Stored in the same "log_likelihood" field for dashboard compatibility;
@@ -935,16 +876,10 @@ class KalmanMLEstimator:
             "estimated_heater_scales": estimated_heater_scales,
             "estimated_inter_room_r": estimated_r_ij,
             "estimated_solar_scales": estimated_solar_scales,
-            "estimated_envelope_splits": estimated_splits,
-            "estimated_t_wall_initial": estimated_t_wall_initial,
-            "estimated_t_wall_per_dataset": estimated_t_wall_per_dataset,
             "identifiable_connections": identifiable_names,
             "identifiable_sources": identifiable_source_names,
             "identifiable_solar_rooms": [
                 self._room_names[i] for i in identifiable_solar
-            ],
-            "identifiable_split_rooms": [
-                self._room_names[i] for i in identifiable_splits
             ],
             "identifiable_ua_rooms": [
                 self._room_names[i] for i in identifiable_ua
@@ -988,16 +923,16 @@ class KalmanMLEstimator:
         ``min_lam`` overrides ``_T_WALL_MIN_LAM`` so diagnostic simulate can
         let the window pull Tw0 farther from the prior.
 
-        Returns a dict ``{room_name: t_wall_initial_float}``.  Falls back to
-        the physics-informed prior when history is too short or the
-        optimiser fails.
+        Returns a dict ``{room_name: air_seed_float}``.  Live plant is 1R1C:
+        there is no hidden wall IC, so this is the first-sample air (or the
+        air/outdoor blend prior) and does not run a wall-only NLP.
         """
+        _ = (room_params, min_lam)
         fit_history = (
             calibration_history if calibration_history is not None else history
         )
         n = self._n
 
-        # Seed the prior from the anchor air / outdoor temperatures.
         self._update_wall_init_prior_from_history(
             fit_history if fit_history else history
         )
@@ -1011,86 +946,10 @@ class KalmanMLEstimator:
                 except (TypeError, ValueError):
                     pass
 
-        fallback = {
+        return {
             self._room_names[i]: round(float(self._t_wall_init_prior[i]), 2)
             for i in range(n)
         }
-
-        if len(fit_history) < self._min_history_steps:
-            return fallback
-
-        # Minimal layout: only the 4n core parameters; no heater / R_ij /
-        # solar / split blocks — those are all locked via equal bounds.
-        layout = _ThetaLayout(
-            n_rooms=n,
-            identifiable_sources=[],
-            identifiable_pairs=[],
-            identifiable_solar=[],
-            identifiable_splits=[],
-        )
-
-        # Start from configured/overridden structural params.
-        log_mass_init = self._log_mass_prior.copy()
-        log_r_init = self._log_r_prior.copy()
-        q_int_init = self._q_int_prior.copy()
-        if room_params:
-            for room_name, overrides in room_params.items():
-                if room_name not in self._room_names:
-                    continue
-                i = self._room_names.index(room_name)
-                if "thermal_mass" in overrides:
-                    log_mass_init[i] = math.log(
-                        max(float(overrides["thermal_mass"]), 1.0)
-                    )
-                if "r_external" in overrides:
-                    log_r_init[i] = math.log(
-                        max(float(overrides["r_external"]), 1e-9)
-                    )
-                if "internal_gain" in overrides:
-                    q_int_init[i] = float(overrides["internal_gain"])
-
-        theta_prior = np.concatenate([
-            log_mass_init,
-            log_r_init,
-            q_int_init,
-            self._t_wall_init_prior.copy(),
-        ])
-
-        # Lock everything except the t_wall_init block (3n … 4n).
-        bounds: List[Tuple[float, float]] = (
-            [(float(theta_prior[i]), float(theta_prior[i])) for i in range(n)]
-            + [(float(theta_prior[n + i]), float(theta_prior[n + i])) for i in range(n)]
-            + [(float(theta_prior[2 * n + i]), float(theta_prior[2 * n + i])) for i in range(n)]
-            + [(_T_WALL_LO, _T_WALL_HI)] * n
-        )
-
-        std_history = self._convert_history_std(fit_history, use_ym=False)
-
-        wall_cache = WallInitMseCache(self, layout, std_history, min_lam)
-
-        lb = np.array([lo for lo, _ in bounds])
-        ub = np.array([hi for _, hi in bounds])
-
-        try:
-            from scipy.optimize import minimize as _sp_minimize
-            res = _sp_minimize(
-                wall_cache.fun, theta_prior,
-                jac=wall_cache.jac,
-                bounds=list(zip(lb, ub)),
-                method="L-BFGS-B",
-                options={"maxiter": 200, "ftol": 1e-10, "gtol": 1e-5},
-            )
-            if np.isfinite(res.fun):
-                a_tw, b_tw = layout.idx_t_wall_init
-                t_wall = np.clip(res.x[a_tw:b_tw], _T_WALL_LO, _T_WALL_HI)
-                return {
-                    self._room_names[i]: round(float(t_wall[i]), 2)
-                    for i in range(n)
-                }
-        except Exception as exc:
-            _LOGGER.debug("Fast t_wall_init estimation failed: %s", exc)
-
-        return fallback
 
     # ── Internal helpers ──────────────────────────────────────────────────
 

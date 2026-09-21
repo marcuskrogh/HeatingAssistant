@@ -60,43 +60,14 @@ def test_heat_pulse_does_not_crash_wall_below_outdoor() -> None:
     assert max(walls) <= t_air + 5.0
 
 
-def test_wall_sigma_scales_with_air_to_wall_capacitance() -> None:
+def test_process_noise_is_air_only() -> None:
     ctrl = _controller()
     sde = ctrl._system
     n = sde._n_rooms
+    assert sde._nx_phys == n
+    assert sde._C_cap.shape == (n,)
     sig = np.diag(sde._sigma_matrix)
-    ratio = min(float(sde._C_cap[0] / sde._C_cap[n]), 1.0)
-    assert sig[0] == pytest.approx(0.1)
-    assert sig[n] == pytest.approx(0.1 * ratio)
-    assert sig[n] < sig[0]
-
-
-def test_wall_sigma_does_not_exceed_air_when_air_fraction_is_large() -> None:
-    room = Room(
-        name="Living Room",
-        thermal_mass=5_000_000.0,
-        r_external=0.05,
-        temperature=22.0,
-        wall_temperature=21.0,
-        c_air_fraction=0.60,
-    )
-    sde = HeatingMPCController(
-        HouseModel([room]),
-        [ElectricHeater("heater", room="Living Room", max_power=6000.0)],
-        horizon=4,
-        dt=900.0,
-        measurement_dt=900.0,
-        n_int_steps=10,
-        mpc_mode="nmpc",
-        nmpc_period=900.0,
-        nmpc_fast_substeps=1,
-        nmpc_horizon_h=1.0,
-        sigma_w=0.1,
-    )._system
-    n = sde._n_rooms
-    sig = np.diag(sde._sigma_matrix)
-    assert float(sde._C_cap[0] / sde._C_cap[n]) > 1.0
-    assert sig[n] == pytest.approx(sig[0])
+    assert sig.shape[0] == sde.nx
     assert sig[0] == pytest.approx(0.1)
 
 

@@ -80,43 +80,26 @@ def test_room_temperature_attribute_is_plain_float() -> None:
 
 
 def test_house_model_state_dimension_is_n() -> None:
-    """2R2C: state vector has length 2n (air block + wall block per room)."""
+    """1R1C: state vector has length n (one air node per room)."""
     rooms = [
         Room(name="a", thermal_mass=5e6, r_external=0.05),
         Room(name="b", thermal_mass=3e6, r_external=0.08),
     ]
     model = HouseModel(rooms)
     n = len(rooms)
-    assert model._C.shape == (2 * n,)
-    assert model._A.shape == (2 * n, 2 * n)
-    assert model._B_ext.shape == (2 * n,)
+    assert model._C.shape == (n,)
+    assert model._A.shape == (n, n)
+    assert model._B_ext.shape == (n,)
 
 
 def test_eigenvalue_is_stable_and_negative() -> None:
-    """The 2R2C per-room sub-system has two eigenvalues, both real and negative.
-
-    For a single room the 2×2 air/wall sub-matrix has eigenvalues:
-        λ₁ = fast (large magnitude, dominated by air↔wall coupling)
-        λ₂ = slow (small magnitude, dominated by wall↔outdoor conduction)
-    Both must be real and strictly negative for stability.
-    """
+    """The 1R1C per-room system has one real negative eigenvalue."""
     model = _make_single_room(thermal_mass=5e6, r_external=0.05)
-    n = model.n  # n=1
     inv_C = 1.0 / model._C
     F = model._A * inv_C[:, np.newaxis]
-    # Extract the 2×2 per-room sub-matrix (rows/cols [0, n])
-    sub = F[np.ix_([0, n], [0, n])]
-    eigs = np.linalg.eigvals(sub)
-    # Both eigenvalues must be real and negative (2R2C is stable)
-    assert len(eigs) == 2
+    eigs = np.linalg.eigvals(F)
     assert np.all(eigs.real < 0.0), f"Expected negative eigenvalues, got {eigs}"
     assert np.all(np.abs(eigs.imag) < 1e-10), f"Expected real eigenvalues, got {eigs}"
-    # Fast/slow separation: the air node is lighter so one eigenvalue is
-    # significantly faster (larger magnitude) than the other.
-    sorted_eigs = np.sort(np.abs(eigs.real))
-    assert sorted_eigs[1] > 2 * sorted_eigs[0], (
-        f"Expected clear fast/slow separation: {sorted_eigs}"
-    )
 
 
 def test_heat_input_raises_temperature() -> None:
@@ -149,10 +132,7 @@ def test_outdoor_loss_cools_room() -> None:
 
 
 def test_inter_room_connection_on_single_temperature() -> None:
-    """In 2R2C inter-room couplings appear on the WALL block (rows/cols n..2n).
-    For n=2 rooms, the wall-block off-diagonal entries A[n+0, n+1] and
-    A[n+1, n+0] carry the inter-room conductance; air-block off-diagonals
-    A[0,1] and A[1,0] must be zero (no direct air-to-air coupling)."""
+    """1R1C inter-room couplings are air-to-air (A[i,j] > 0)."""
     rooms = [
         Room(
             name="a", thermal_mass=5e6, r_external=0.05,
@@ -166,14 +146,9 @@ def test_inter_room_connection_on_single_temperature() -> None:
         ),
     ]
     model = HouseModel(rooms)
-    n = len(rooms)  # n = 2
     A = model._A
-    # Wall-block off-diagonal entries carry the inter-room conductance.
-    assert A[n + 0, n + 1] > 0.0, f"A[n+0, n+1] = {A[n+0, n+1]} should be > 0"
-    assert A[n + 1, n + 0] > 0.0, f"A[n+1, n+0] = {A[n+1, n+0]} should be > 0"
-    # Air-block off-diagonals must be zero (no direct air-to-air coupling).
-    assert A[0, 1] == 0.0, f"A[0,1] = {A[0,1]} should be 0 (no direct air coupling)"
-    assert A[1, 0] == 0.0, f"A[1,0] = {A[1,0]} should be 0 (no direct air coupling)"
+    assert A[0, 1] > 0.0, f"A[0,1] = {A[0,1]} should be > 0"
+    assert A[1, 0] > 0.0, f"A[1,0] = {A[1,0]} should be > 0"
 
 
 def test_heat_flows_through_inter_room_connection() -> None:

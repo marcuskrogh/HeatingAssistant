@@ -128,11 +128,9 @@ class TestThetaModelQuantities:
         rf = float(est._r_aw_prior_full[0])
         g_cond = (1.0 - f_inf) * ua
 
-        np.testing.assert_allclose(quants["C_a"], [fc * C_tot])
-        np.testing.assert_allclose(quants["C_w"], [(1.0 - fc) * C_tot])
+        np.testing.assert_allclose(quants["C_a"], [C_tot])
         np.testing.assert_allclose(quants["g_inf"], [f_inf * ua])
-        np.testing.assert_allclose(quants["g_aw"], [g_cond / rf])
-        np.testing.assert_allclose(quants["g_we"], [g_cond / (1.0 - rf)])
+        np.testing.assert_allclose(quants["g_we"], [(1.0 - f_inf) * ua])
 
 
 class TestBuildRoomsFromTheta:
@@ -197,8 +195,8 @@ class TestBuildSystem:
 
         system = _build_system(est, log_mass, log_r)
         assert system is not None
-        # Legacy builder keeps offset augmentation on: 2R2C (air+wall) + bias.
-        assert system.nx == 3
+        # 1R1C + offset bias
+        assert system.nx == 2
         assert system.nym == 1
 
     def test_build_parametric_system_strips_wall_init_block(self):
@@ -210,8 +208,8 @@ class TestBuildSystem:
 
         system = _build_parametric_system(est, layout, theta)
         assert system is not None
-        # Parametric path disables offset augmentation: 2R2C only.
-        assert system.nx == 2
+        # Parametric path disables offset augmentation: 1R1C only.
+        assert system.nx == 1
         assert system.nym == 1
 
     def test_build_system_returns_none_on_empty_parameters(self):
@@ -330,8 +328,6 @@ class TestInitialStateAndCovariance:
         assert x0.shape == (system.nx,)
         assert P0.shape == (system.nx, system.nx)
         assert P0[0, 0] == pytest.approx(est._R_var * 10.0)
-        # Latent (wall + emitter) states start with 4× air-node uncertainty.
-        assert P0[1, 1] == pytest.approx(est._R_var * 40.0)
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +361,6 @@ class TestDfdthetaStep:
         )
         assert D.shape == (ntheta, nx)
         assert D[0, 0] == pytest.approx(-f_val[0])
-        assert D[0, 1] == pytest.approx(-f_val[1])
 
 
 class TestDFdthetaConst:
@@ -385,8 +380,7 @@ class TestDFdthetaConst:
 
         D = _dFdtheta_const(est, quants, layout, model, ntheta, nx)
         assert D.shape == (ntheta, nx, nx)
-        np.testing.assert_allclose(D[0, 0, :2], -F_phys[0, :])
-        np.testing.assert_allclose(D[0, 1, :2], -F_phys[1, :])
+        np.testing.assert_allclose(D[0, 0, :nx], -F_phys[0, :nx])
 
 
 class TestSimulationMseAndGrad:

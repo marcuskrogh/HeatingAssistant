@@ -74,19 +74,17 @@ def _make_controller(internal_gain=0.0):
 
 
 def test_sde_has_no_gain_block():
-    """The 2R2C SDE state is exactly [T_a (n), T_w (n)] — no gain augmentation."""
+    """The 1R1C SDE state is exactly T_a (n) — no gain augmentation."""
     model, sources = _make_model_and_sources()
     sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
-    # Two rooms × two nodes → nx = 4, with no gain block appended.
-    assert sde.nx == 4
+    assert sde.nx == 2
     assert not hasattr(sde, "_augment_gain")
     assert not hasattr(sde, "set_fixed_gain_dev")
     assert not hasattr(sde, "gain_deviation_from_state")
-    # Diffusion matrix is sized to the physical state only.
     sig = sde.sigma(
         np.zeros(sde.nx), np.zeros(sde.nu), np.zeros(sde.nd), np.array([]), 0.0
     )
-    assert sig.shape == (4, 4)
+    assert sig.shape == (2, 2)
 
 
 def test_estimation_and_control_models_share_state_space():

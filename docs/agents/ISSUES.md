@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | To Do | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | `/implement SWD-570` |
+| SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | In Progress | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | `/implement SWD-570` |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
 | SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
 | SWD-562 | Sub-task | Wire PE origins to the single NMPC grid | Done | SWD-561 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | — |

@@ -184,13 +184,6 @@ class HassStatesMixin:
                 filtered_attrs,
                 now,
             )
-            wall_temp = self._ekf_wall_temperature(name)
-            states[f"sensor.heating_assistant_{slug}_temperature_wall"] = self._ha_state(
-                f"sensor.heating_assistant_{slug}_temperature_wall",
-                "unknown" if wall_temp is None else round(float(wall_temp), 2),
-                {"room": name, "unit_of_measurement": "°C"},
-                now,
-            )
             states[f"sensor.heating_assistant_{slug}_setpoint"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_setpoint",
                 setpoint,

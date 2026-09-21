@@ -69,12 +69,14 @@ def _theta_model_quantities(
         for r in est._rooms
     ])
 
-    C_a = fc * C_tot
-    C_w = (1.0 - fc) * C_tot
+    C_a = C_tot
     g_inf = f_inf * ua
     g_cond = (1.0 - f_inf) * ua
-    g_aw = g_cond / rf
-    g_we = g_cond / (1.0 - rf)
+    g_aw = np.zeros(n)
+    g_we = g_cond
+    C_w = C_tot
+    fc = np.ones(n)
+    rf = np.ones(n)
 
     heater_scales = np.ones(est._n_u)
     for k_la, s_idx in enumerate(layout.identifiable_sources):

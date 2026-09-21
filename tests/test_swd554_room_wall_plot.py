@@ -1,4 +1,4 @@
-"""SWD-554: EKF wall temperature on room-view temperature plots."""
+"""SWD-570: room plots and HA states drop the wall series."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from heatingassistant.mqtt.bridge import InMemoryMqttBus
 pytestmark = pytest.mark.unit
 
 
-def test_forecast_payload_includes_wall_temperature() -> None:
+def test_forecast_payload_omits_wall_temperature() -> None:
     now = datetime(2026, 9, 15, 4, 0, tzinfo=timezone.utc)
     payload = build_app_forecast_payload(
         rooms=[{"name": "Living Room", "setpoint": 21.0, "comfort_offset": 0.5}],
@@ -39,13 +39,14 @@ def test_forecast_payload_includes_wall_temperature() -> None:
         now=now,
     )
     steps = payload["rooms"]["living_room"]["forecast"]
-    assert steps[0]["wall_temperature"] == pytest.approx(20.5)
-    assert "measured" not in steps[0]
-    assert steps[1]["wall_temperature"] == pytest.approx(20.4)
-    assert steps[2]["wall_temperature"] == pytest.approx(20.3)
+    for step in steps:
+        assert "wall_temperature" not in step or step.get("wall_temperature") in (
+            None,
+            step.get("temperature"),
+        )
 
 
-def test_runtime_publishes_wall_temperature_entity(tmp_path: Path) -> None:
+def test_runtime_does_not_publish_wall_temperature_entity(tmp_path: Path) -> None:
     runtime = HeatingRuntime(
         tmp_path,
         bus=InMemoryMqttBus(),
@@ -57,5 +58,4 @@ def test_runtime_publishes_wall_temperature_entity(tmp_path: Path) -> None:
     runtime.control_engine._last_wall_temperatures = {"Living Room": 19.25}
     states = runtime.hass_states()
     entity = "sensor.heating_assistant_living_room_temperature_wall"
-    assert entity in states
-    assert float(states[entity]["state"]) == pytest.approx(19.25)
+    assert entity not in states

@@ -134,7 +134,6 @@ export async function loadChartsData(
   lastRunTs.value = mpcForecastStamp(state);
 
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
-  const wallHistory = historyToDataPoints(history[tempWallEntity]);
   const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity]), windowStart));
   const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity]), windowStart));
   const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity]), windowStart));
@@ -153,7 +152,6 @@ export async function loadChartsData(
   if (onPowerBounds) onPowerBounds(roomForecast, priceForecast);
 
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
-  const wallForecast = forecastToDataPoints(forecastData, 'wall_temperature');
   const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
   const setpointForecast = forecastToEnabledPoints(forecastData, 'setpoint');
   const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');
@@ -170,7 +168,6 @@ export async function loadChartsData(
     constraintUpperHistory, constraintUpperForecast,
     constraintLowerHistory, constraintLowerForecast,
     sensorSpan,
-    { wallHistory, wallForecast },
   );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast, windowStart);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);

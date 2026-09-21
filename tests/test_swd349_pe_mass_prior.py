@@ -90,7 +90,6 @@ def test_mass_prior_weight_is_heavier_when_heater_is_unexcited():
         est._log_mass_prior,
         est._log_r_prior,
         est._q_int_prior,
-        est._t_wall_init_prior,
     ])
     theta = theta.copy()
     theta[0] += math.log(_MASS_BOUND_FACTOR)

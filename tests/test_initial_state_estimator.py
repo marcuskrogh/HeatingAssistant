@@ -67,14 +67,13 @@ def test_prefix_calibration_slice_uses_minority_of_window():
     assert prefix[0] is hist[0]
 
 
-def test_ekf_state_at_end_returns_wall_distinct_from_air():
+def test_ekf_state_at_end_returns_air() -> None:
     hist, model, heater = _simulate_history(n_steps=60)
     sde = HouseThermalSDE(model, [heater], 900.0, augment_offsets=False)
     x_end = ekf_state_at_end_of_history(hist, sde, ["studio"], 900.0)
     assert x_end is not None
-    assert x_end.shape[0] >= 2
-    # After prolonged heating the wall estimate should differ from air.
-    assert abs(float(x_end[1]) - float(x_end[0])) >= 0.0
+    assert x_end.shape[0] >= 1
+    assert np.isfinite(x_end[0])
 
 
 def test_estimate_initial_state_uses_leading_history():
@@ -95,8 +94,6 @@ def test_estimate_initial_state_uses_leading_history():
         wall_optimizer=estimator,
     )
     assert "studio" in result["t_air"]
-    assert "studio" in result["t_wall"]
-    assert result["method"].startswith("ekf")
     assert result["calibration_steps"] >= 2
     # Air must match the measured anchor exactly.
     assert result["t_air"]["studio"] == round(float(simulation[0]["y"][0]), 2)
@@ -115,4 +112,4 @@ def test_estimate_initial_state_prefix_when_no_leading():
         wall_optimizer=estimator,
     )
     assert result["method"] in ("ekf_prefix", "ekf+opt_prefix", "opt_prefix", "steady_state")
-    assert "studio" in result["t_wall"]
+    assert "studio" in result["t_air"]

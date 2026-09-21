@@ -40,10 +40,10 @@ fast P:    u = clip(u_ref + Kp * (T_ref - Ta_hat))
 That two-rate tracker was the SWD-392 route. Inner P was removed;
 Nonlinear was then put on the same sample grid as Linear (SWD-532).
 
-## Plant (until SWD-570 ships)
+## Plant
 
-Live thermal plant is still 2R2C (hidden `Tw`) plus CD-EKF. SWD-570
-replaces that plant with 1R1C air; it does **not** restore P control.
+Live thermal plant is **1R1C** (one air node per room) plus CD-EKF on
+`x = [Ta, phi, b]`. There is no hidden wall state and no P tracker.
 
 ## Pointers
 

@@ -26,51 +26,30 @@ def _dfdtheta_step(
     nx: int,
     ua_coeff: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """``∂f/∂θ`` at fixed state, shape (ntheta, nx), for the 2R2C drift.
+    """``∂f/∂θ`` at fixed state, shape (ntheta, nx), for the 1R1C drift.
 
-    Only the physical rows (air 0…n−1, wall n…2n−1) are non-zero; the
-    emitter-filter drift carries no θ-dependence.  Two parameter
-    families use the exact whole-row scaling shortcut (every term of a
-    room's drift row is proportional to 1/C):
-
-    * ``log_mass_i`` scales both of room i's rows by −1, and
-    * ``c_air_i`` scales the air row by −1/fc and the wall row by
-      +1/(1−fc).
-
-    The remaining families are written out from the conductance
-    structure.  The wind overlay is inactive during estimation, and
-    sky/bridge conductances (default 0) are treated as
-    r-independent.
+    Only air rows are non-zero.  ``log_mass_i`` scales room i's row by −1.
     """
     n = est._n
     T_a = x[:n]
-    T_w = x[n: 2 * n]
     T_out = float(d_k[0])
     d_sol = np.array([
         float(d_k[1 + i]) if 1 + i < len(d_k) else 0.0 for i in range(n)
     ])
-    C_a, C_w = q["C_a"], q["C_w"]
-    g_inf, g_aw, g_we = q["g_inf"], q["g_aw"], q["g_we"]
-    fc, rf, s = q["fc"], q["rf"], q["s"]
-    w = q["wall_frac"]
+    C_a = q["C_a"]
+    g_inf, g_we = q["g_inf"], q["g_we"]
+    s = q["s"]
     facade = q["facade"]
 
     D = np.zeros((ntheta, nx))
     j_idx = np.arange(n)
 
-    # log_mass: rows scale with 1/C_tot → −f per row.
     D[j_idx, j_idx] = -f_val[:n]
-    D[j_idx, n + j_idx] = -f_val[n: 2 * n]
 
-    # log_r: all three conductances scale with 1/r_ext.
     D[n + j_idx, j_idx] = -(
-        (g_aw / C_a) * (T_w - T_a) + (g_inf / C_a) * (T_out - T_a)
-    )
-    D[n + j_idx, n + j_idx] = -(
-        (g_aw / C_w) * (T_a - T_w) + (g_we / C_w) * (T_out - T_w)
+        ((g_inf + g_we) / C_a) * (T_out - T_a)
     )
 
-    # q_int: direct heat on the air node.
     D[2 * n + j_idx, j_idx] = 1.0 / C_a
 
     # Heater scales α (air node).
@@ -84,32 +63,17 @@ def _dfdtheta_step(
             src.thermal_power(max(0.0, u_scaled_s), T_out) / C_a[i_src]
         )
 
-    # Inter-room resistances (wall-to-wall).
+    # Inter-room resistances (air-to-air).
     r0, _ = layout.idx_log_r_ij
     for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
         g_ij = float(q["g_ij"][k_rij])
-        D[r0 + k_rij, n + pi] = (g_ij / C_w[pi]) * (T_w[pi] - T_w[pj])
-        D[r0 + k_rij, n + pj] = (g_ij / C_w[pj]) * (T_w[pj] - T_w[pi])
+        D[r0 + k_rij, pi] = (g_ij / C_a[pi]) * (T_a[pi] - T_a[pj])
+        D[r0 + k_rij, pj] = (g_ij / C_a[pj]) * (T_a[pj] - T_a[pi])
 
-    # Solar scales (split between air and wall like G_d).
+    # Solar scales (all on air).
     s0, _ = layout.idx_log_solar
     for k_s, i in enumerate(layout.identifiable_solar):
-        D[s0 + k_s, i] = (1.0 - w) * s[i] * d_sol[i] / C_a[i]
-        D[s0 + k_s, n + i] = (w + facade[i]) * s[i] * d_sol[i] / C_w[i]
-
-    # Envelope splits.
-    ca0, _ = layout.idx_c_air
-    ra0, _ = layout.idx_r_aw
-    for k_sp, i in enumerate(layout.identifiable_splits):
-        # c_air: air row ∝ 1/fc, wall row ∝ 1/(1−fc).
-        D[ca0 + k_sp, i] = -f_val[i] / fc[i]
-        D[ca0 + k_sp, n + i] = f_val[n + i] / (1.0 - fc[i])
-        # r_aw: ∂g_aw/∂rf = −g_aw/rf, ∂g_we/∂rf = +g_we/(1−rf).
-        D[ra0 + k_sp, i] = -(g_aw[i] / (rf[i] * C_a[i])) * (T_w[i] - T_a[i])
-        D[ra0 + k_sp, n + i] = (
-            -(g_aw[i] / (rf[i] * C_w[i])) * (T_a[i] - T_w[i])
-            + (g_we[i] / ((1.0 - rf[i]) * C_w[i])) * (T_out - T_w[i])
-        )
+        D[s0 + k_s, i] = (1.0 + facade[i]) * s[i] * d_sol[i] / C_a[i]
 
     # Contact-gated extra UA: linearized as known air-heat
     # Q = UA_open · c · (T_out − y^m).  Coefficient is ZOH over the step.
@@ -128,53 +92,26 @@ def _dFdtheta_const(
     ntheta: int,
     nx: int,
 ) -> np.ndarray:
-    """``∂(∂f/∂x)/∂θ``, shape (ntheta, nx, nx), for the 2R2C drift.
-
-    Used by the EKF-likelihood sensitivity pass to propagate ∂P/∂θ.
-    Only the physical 2n × 2n block carries θ-dependence (the
-    filter-column coupling through the heater scales is neglected,
-    as in the previous 1R1C implementation).
-    """
+    """``∂(∂f/∂x)/∂θ``, shape (ntheta, nx, nx), for the 1R1C drift."""
     n = est._n
-    C_a, C_w = q["C_a"], q["C_w"]
-    g_inf, g_aw, g_we = q["g_inf"], q["g_aw"], q["g_we"]
-    fc, rf = q["fc"], q["rf"]
-    F_phys = model._F  # (2n, 2n), already divided by C
+    C_a = q["C_a"]
+    g_inf, g_we = q["g_inf"], q["g_we"]
+    F_phys = model._F
 
     D = np.zeros((ntheta, nx, nx))
+    n_phys = min(n, F_phys.shape[0])
     for j in range(n):
-        # log_mass: both of room j's rows scale with 1/C_tot.
-        D[j, j, :2 * n] = -F_phys[j, :]
-        D[j, n + j, :2 * n] = -F_phys[n + j, :]
-        # log_r: g_inf, g_aw, g_we all scale with 1/r_ext.
-        D[n + j, j, j] = (g_inf[j] + g_aw[j]) / C_a[j]
-        D[n + j, j, n + j] = -g_aw[j] / C_a[j]
-        D[n + j, n + j, j] = -g_aw[j] / C_w[j]
-        D[n + j, n + j, n + j] = (g_aw[j] + g_we[j]) / C_w[j]
+        D[j, j, :n_phys] = -F_phys[j, :n_phys]
+        D[n + j, j, j] = (g_inf[j] + g_we[j]) / C_a[j]
 
     r0, _ = layout.idx_log_r_ij
     for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
         g_ij = float(q["g_ij"][k_rij])
         t = r0 + k_rij
-        D[t, n + pi, n + pi] = g_ij / C_w[pi]
-        D[t, n + pj, n + pj] = g_ij / C_w[pj]
-        D[t, n + pi, n + pj] = -g_ij / C_w[pi]
-        D[t, n + pj, n + pi] = -g_ij / C_w[pj]
-
-    ca0, _ = layout.idx_c_air
-    ra0, _ = layout.idx_r_aw
-    for k_sp, i in enumerate(layout.identifiable_splits):
-        t = ca0 + k_sp
-        D[t, i, :2 * n] = -F_phys[i, :] / fc[i]
-        D[t, n + i, :2 * n] = F_phys[n + i, :] / (1.0 - fc[i])
-        t = ra0 + k_sp
-        D[t, i, i] = g_aw[i] / (rf[i] * C_a[i])
-        D[t, i, n + i] = -g_aw[i] / (rf[i] * C_a[i])
-        D[t, n + i, i] = -g_aw[i] / (rf[i] * C_w[i])
-        D[t, n + i, n + i] = (
-            g_aw[i] / (rf[i] * C_w[i])
-            - g_we[i] / ((1.0 - rf[i]) * C_w[i])
-        )
+        D[t, pi, pi] = g_ij / C_a[pi]
+        D[t, pj, pj] = g_ij / C_a[pj]
+        D[t, pi, pj] = -g_ij / C_a[pi]
+        D[t, pj, pi] = -g_ij / C_a[pj]
     return D
 
 

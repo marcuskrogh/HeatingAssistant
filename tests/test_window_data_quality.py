@@ -99,7 +99,6 @@ def _eval_objective(est, history):
             est._log_mass_prior,
             est._log_r_prior,
             est._q_int_prior,
-            np.array([0.0]),  # t_wall_init
         ]
     )
     std = est._convert_history_std(history, use_ym=True)
