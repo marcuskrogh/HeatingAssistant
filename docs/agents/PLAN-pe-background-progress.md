@@ -95,9 +95,9 @@
 - Sub-tasks: SWD-574, SWD-575
 - Relates: SWD-504
 - Branch: cursor/swd-573-pe-background-progress-6f70
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/694
 - Classification: feature
 - Workflow: feature-standard
 
 ## Next
-`/architect SWD-573` — Shape stamp for panel PE session
+`/test SWD-573` — dedicated test phase after implement (https://github.com/marcuskrogh/HeatingAssistant/pull/694)

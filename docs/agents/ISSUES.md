@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | In Progress | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | `/test SWD-573` — dedicated test phase after implement |
+| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | In Progress | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | `/test SWD-573` — https://github.com/marcuskrogh/HeatingAssistant/pull/694 |
 | SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
 | SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | In Progress | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
 | SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | Done | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/693 (`d875c8f9`) |
