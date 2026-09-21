@@ -8,8 +8,9 @@ must be the exact calendar version on its own line.
 
 - Parameter estimation keeps running if you close the progress window. Overview,
   Controller Tuning, and Parameter Estimation show that a fit is in progress and
-  reopen it. The top bar shows Estimating while a job is running. Start another
-  fit only after you stop the one that is already going.
+  reopen it. The page nav shows Estimating while a job is running. The progress
+  window plots fit error and optimiser convergence, each with a title. Start
+  another fit only after you stop the one that is already going.
 
 # 2026.09.29
 

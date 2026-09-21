@@ -383,7 +383,7 @@
 
 .pe-progress {
   position: relative;
-  width: min(720px, 100%);
+  width: min(980px, 100%);
   margin: auto 0;
   max-height: calc(100dvh - 32px);
   background: var(--bg-card);
@@ -477,8 +477,23 @@
   color: var(--text-dim);
 }
 
-.pe-progress__plot-wrap {
+.pe-progress__plots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
   padding: 8px 18px 6px;
+}
+
+.pe-progress__plot-wrap {
+  padding: 0;
+  min-width: 0;
+}
+
+.pe-progress__plot-title {
+  margin: 0 0 4px;
+  font-size: var(--type-ui);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .pe-progress__plot-label {
@@ -505,8 +520,8 @@
 .pe-progress__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 6px 18px 10px;
+  gap: 12px;
+  padding: 6px 0 4px;
   font-size: var(--type-kicker);
   color: var(--text-secondary);
 }
@@ -661,10 +676,13 @@
 
   .pe-progress__head,
   .pe-progress__metrics,
-  .pe-progress__plot-wrap,
-  .pe-progress__legend {
+  .pe-progress__plots {
     padding-left: 12px;
     padding-right: 12px;
+  }
+
+  .pe-progress__plots {
+    grid-template-columns: 1fr;
   }
 
   .pe-progress__metrics {

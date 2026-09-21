@@ -51,8 +51,8 @@ def test_calver_and_cache_bust_for_computing_overlay() -> None:
     for static in _TREES:
         index = _read(static, "index.html")
         dashboard = _read(static, "industrial-dashboard.js")
-        assert "industrial-dashboard.js?v=170" in index
-        assert "return '170'" in dashboard
+        assert "industrial-dashboard.js?v=171" in index
+        assert "return '171'" in dashboard
         overview = _read(static, "js", "pages", "overview.js")
         room = _read(static, "js", "pages", "room-detail.js")
         assert "countdown.js?v=156" in overview

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from heatingassistant.app import sysid_services
+from heatingassistant.engine.estimation.constants import PE_LBFGS_FTOL
 from tests.helpers.estimation_fixtures import (
     generate_history,
     make_electric_heaters,
@@ -84,6 +85,7 @@ def test_pe_job_start_includes_compute_cap(tmp_path, monkeypatch) -> None:
     job = sysid_services.pe_job_snapshot(runtime)
     assert job.get("cap_s") == 300.0
     assert job.get("phase") == "nstep_pem"
+    assert job.get("ftol") == pytest.approx(PE_LBFGS_FTOL)
     done = wait_pe_job(runtime, timeout=5.0)
     assert done["status"] == "success"
     assert done.get("cap_s") == 300.0
@@ -111,10 +113,11 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
     assert "waitForPeJob" in detail
     assert "RMS error" in progress
     assert "Normalised RMS" in progress
+    assert "Fit error" in progress
+    assert "Optimiser convergence" in progress
     assert "Time remaining" not in progress
     assert "pe-progress-overlay" in css
     assert "position: fixed" in css
     assert "overflow-y: auto" in css
     assert "overlayHost.appendChild" in session
-    assert "ftol" not in progress
-    assert "L-BFGS" not in progress
+    assert 'data-pe-plot="ftol"' in progress

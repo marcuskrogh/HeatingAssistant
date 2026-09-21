@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '170';
+  return '171';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -511,7 +511,6 @@ class HaIndustrialPanel extends HTMLElement {
       this._peSession = attachPeSession({
         overlayHost: this.shadowRoot,
         chips: [
-          this.shadowRoot.getElementById('pe-top-chip'),
           this.shadowRoot.getElementById('pe-nav-chip'),
         ],
         connection: this._connection,
@@ -772,15 +771,6 @@ class HaIndustrialPanel extends HTMLElement {
     this._menuButton = menuBtn;
 
     toolbar.appendChild(menuBtn);
-    const peChip = document.createElement('button');
-    peChip.type = 'button';
-    peChip.id = 'pe-top-chip';
-    peChip.className = 'panel-nav__pe-chip';
-    peChip.hidden = true;
-    peChip.setAttribute('data-pe-open', '');
-    peChip.setAttribute('aria-label', 'Show parameter estimation progress');
-    peChip.textContent = 'Estimating';
-    toolbar.appendChild(peChip);
     container.appendChild(toolbar);
   }
 

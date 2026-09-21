@@ -20,6 +20,9 @@ from .constants import (
     PE_ETA_NOISE,
     PE_ETA_STALE_EVALS,
     PE_ETA_TOL,
+    PE_LBFGS_FTOL,
+    PE_LBFGS_GTOL,
+    PE_LBFGS_MAXITER,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
     _LOG_ALPHA_HI,
@@ -65,7 +68,7 @@ from .sensitivity import (
     _dfdtheta_step,
     _simulation_mse_and_grad,
 )
-from .nlp_eval import RegularizedMseCache, solve_lbfgs
+from .nlp_eval import RegularizedMseCache, lbfgs_rel_reduction, solve_lbfgs
 from .nstep_pem import (
     CANCEL_USER_MESSAGE,
     PeCancelled,
@@ -657,6 +660,7 @@ class KalmanMLEstimator:
         self._pe_t0_mono = time.monotonic()
         self._pe_nfev = 0
         self._pe_f_hist = []
+        self._pe_prev_f = None
         self._pe_n_obs = 0
         self._pe_best_eta = None
         self._pe_best_rmse = None
@@ -676,7 +680,11 @@ class KalmanMLEstimator:
             # log_mass gradient is O(1) while q_int gradient is O(1e-4)),
             # giving much better convergence than pure-gradient SLSQP.
             method="L-BFGS-B",
-            options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-6},
+            options={
+                "maxiter": int(PE_LBFGS_MAXITER),
+                "ftol": float(PE_LBFGS_FTOL),
+                "gtol": float(PE_LBFGS_GTOL),
+            },
         )
 
         timed_out = False
@@ -1139,6 +1147,11 @@ class KalmanMLEstimator:
         misfit = float(data_mse if data_mse is not None else f)
         eta, rmse_c = self._pe_eta_from_misfit(misfit, n_obs)
         self._note_pe_best_eta(eta, rmse_c, f, theta)
+        rel_red = None
+        prev_f = getattr(self, "_pe_prev_f", None)
+        if prev_f is not None and math.isfinite(float(prev_f)) and math.isfinite(float(f)):
+            rel_red = lbfgs_rel_reduction(float(prev_f), float(f))
+        self._pe_prev_f = float(f)
         point = {
             "nfev": int(self._pe_nfev),
             "f": float(f),
@@ -1148,6 +1161,7 @@ class KalmanMLEstimator:
             "rmse_c": rmse_c,
             "eta_best": self._pe_best_eta,
             "rmse_c_best": self._pe_best_rmse,
+            "rel_red": rel_red,
         }
         self._pe_f_hist.append(point)
         if len(self._pe_f_hist) > 400:
@@ -1170,6 +1184,8 @@ class KalmanMLEstimator:
             "r_var": r_var,
             "eta_tol": float(PE_ETA_TOL),
             "eta_noise": float(PE_ETA_NOISE),
+            "ftol": float(PE_LBFGS_FTOL),
+            "rel_red": rel_red,
         }
         if callback is not None:
             try:

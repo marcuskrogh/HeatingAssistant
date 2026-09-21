@@ -4,7 +4,7 @@
 - Parameter estimation already runs as a background job. Closing the Fitting
   the model overlay must hide it without stopping the fit, so the operator can
   use Overview, Controller Tuning, and other pages while it continues.
-- Those pages and the top navigation show that a fit is running and reopen the
+- Those pages and the panel nav show that a fit is running and reopen the
   overlay. Starting another estimation is blocked until the running job is
   stopped explicitly.
 
@@ -16,13 +16,17 @@
   are not applied.
 - In-progress banners on Overview, Controller Tuning, and Parameter Estimation
   (index + room detail); click reopens the overlay.
-- Compact Estimating chip in the HA toolbar (`#top-bar`) and `panel-nav`
-  controls; click reopens the overlay. Hidden when idle.
+- Compact Estimating chip only in `panel-nav` controls; click reopens the
+  overlay. Hidden when idle. Not in the HA `#top-bar`.
+- Overlay shows two log plots with the same canvas style: fit error (η vs
+  η-tol) and optimiser convergence (L-BFGS-B relative cost drop vs ftol).
+  Each plot has a title so they are distinguishable.
 - Identification start path refuses a second start while `status === running`
   and opens the existing overlay instead.
 
 **Out**
-- PE algorithm, time cap, apply-on-timeout, or job payload fields.
+- PE algorithm, time cap, apply-on-timeout, or changing ftol/gtol values.
+- Extra job payload fields beyond publishing `ftol` / `rel_red` for the plot.
 - Auto-opening the overlay when a dismissed job finishes.
 - Starting more than one concurrent PE worker (backend already returns the
   running snapshot).
@@ -75,7 +79,10 @@
   not applied.
 - Overview, Controller Tuning, and Parameter Estimation show an in-progress
   control while running; activating it shows the overlay.
-- Top nav shows an Estimating chip while running; activating it shows the overlay.
+- Panel nav shows an Estimating chip while running; activating it shows the
+  overlay. The HA top bar does not.
+- The overlay paints two titled log plots (Fit error and Optimiser
+  convergence) with a dashed tolerance line matching the existing RMS style.
 - Run recommended estimation (and equivalent start) does not start a second job
   while one is running; it surfaces the running overlay instead.
 - Overlay and chips survive navigating away from Parameter Estimation.

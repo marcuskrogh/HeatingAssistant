@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
-pytestmark = __import__("pytest").mark.unit
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "heatingassistant" / "app" / "static"
@@ -50,7 +51,7 @@ def test_nav_and_page_surfaces_reopen_overlay() -> None:
     nav_css = NAV_CSS.read_text(encoding="utf-8")
     ident_css = IDENT_CSS.read_text(encoding="utf-8")
     assert "pe-nav-chip" in dashboard
-    assert "pe-top-chip" in dashboard
+    assert "pe-top-chip" not in dashboard
     assert "Estimating" in dashboard
     assert "attachPeSession" in dashboard
     assert "js/identification/pe-session.js" in dashboard
@@ -92,3 +93,23 @@ def test_pe_session_exports_and_close_path() -> None:
     assert "function hide()" in source
     assert "async function stopJob()" in source
     assert "async function waitUntilSettled()" in source
+
+
+def test_overlay_has_titled_fit_and_convergence_plots() -> None:
+    progress = PROGRESS.read_text(encoding="utf-8")
+    ident_css = IDENT_CSS.read_text(encoding="utf-8")
+    assert "Fit error" in progress
+    assert "Optimiser convergence" in progress
+    assert 'data-pe-plot="eta"' in progress
+    assert 'data-pe-plot="ftol"' in progress
+    assert "pe-progress__plot-title" in progress
+    assert "pe-progress__plots" in ident_css
+    assert "grid-template-columns: 1fr 1fr" in ident_css
+
+
+def test_lbfgs_rel_reduction_matches_scipy_ftol() -> None:
+    from heatingassistant.engine.estimation.nlp_eval import lbfgs_rel_reduction
+
+    assert lbfgs_rel_reduction(2.0, 1.0) == pytest.approx(0.5)
+    assert lbfgs_rel_reduction(0.1, 0.05) == pytest.approx(0.05)
+    assert lbfgs_rel_reduction(1.0, 1.0) == pytest.approx(0.0)

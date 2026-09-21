@@ -91,6 +91,8 @@ def test_pe_progress_plot_matches_room_guide() -> None:
     assert "CHART_TICK_SIZE" in progress
     assert "height: var(--chart-height-primary)" in ident
     assert ".pe-progress__plot-frame" in ident
+    assert ".pe-progress__plot-title" in ident
+    assert "grid-template-columns: 1fr 1fr" in ident
     assert "@media (max-width: 768px)" in ident
     assert "align-items: flex-start" in ident
     assert "CHART_TICK_SIZE = 10" in theme
@@ -139,5 +141,5 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
     assert '__version__ = "2026.09.30"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=170" in index
-    assert "return '170'" in dashboard
+    assert "industrial-dashboard.js?v=171" in index
+    assert "return '171'" in dashboard

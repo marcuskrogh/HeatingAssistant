@@ -14,7 +14,7 @@ import {
   updateControllerTuning,
   updateEstimationParams,
 } from '../ha-services.js?v=124';
-import { peSessionOf, mountPeRunningBanner } from '../identification/pe-session.js?v=170';
+import { peSessionOf, mountPeRunningBanner } from '../identification/pe-session.js?v=171';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 

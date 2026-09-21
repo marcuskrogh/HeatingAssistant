@@ -23,7 +23,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=151';
-import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=170';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=171';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);

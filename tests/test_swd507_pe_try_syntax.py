@@ -106,7 +106,7 @@ def test_wait_for_pe_job_is_valid_javascript() -> None:
     assert "finally {\n      hidePeOverlay();" not in source
     assert "hidePeOverlay();" not in source
     assert "peSession.waitUntilSettled" in source
-    assert "pe-session.js?v=170" in source
+    assert "pe-session.js?v=171" in source
     packaged = PACKAGED.read_text(encoding="utf-8")
     assert _extract_named_function(packaged, "waitForPeJob") == fn
     assert _try_blocks_missing_handler(packaged) == []

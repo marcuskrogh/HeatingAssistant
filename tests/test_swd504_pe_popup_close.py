@@ -73,7 +73,7 @@ def test_overlay_stays_open_and_has_close_control() -> None:
     assert "data-pe-stop" in progress
     assert "hidePeOverlay();" not in detail
     assert "finally {\n      hidePeOverlay();" not in detail
-    assert "pe-session.js?v=170" in detail
+    assert "pe-session.js?v=171" in detail
     assert "exit_label" in progress
     assert "Finished" in progress
     assert "Stopped" in progress
