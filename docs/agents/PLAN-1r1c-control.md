@@ -89,7 +89,7 @@
 - Classification: rework
 - Workflow: parity-iterative
 - Branch: `cursor/constrained-cdkf-wall-5de1`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/691
 
 ## Next
-`/architect SWD-570` — shape stamp then implement 1R1C
+`/implement SWD-570` — Build the 1R1C plant to ARCHITECTURE.md

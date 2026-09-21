@@ -116,9 +116,9 @@ Finding docs for `/define` and `/implement`. Supersedes
 - Task: [SWD-570](https://marcusknielsen.atlassian.net/browse/SWD-570)
 - Relates: [SWD-564](https://marcusknielsen.atlassian.net/browse/SWD-564)
 - Branch: `cursor/constrained-cdkf-wall-5de1`
-- PR: — (filled at define)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/691 (define opened)
 - Artifact: `docs/agents/MODEL-1r1c.md`
 
 ## Next
 
-`/define SWD-570` — bind the 1R1C production swap
+`/implement SWD-570` — 1R1C production swap
