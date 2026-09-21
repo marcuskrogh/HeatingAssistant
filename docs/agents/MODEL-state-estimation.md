@@ -172,4 +172,4 @@ product scope/UX.
 
 ## Next
 
-`/define SWD-570` — bind production scope for blocked wall Kalman gain (\(K_w=0\))
+`/define SWD-570` — superseded: live plant is 1R1C (`MODEL-1r1c.md`)
