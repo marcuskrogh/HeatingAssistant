@@ -48,4 +48,4 @@ Live θ is already C, R, q_int, solar scale, heater α, R_ij, ua_open.
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/693
 
 ## Next
-Done — CalVer 2026.09.29; Identification and room plots are air-only 1R1C.
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/693 (`d875c8f9`)
