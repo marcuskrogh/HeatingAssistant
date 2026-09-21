@@ -20,7 +20,7 @@ import {
   solarGainGaugeMax,
   roomModelFit,
   houseComfortBreakdown,
-} from './kpi-engine.js?v=149';
+} from './kpi-engine.js?v=150';
 import {
   formatEnergy,
   formatPercent,

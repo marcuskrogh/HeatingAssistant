@@ -58,7 +58,7 @@ export function nmpcLoadPercent(state) {
   const duration = parseFloat(entity.attributes?.last_nmpc_duration_s);
   const budget = nmpcLoadBudgetS(entity.attributes?.nmpc_period_s);
   if (!Number.isFinite(duration) || budget == null || budget <= 0) return null;
-  return Math.min(100, (duration / budget) * 100);
+  return (duration / budget) * 100;
 }
 
 function nmpcRows(state) {

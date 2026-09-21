@@ -44,4 +44,17 @@ const budget = mpc.rows.find((row) => row.label === 'Load budget');
 assert(budget.value.includes('720'), 'budget row must show 10% of the sample interval');
 assert(mpc.rows.some((row) => row.label === 'Sample interval'), 'sample interval row must be present');
 
+const overrun = catalog.mpcLoadDetail({
+  [MPC]: {
+    state: '108.80',
+    attributes: {
+      last_planner_duration_s: 108.8,
+      dt_s: 900,
+      mpc_mode: 'nmpc',
+    },
+  },
+});
+const overrunLoad = overrun.rows.find((row) => row.label === 'Load');
+assert(overrunLoad.value === '121%', '108.8 s of a 90 s budget must paint 121%, not 100%');
+
 console.log('panel_kpi_load_catalog.harness.mjs: ok');
