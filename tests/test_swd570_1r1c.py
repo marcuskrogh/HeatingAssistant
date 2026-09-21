@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -109,6 +110,28 @@ def test_nmpc_apply_is_ustar_k_not_kp() -> None:
     assert u[0] == pytest.approx(0.55)
 
 
+def test_nmpc_replans_heat_when_air_is_below_comfort() -> None:
+    model, heater = _one_room(temperature=16.0)
+    ctrl = HeatingMPCController(
+        model,
+        [heater],
+        horizon=4,
+        dt=900.0,
+        mpc_mode="nmpc",
+        nmpc_fast_substeps=1,
+        nmpc_horizon_h=1.0,
+    )
+    plan = ctrl.solve_nmpc(
+        outdoor_temp=-5.0,
+        now=datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc),
+        timeout_s=8.0,
+        maxiter=30,
+    )
+    u_star = np.asarray(plan["u_star"], dtype=float)
+    assert plan["accepted"] is True
+    assert float(np.max(u_star)) > 0.1
+
+
 def inspect_source() -> str:
     from heatingassistant.engine.controller import facade as facade_mod
 
@@ -132,6 +155,14 @@ def test_runtime_does_not_publish_wall_entity(tmp_path: Path) -> None:
     )
     states = runtime.hass_states()
     assert "sensor.heating_assistant_living_room_temperature_wall" not in states
+
+
+def test_control_docs_are_nmpc_only() -> None:
+    control = Path("docs/agents/CONTROL.md").read_text(encoding="utf-8")
+    assert "u = U*[k]" in control
+    assert "There is no inner P/PID loop" in control
+    roadmap = Path("docs/ROADMAP.md").read_text(encoding="utf-8")
+    assert "Superseded as the live control loop" in roadmap
 
 
 def test_room_chart_source_drops_wall_series() -> None:
