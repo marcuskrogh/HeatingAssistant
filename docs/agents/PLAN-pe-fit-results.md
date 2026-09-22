@@ -102,9 +102,9 @@
 - Sub-tasks: SWD-577, SWD-578, SWD-579
 - Relates: SWD-573
 - Branch: cursor/swd-576-pe-fit-results-6f70
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/695
 - Classification: feature
 - Workflow: feature-standard
 
 ## Next
-`/architect SWD-576` — Shape persist + Identification list (same branch/PR)
+`/architect SWD-576` — Shape persist + Identification list (https://github.com/marcuskrogh/HeatingAssistant/pull/695)
