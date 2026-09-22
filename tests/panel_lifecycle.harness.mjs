@@ -139,6 +139,9 @@ globalThis.__imp = async (spec) => {
   if (spec.includes('/pages/tuning-controller.js')) return { renderControllerTuning: stub('tuning') };
   if (spec.includes('/pages/schedules.js')) return { renderSchedules: stub('schedules') };
   if (spec.includes('/pages/configuration.js')) return { renderConfiguration: stub('config') };
+  if (spec.includes('/identification/pe-session.js')) {
+    return { attachPeSession() { return { destroy() {} }; } };
+  }
   throw new Error('unknown import ' + spec);
 };
 
