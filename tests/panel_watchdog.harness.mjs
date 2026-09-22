@@ -120,6 +120,18 @@ globalThis.__imp = async (spec) => {
   if (spec.includes('/pages/tuning-controller.js')) return { renderControllerTuning: stub('tuning') };
   if (spec.includes('/pages/schedules.js')) return { renderSchedules: stub('schedules') };
   if (spec.includes('/pages/configuration.js')) return { renderConfiguration: stub('config') };
+  if (spec.includes('/identification/pe-session.js')) {
+    return {
+      peSessionOf: () => ({ isRunning: () => false, show() {}, waitUntilSettled: async () => {} }),
+      attachPeSession: () => ({
+        isRunning: () => false,
+        show() {},
+        waitUntilSettled: async () => {},
+        destroy() {},
+      }),
+      mountPeRunningBanner: () => () => {},
+    };
+  }
   throw new Error('unknown import ' + spec);
 };
 
