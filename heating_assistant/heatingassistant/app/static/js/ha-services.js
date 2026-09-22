@@ -125,6 +125,10 @@ export async function deleteParameterHistory(hass, historyIndex) {
   return ha(hass, 'delete_parameter_history', { history_index: historyIndex });
 }
 
+export async function deletePeFitResult(hass, resultId) {
+  return ha(hass, 'delete_pe_fit_result', { result_id: resultId });
+}
+
 export async function estimateParametersMl(hass, data = {}) {
   return ha(hass, 'estimate_parameters_ml', data);
 }

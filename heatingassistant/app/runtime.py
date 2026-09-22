@@ -43,6 +43,7 @@ from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.solar_model import coerce_solar_gain_smoothing_tau_s
 from heatingassistant.engine.parameter_lifecycle import (
     PARAMETER_HISTORY_KEY,
+    PE_FIT_RESULTS_KEY,
     estimated_params_snapshot,
     restore_estimated_parameters,
 )
@@ -864,6 +865,7 @@ class HeatingRuntime(
                 "store_identified_parameters": sysid_services.handle_store_identified_parameters,
                 "update_estimation_params": sysid_services.handle_update_estimation_params,
                 "delete_parameter_history": sysid_services.handle_delete_parameter_history,
+                "delete_pe_fit_result": sysid_services.handle_delete_pe_fit_result,
                 "create_dataset": sysid_services.handle_create_dataset,
                 "delete_dataset": sysid_services.handle_delete_dataset,
             }.get(service)
@@ -987,6 +989,37 @@ class HeatingRuntime(
             ui_history.append(item)
         return ui_history
 
+    def _slugify_mapping_keys(self, values: Mapping[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(values, Mapping):
+            return {}
+        out: dict[str, Any] = {}
+        for room_name, room_data in values.items():
+            out[self._room_slug(str(room_name))] = (
+                dict(room_data) if isinstance(room_data, Mapping) else room_data
+            )
+        return out
+
+    def _pe_fit_results_for_ui(self) -> list[dict[str, Any]]:
+        """House-level PE catalog with room keys slugified for the panel."""
+
+        catalog = self.options.get(PE_FIT_RESULTS_KEY)
+        if not isinstance(catalog, list):
+            return []
+        ui_rows: list[dict[str, Any]] = []
+        for entry in catalog:
+            if not isinstance(entry, Mapping):
+                continue
+            item = dict(entry)
+            item["rooms"] = self._slugify_mapping_keys(item.get("rooms"))
+            tw = item.get("t_wall_initial")
+            if isinstance(tw, Mapping):
+                item["t_wall_initial"] = self._slugify_mapping_keys(tw)
+            fp = item.get("param_fingerprint")
+            if isinstance(fp, Mapping):
+                item["param_fingerprint"] = self._slugify_mapping_keys(fp)
+            ui_rows.append(item)
+        return ui_rows
+
     def controller_config(self) -> dict[str, Any]:
         """Return the industrial panel's controller-configuration snapshot."""
 
@@ -1056,6 +1089,7 @@ class HeatingRuntime(
             "room_active": self._room_enabled_map(),
             "system_enabled": bool(self.options.get("system_enabled", False)),
             "parameter_history": parameter_history,
+            "pe_fit_results": self._pe_fit_results_for_ui(),
             "sigma_w": float(self.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W)),
             "sigma_v": float(self.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V)),
             "parameter_estimation_horizon_hours": float(
