@@ -173,6 +173,6 @@ def test_calver_and_cache_bust_for_compute_refresh() -> None:
     for static in _TREES:
         index = (static / "index.html").read_text(encoding="utf-8")
         dashboard = (static / "industrial-dashboard.js").read_text(encoding="utf-8")
-        assert "industrial-dashboard.js?v=171" in index
-        assert "app-hass-shim.js?v=171" in index
+        assert "industrial-dashboard.js?v=172" in index
+        assert "app-hass-shim.js?v=172" in index
         assert "return '171'" in dashboard

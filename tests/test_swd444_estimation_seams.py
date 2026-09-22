@@ -39,6 +39,7 @@ def test_sysid_services_public_handlers_exist() -> None:
         "handle_store_identified_parameters",
         "handle_update_estimation_params",
         "handle_delete_parameter_history",
+        "handle_delete_pe_fit_result",
         "handle_create_dataset",
         "handle_delete_dataset",
         "annotate_datasets_with_coverage",

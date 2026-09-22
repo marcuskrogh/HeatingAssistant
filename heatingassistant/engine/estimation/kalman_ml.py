@@ -690,6 +690,9 @@ class KalmanMLEstimator:
         timed_out = False
         cancelled = False
         exit_label = "Did not converge"
+        best_theta = None
+        best_f = float("inf")
+        best_converged = False
         try:
             best_theta, best_f, best_converged, exit_label = self._solve_joint_nlp(
                 mse_cache,
@@ -702,6 +705,15 @@ class KalmanMLEstimator:
             timed_out = True
             exit_label = "Time limit reached"
             _LOGGER.info("PE compute timeout after %.1f s (cap %.1f s)", exc.elapsed_s, exc.cap_s)
+            stored = getattr(self, "_pe_best_theta", None)
+            if stored is None:
+                best_theta = None
+                best_f = float("inf")
+                best_converged = False
+            else:
+                best_theta = np.asarray(stored, dtype=float)
+                best_f = float(self._pe_best_f)
+                best_converged = False
         except PeCancelled:
             cancelled = True
             exit_label = "Stopped by the user"
@@ -723,17 +735,21 @@ class KalmanMLEstimator:
                 self._pe_best_eta,
             )
 
-        if timed_out or cancelled:
+        if cancelled or (timed_out and best_theta is None):
             return {
                 "success": False,
                 "timed_out": timed_out,
                 "cancelled": cancelled,
                 "exit_label": exit_label,
-                "estimated_params": {
-                    name: {"thermal_mass": p["thermal_mass"],
-                           "r_external": p["r_external"]}
-                    for name, p in current.items()
-                },
+                "estimated_params": (
+                    {}
+                    if timed_out
+                    else {
+                        name: {"thermal_mass": p["thermal_mass"],
+                               "r_external": p["r_external"]}
+                        for name, p in current.items()
+                    }
+                ),
                 "current_params": {
                     name: {"thermal_mass": p["thermal_mass"],
                            "r_external": p["r_external"]}
@@ -871,8 +887,8 @@ class KalmanMLEstimator:
         self._last_std_history = std_history
         self._last_dataset_start_ts = dataset_start_timestamps
 
-        return {
-            "success": True,
+        payload = {
+            "success": not timed_out,
             "estimated_params": estimated_params,
             "current_params": {
                 name: {"thermal_mass": p["thermal_mass"],
@@ -895,12 +911,18 @@ class KalmanMLEstimator:
             "stage2_converged": best_converged,
             "exit_label": exit_label,
             "cancelled": False,
-            "timed_out": False,
+            "timed_out": bool(timed_out),
             "n_steps": n_steps,
-            "log_likelihood": log_ll_val,
-            "neg_normalized_mse": log_ll_val,
-            "message": "  ".join(msg_parts),
+            "log_likelihood": None if timed_out else log_ll_val,
+            "neg_normalized_mse": None if timed_out else log_ll_val,
+            "rmse_c_best": self._pe_best_rmse,
+            "message": (
+                timeout_user_message(cap if cap > 0.0 else self._max_compute_s)
+                if timed_out
+                else "  ".join(msg_parts)
+            ),
         }
+        return payload
 
     def estimate_wall_initial_only(
         self,
