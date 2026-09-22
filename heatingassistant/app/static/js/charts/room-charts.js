@@ -51,8 +51,6 @@ export function buildTemperatureChart(
   options = {},
 ) {
   const forecastOnly = options.forecastOnly === true;
-  const wallHistory = [];
-  const wallForecast = [];
   const combinedSetpoint = forecastOnly
     ? setpointForecast
     : [...setpointHistory, ...setpointForecast];
@@ -65,10 +63,10 @@ export function buildTemperatureChart(
 
   const spanPts = sensorSpan ? [sensorSpan.min, sensorSpan.max] : [];
   const allData = forecastOnly
-    ? [combinedSetpoint, forecastNonlinear, forecastLinearised, combinedUpper, combinedLower, wallForecast]
+    ? [combinedSetpoint, forecastNonlinear, forecastLinearised, combinedUpper, combinedLower]
     : [
-      filteredHistory, measuredHistory, wallHistory,
-      combinedSetpoint, forecastNonlinear, forecastLinearised, wallForecast,
+      filteredHistory, measuredHistory,
+      combinedSetpoint, forecastNonlinear, forecastLinearised,
       combinedUpper, combinedLower,
       ...spanPts,
     ];
@@ -84,27 +82,12 @@ export function buildTemperatureChart(
         showLine: false,
       }),
     );
-    if (wallHistory.length > 0) {
-      datasets.push(
-        makeDataset('Wall', wallHistory, 'rgba(158,158,158,0.55)', {
-          borderWidth: 1.5, order: 8,
-        }),
-      );
-    }
   }
   datasets.push(
     makeDataset('Forecast', forecastNonlinear, '#4fc3f7', {
       dashed: !forecastOnly, borderWidth: 2,
     }),
   );
-
-  if (wallForecast.length > 0) {
-    datasets.push(
-      makeDataset(forecastOnly ? 'Wall' : 'Wall Forecast', wallForecast, 'rgba(158,158,158,0.55)', {
-        dashed: !forecastOnly, borderWidth: 1.5, order: 8,
-      }),
-    );
-  }
 
   if (forecastLinearised.length > 0) {
     datasets.push(

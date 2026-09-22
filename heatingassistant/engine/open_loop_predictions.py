@@ -89,16 +89,8 @@ def _seed_wall_states(
     t_wall_initial: Optional[Dict[str, float]],
     is_first_dataset_segment: bool,
 ) -> np.ndarray:
-    if not (is_first_dataset_segment and x.shape[0] >= 2 * n):
-        return x
-    if t_wall_initial:
-        for room_idx, room_name in enumerate(room_names):
-            if room_name in t_wall_initial:
-                x[n + room_idx] = float(t_wall_initial[room_name])
-            else:
-                x[n + room_idx] = float(y0_arr[room_idx])
-    else:
-        x[n : 2 * n] = y0_arr[:n]
+    """No-op on 1R1C: ``x[n:]`` is emitter lag / offset, not a wall node."""
+    _ = (y0_arr, room_names, t_wall_initial, is_first_dataset_segment)
     return x
 
 
@@ -216,7 +208,7 @@ def compute_open_loop_predictions(
             is_first_dataset_segment = False
 
         ts_prev = float(seg[0].get("timestamp", 0.0))
-        has_wall_states = len(x) > n
+        has_wall_states = int(getattr(system, "_nx_phys", n) or n) > n
         window_open0 = seg[0].get("window_open") or {}
         if callable(set_window_open):
             set_window_open(window_open0)
@@ -270,7 +262,7 @@ def compute_open_loop_predictions(
 
             y_meas = record.get("y", [])
             window_open = record.get("window_open") or {}
-            has_wall = len(x) > n
+            has_wall = int(getattr(system, "_nx_phys", n) or n) > n
             for room_idx, room_name in enumerate(room_names):
                 if room_idx >= len(y_meas):
                     continue

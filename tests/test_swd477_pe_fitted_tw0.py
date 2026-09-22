@@ -180,18 +180,17 @@ def test_get_pe_inputs_returns_fitted_tw0_for_matching_dataset(monkeypatch):
     assert result["t_wall_initial_source"] == "parameter_set"
 
 
-def test_pe_ui_shows_tw0_source():
+def test_pe_ui_is_1r1c_air_only():
     detail = (STATIC_JS / "identification" / "sysid-detail.js").read_text(encoding="utf-8")
     markup = (STATIC_JS / "identification" / "sysid-detail-markup.js").read_text(encoding="utf-8")
-    assert "t_wall_initial_source" in detail
-    assert "fittedTw0FromActiveHistory" in detail
-    assert "formMatchesParamFingerprint" in detail
-    assert "param_fingerprint" in detail
-    extras = detail.split("function renderIdentifiedExtras", 1)[1].split("function populateModelFromSysid", 1)[0]
-    assert "applySimulatedTw0" not in extras
-    assert "applyTw0" in detail
-    assert "param-t-wall-initial-hint" in markup
-    assert "current parameter set" in markup
+    assert "Envelope Split" not in markup
+    assert "param-t-wall-initial" not in markup
+    assert "param-c-air-fraction" not in markup
+    assert "cAirFractionInput" not in detail
+    assert "applySimulatedTw0" not in detail
+    assert "Predicted (wall)" not in (
+        STATIC_JS / "identification" / "sysid-datasets.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_restore_from_applied_snapshot_without_last_pe_fit(monkeypatch):

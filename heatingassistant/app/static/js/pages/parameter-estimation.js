@@ -5,5 +5,5 @@ export function renderParameterEstimation(container, rooms, state, connection, h
   if (slug) {
     return renderIdentificationDetail(container, slug, rooms, state, connection, hass);
   }
-  return renderIdentificationIndex(container, rooms, state);
+  return renderIdentificationIndex(container, rooms, state, connection);
 }

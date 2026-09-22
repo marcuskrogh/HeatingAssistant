@@ -168,5 +168,10 @@ _RESTART_PERT = 0.5
 #: η ≤ 2 ⇔ RMS ≤ 1 °C at the default EKF R_var = 0.25.
 PE_ETA_TOL = 2.0
 PE_ETA_NOISE = 1.0
+#: SciPy L-BFGS-B relative cost-reduction tolerance.
+#: Stops when (f^k − f^{k+1}) / max(|f^k|, |f^{k+1}|, 1) ≤ ftol.
+PE_LBFGS_FTOL = 1e-12
+PE_LBFGS_GTOL = 1e-6
+PE_LBFGS_MAXITER = 500
 #: Consecutive NLP evals without a strictly better data η before PE stops.
 PE_ETA_STALE_EVALS = 8

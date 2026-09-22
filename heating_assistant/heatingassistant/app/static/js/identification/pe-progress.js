@@ -8,6 +8,8 @@ import {
   sizePlotCanvas,
 } from '../components/chart-theme.js?v=157';
 
+const FTOL = 1e-12;
+
 function fmtClock(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
   const m = Math.floor(s / 60);
@@ -81,7 +83,23 @@ export function liveClock(snap, nowS = Date.now() / 1000) {
   return { cap, elapsed, remaining };
 }
 
-function drawPlot(canvas, snap) {
+export function relReduction(prevF, currF) {
+  const prev = Number(prevF);
+  const curr = Number(currF);
+  if (!Number.isFinite(prev) || !Number.isFinite(curr)) return null;
+  return (prev - curr) / Math.max(Math.abs(prev), Math.abs(curr), 1);
+}
+
+export function pointRelRed(p, i, hist) {
+  if (p == null) return null;
+  const direct = Number(p.rel_red);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  if (i < 1 || !hist) return null;
+  const v = relReduction(hist[i - 1].f, p.f);
+  return v != null && v > 0 ? v : null;
+}
+
+function drawLogPlot(canvas, hist, yOfPoint, tol, guide) {
   const sized = sizePlotCanvas(canvas);
   if (sized.skipped) return false;
   const { ctx, cssW: w, cssH: h } = sized;
@@ -89,18 +107,16 @@ function drawPlot(canvas, snap) {
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, w, h);
 
-  const hist = snap.f_hist || [];
   if (hist.length < 1) return true;
   const padL = 44;
   const padR = 18;
   const padT = 14;
   const padB = 28;
-  const etaTol = positiveF(snap.eta_tol) || ETA_TOL;
-  const etaNoise = positiveF(snap.eta_noise) || ETA_NOISE;
-  const ys = hist.map((p) => pointEta(p)).filter((v) => v != null && v > 0);
-  const yMax = Math.max(etaTol * 1.6, ...(ys.length ? ys : [etaTol])) * 1.15;
-  const yMin = Math.min(etaNoise * 0.45, ...(ys.length ? ys : [etaNoise]));
-  const yFloor = Math.max(yMin * 0.85, 0.08);
+  const ys = hist.map((p, i) => yOfPoint(p, i, hist)).filter((v) => v != null && v > 0);
+  const guideVal = positiveF(guide);
+  const yMax = Math.max(tol * 1.6, ...(ys.length ? ys : [tol])) * 1.15;
+  const yMin = Math.min(guideVal ? guideVal * 0.45 : tol * 0.45, ...(ys.length ? ys : [tol]));
+  const yFloor = Math.max(yMin * 0.85, Number.MIN_VALUE);
   const xMin = 0;
   const xMax = Math.max(8, hist.length - 1);
   const logMin = Math.log10(yFloor);
@@ -112,7 +128,7 @@ function drawPlot(canvas, snap) {
     return padT + (1 - (Math.log10(clipped) - logMin) / (logMax - logMin)) * (h - padT - padB);
   };
 
-  const yGood = yOf(etaTol);
+  const yGood = yOf(tol);
   const yBottom = padT + (h - padT - padB);
   ctx.fillStyle = 'rgba(46, 196, 182, 0.10)';
   ctx.fillRect(padL, yGood, w - padL - padR, Math.max(0, yBottom - yGood));
@@ -123,7 +139,7 @@ function drawPlot(canvas, snap) {
   ctx.fillStyle = theme.tick;
   logTicks(yFloor, yMax).forEach((v) => {
     if (v < yFloor * 0.999 || v > yMax * 1.001) return;
-    if (Math.abs(Math.log10(v) - Math.log10(etaTol)) < 0.22) return;
+    if (Math.abs(Math.log10(v) - Math.log10(tol)) < 0.22) return;
     const y = yOf(v);
     ctx.beginPath();
     ctx.moveTo(padL, y);
@@ -132,14 +148,16 @@ function drawPlot(canvas, snap) {
     ctx.fillText(fmtTick(v), 8, y + 3);
   });
 
-  ctx.setLineDash(CHART_DASH_PATTERN);
-  ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = CHART_DASH_WIDTH;
-  const yOne = yOf(etaNoise);
-  ctx.beginPath();
-  ctx.moveTo(padL, yOne);
-  ctx.lineTo(w - padR, yOne);
-  ctx.stroke();
+  if (guideVal) {
+    ctx.setLineDash(CHART_DASH_PATTERN);
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = CHART_DASH_WIDTH;
+    const yGuide = yOf(guideVal);
+    ctx.beginPath();
+    ctx.moveTo(padL, yGuide);
+    ctx.lineTo(w - padR, yGuide);
+    ctx.stroke();
+  }
 
   ctx.setLineDash(CHART_DASH_PATTERN);
   ctx.strokeStyle = theme.warn;
@@ -159,7 +177,7 @@ function drawPlot(canvas, snap) {
   ctx.beginPath();
   hist.forEach((p, i) => {
     const x = xOf(i);
-    const y = yOf(pointEta(p) || yFloor);
+    const y = yOf(yOfPoint(p, i, hist) || yFloor);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -169,6 +187,19 @@ function drawPlot(canvas, snap) {
   ctx.font = `${CHART_TICK_SIZE}px ${theme.fontSans}`;
   ctx.fillText('evaluation', w / 2 - 28, h - 8);
   return true;
+}
+
+function drawEtaPlot(canvas, snap) {
+  const hist = snap.f_hist || [];
+  const etaTol = positiveF(snap.eta_tol) || ETA_TOL;
+  const etaNoise = positiveF(snap.eta_noise) || ETA_NOISE;
+  return drawLogPlot(canvas, hist, (p) => pointEta(p), etaTol, etaNoise);
+}
+
+function drawConvPlot(canvas, snap) {
+  const hist = snap.f_hist || [];
+  const ftol = positiveF(snap.ftol) || FTOL;
+  return drawLogPlot(canvas, hist, pointRelRed, ftol, null);
 }
 
 export function renderPeProgress(overlay, snap) {
@@ -195,6 +226,7 @@ export function renderPeProgress(overlay, snap) {
       ? Number(snap.rmse_c)
       : rmseCFromEta(etaHero));
   const etaTol = Number(snap.eta_tol) || ETA_TOL;
+  const ftol = positiveF(snap.ftol) || FTOL;
   const within = Number.isFinite(etaHero) && etaHero <= etaTol;
   const rmseClass = within
     ? 'pe-progress__metric-value pe-progress__metric-value--lead pe-progress__metric-value--ok'
@@ -206,7 +238,7 @@ export function renderPeProgress(overlay, snap) {
 
   overlay.innerHTML = `
     <div class="pe-progress" role="dialog" aria-live="polite" aria-label="Parameter estimation progress">
-      <button type="button" class="pe-progress__close" data-pe-close aria-label="Close">×</button>
+      <button type="button" class="pe-progress__close" data-pe-close aria-label="Hide progress">×</button>
       <div class="pe-progress__head">
         <div class="pe-progress__kicker">Parameter estimation</div>
         <p class="pe-progress__title">${phaseLabel(snap)}</p>
@@ -222,15 +254,29 @@ export function renderPeProgress(overlay, snap) {
           <div class="pe-progress__metric-value pe-progress__metric-value--lead">${snap.nfev ?? '—'}</div>
         </div>
       </div>
-      <div class="pe-progress__plot-wrap">
-        <div class="pe-progress__plot-label">Normalised RMS (1 = sensor noise)</div>
-        <div class="pe-progress__plot-frame">
-          <canvas class="pe-progress__plot"></canvas>
+      <div class="pe-progress__plots">
+        <div class="pe-progress__plot-wrap">
+          <h3 class="pe-progress__plot-title">Fit error</h3>
+          <div class="pe-progress__plot-label">Normalised RMS (1 = sensor noise)</div>
+          <div class="pe-progress__plot-frame">
+            <canvas class="pe-progress__plot" data-pe-plot="eta"></canvas>
+          </div>
+          <div class="pe-progress__legend">
+            <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>normalised RMS</span>
+            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>reasonable fit (η ≤ ${fmtEta(etaTol)} ≈ 1 °C)</span>
+          </div>
         </div>
-      </div>
-      <div class="pe-progress__legend">
-        <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>normalised RMS</span>
-        <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>reasonable fit (η ≤ ${fmtEta(etaTol)} ≈ 1 °C)</span>
+        <div class="pe-progress__plot-wrap">
+          <h3 class="pe-progress__plot-title">Optimiser convergence</h3>
+          <div class="pe-progress__plot-label">Relative cost drop vs ftol</div>
+          <div class="pe-progress__plot-frame">
+            <canvas class="pe-progress__plot" data-pe-plot="ftol"></canvas>
+          </div>
+          <div class="pe-progress__legend">
+            <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>relative cost drop</span>
+            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>ftol (${fmtTick(ftol)})</span>
+          </div>
+        </div>
       </div>
       <div class="pe-progress__time">
         <div class="${timeClass}">${remainText}</div>
@@ -242,11 +288,15 @@ export function renderPeProgress(overlay, snap) {
         </div>
       </div>
       ${exitLine ? `<p class="pe-progress__timeout">${exitLine}</p>` : ''}
+      ${running ? `<div class="pe-progress__actions"><button type="button" class="btn btn--ghost pe-progress__stop" data-pe-stop>Stop estimation</button></div>` : ''}
     </div>
   `;
-  const canvas = overlay.querySelector('.pe-progress__plot');
+  const etaCanvas = overlay.querySelector('[data-pe-plot="eta"]');
+  const convCanvas = overlay.querySelector('[data-pe-plot="ftol"]');
   const paint = () => {
-    if (!drawPlot(canvas, snap)) requestAnimationFrame(paint);
+    const etaOk = drawEtaPlot(etaCanvas, snap);
+    const convOk = drawConvPlot(convCanvas, snap);
+    if (!etaOk || !convOk) requestAnimationFrame(paint);
   };
   paint();
 }

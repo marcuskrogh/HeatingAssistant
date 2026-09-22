@@ -13,7 +13,7 @@ import {
   buildPowerChart,
   buildDisturbanceChart,
   extendDatasetToNow,
-} from '../charts/room-charts.js?v=158';
+} from '../charts/room-charts.js?v=159';
 
 function appendCurrentValue(dataPoints, state, entityId) {
   extendDatasetToNow(dataPoints, entityValue(state, entityId));
@@ -65,7 +65,6 @@ export async function loadChartsData(
   mpcForecastStamp,
 ) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
-  const tempWallEntity = room.entities['temperature_wall'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
   const constraintUpperEntity = room.entities['constraint_upper'];
@@ -77,7 +76,6 @@ export async function loadChartsData(
 
   const historyEntities = [
     tempFilteredEntity,
-    tempWallEntity,
     tempMeasuredEntity,
     setpointEntity,
     constraintUpperEntity,

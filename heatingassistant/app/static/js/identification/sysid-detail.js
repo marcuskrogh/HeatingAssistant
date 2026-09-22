@@ -9,22 +9,21 @@ import {
   deleteDataset,
   deleteParameterHistory,
   estimateParametersMl,
-  cancelParameterEstimation,
   runOpenLoopSimulation,
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
 } from '../ha-services.js?v=124';
-import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=124';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=145';
+import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=125';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=146';
 import {
   actionsCardHtml,
   paramsCardHtml,
   validationIntroHtml,
   historyBodyHtml,
   buildValidationSection,
-} from './sysid-detail-markup.js?v=150';
-import { renderPeProgress } from './pe-progress.js?v=160';
+} from './sysid-detail-markup.js?v=151';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=171';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -35,6 +34,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
   container.innerHTML = '';
   container.classList.add('sysid-detail-host');
+  const peSession = peSessionOf(connection);
+  const unmountPeBanner = mountPeRunningBanner(container, peSession);
 
   // Back navigation
   const nav = document.createElement('button');
@@ -161,10 +162,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const rExternalInput = container.querySelector('#param-r-external');
   const internalGainInput = container.querySelector('#param-internal-gain');
   const solarScaleInput = container.querySelector('#param-solar-scale');
-  const cAirFractionInput = container.querySelector('#param-c-air-fraction');
-  const rAwFractionInput = container.querySelector('#param-r-aw-fraction');
-  const tWallInitialInput = container.querySelector('#param-t-wall-initial');
-  const tWallInitialHint = container.querySelector('#param-t-wall-initial-hint');
   const uaOpenInput = container.querySelector('#param-ua-open');
   const interRoomRSubsection = container.querySelector('#inter-room-r-subsection');
   const interRoomRList = container.querySelector('#inter-room-r-list');
@@ -182,76 +179,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
   const actionStatusEl = container.querySelector('#action-status');
-  const peOverlay = document.createElement('div');
-  peOverlay.className = 'pe-progress-overlay';
-  peOverlay.hidden = true;
-  // Sit on the shadow root, as a sibling of .shell. On mobile .shell is the
-  // scroll container; an overlay inside the Identification page would live at
-  // the top of that long page, off screen from the Estimate button.
-  const overlayRoot = container.getRootNode();
-  const overlayHost = overlayRoot instanceof ShadowRoot
-    ? overlayRoot
-    : document.body;
-  overlayHost.appendChild(peOverlay);
-  peOverlay.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('[data-pe-close]');
-    if (!btn || !peOverlay.contains(btn)) return;
-    const running = peOverlayJob && peOverlayJob.status === 'running';
-    hidePeOverlay();
-    if (running) {
-      cancelParameterEstimation(hass).catch(() => {});
-    }
-  });
-  let peOverlayJob = null;
-  let peOverlayTimer = null;
-  let peOverlayDismissed = false;
-
-  function peShell() {
-    if (!(overlayRoot instanceof ShadowRoot)) return null;
-    return overlayRoot.querySelector('.shell');
-  }
-
-  function lockPeBackground(on) {
-    const shell = peShell();
-    if (!shell) return;
-    if (on) shell.style.overflowY = 'hidden';
-    else shell.style.overflowY = '';
-  }
-
-  function paintPeOverlay(job) {
-    if (peOverlayDismissed) return;
-    peOverlayJob = job;
-    peOverlay.hidden = false;
-    lockPeBackground(true);
-    peOverlay.scrollTop = 0;
-    renderPeProgress(peOverlay, job);
-    const status = job && job.status;
-    if (status && status !== 'running' && peOverlayTimer != null) {
-      window.clearInterval(peOverlayTimer);
-      peOverlayTimer = null;
-    }
-  }
-
-  function hidePeOverlay() {
-    peOverlayDismissed = true;
-    if (peOverlayTimer != null) {
-      window.clearInterval(peOverlayTimer);
-      peOverlayTimer = null;
-    }
-    peOverlayJob = null;
-    peOverlay.hidden = true;
-    peOverlay.innerHTML = '';
-    lockPeBackground(false);
-  }
-
-  function startPeOverlay(job) {
-    peOverlayDismissed = false;
-    paintPeOverlay(job || { status: 'running' });
-    if (peOverlayTimer != null) window.clearInterval(peOverlayTimer);
-    peOverlayTimer = window.setInterval(() => {
-      if (peOverlayJob) renderPeProgress(peOverlay, peOverlayJob);
-    }, 250);
-  }
   const ekfStatusEl = container.querySelector('#ekf-status');
   const olStatusEl = container.querySelector('#ol-status');
 
@@ -268,7 +195,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // they are built by ensureHeaterScaleInputs).
   const paramInputs = [
     thermalMassInput, rExternalInput, internalGainInput, solarScaleInput,
-    cAirFractionInput, rAwFractionInput,
     sigmaWInput, sigmaVInput, horizonInput,
   ];
 
@@ -338,18 +264,10 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       r_external: rExternalInput,
       internal_gain: internalGainInput,
       solar_scale: solarScaleInput,
-      c_air_fraction: cAirFractionInput,
-      r_aw_fraction: rAwFractionInput,
     };
     for (const [param, inp] of Object.entries(roomParamInputs)) {
       if (lockedParams.has(param)) {
         result[param] = { [roomSlug]: parseFloat(inp.value) };
-      }
-    }
-    if (lockedParams.has('t_wall_initial')) {
-      const twVal = parseFloat(tWallInitialInput.value);
-      if (isFinite(twVal)) {
-        result.t_wall_initial = { [roomSlug]: twVal };
       }
     }
     for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
@@ -391,8 +309,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       r_external: modelAttrs.r_external ?? DEFAULTS.r_external,
       internal_gain: modelAttrs.internal_gain ?? DEFAULTS.internal_gain,
       solar_scale: modelAttrs.solar_scale ?? DEFAULTS.solar_scale,
-      c_air_fraction: modelAttrs.c_air_fraction ?? DEFAULTS.c_air_fraction,
-      r_aw_fraction: modelAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
       sigma_w: configAttrs.sigma_w ?? DEFAULTS.sigma_w,
       sigma_v: configAttrs.sigma_v ?? DEFAULTS.sigma_v,
       horizon_hours: configAttrs.parameter_estimation_horizon_hours ?? DEFAULTS.horizon_hours,
@@ -411,8 +327,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       r_external: parseFloat(rExternalInput.value),
       internal_gain: parseFloat(internalGainInput.value),
       solar_scale: parseFloat(solarScaleInput.value),
-      c_air_fraction: parseFloat(cAirFractionInput.value),
-      r_aw_fraction: parseFloat(rAwFractionInput.value),
       sigma_w: parseFloat(sigmaWInput.value),
       sigma_v: parseFloat(sigmaVInput.value),
       horizon_hours: parseFloat(horizonInput.value),
@@ -424,7 +338,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     if (!applied) return false;
     const scalarKeys = [
       'thermal_mass', 'r_external', 'internal_gain', 'solar_scale',
-      'c_air_fraction', 'r_aw_fraction', 'sigma_w', 'sigma_v', 'horizon_hours',
+      'sigma_w', 'sigma_v', 'horizon_hours',
     ];
     if (scalarKeys.some((key) => !valuesEqual(current[key], applied[key]))) return true;
     const appliedScales = applied.heater_scales || {};
@@ -463,8 +377,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       [rExternalInput, 'r_external'],
       [internalGainInput, 'internal_gain'],
       [solarScaleInput, 'solar_scale'],
-      [cAirFractionInput, 'c_air_fraction'],
-      [rAwFractionInput, 'r_aw_fraction'],
       [sigmaWInput, 'sigma_w'],
       [sigmaVInput, 'sigma_v'],
       [horizonInput, 'horizon_hours'],
@@ -492,8 +404,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     rExternalInput.value = appliedParams.r_external;
     internalGainInput.value = appliedParams.internal_gain;
     solarScaleInput.value = appliedParams.solar_scale;
-    cAirFractionInput.value = appliedParams.c_air_fraction;
-    rAwFractionInput.value = appliedParams.r_aw_fraction;
     sigmaWInput.value = appliedParams.sigma_w;
     sigmaVInput.value = appliedParams.sigma_v;
     horizonInput.value = appliedParams.horizon_hours;
@@ -524,8 +434,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const setSelectedDataset = (id, label) => {
     selectedDatasetId = id;
     renderDatasetSelection(label || '');
-    const fitted = fittedTw0FromActiveHistory(latestState);
-    if (fitted) applySimulatedTw0(fitted);
     refreshAuxFromWindow();
   };
   const clearSelectedDataset = () => {
@@ -652,8 +560,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
       [`internal_gain_${roomSlug}`]: parseFloat(internalGainInput.value),
       [`solar_scale_${roomSlug}`]: parseFloat(solarScaleInput.value),
-      [`c_air_fraction_${roomSlug}`]: parseFloat(cAirFractionInput.value),
-      [`r_aw_fraction_${roomSlug}`]: parseFloat(rAwFractionInput.value),
     };
 
     if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
@@ -670,13 +576,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
 
     if (Object.keys(heaterScales).length) params.heater_scales = heaterScales;
     if (selectedDatasetId) params.dataset_id = selectedDatasetId;
-    if (lockedParams.has('t_wall_initial')) {
-      const twVal = parseFloat(tWallInitialInput.value);
-      if (isFinite(twVal)) {
-        params[`t_wall_initial_${roomSlug}`] = twVal;
-        params.t_wall_locked = true;
-      }
-    }
     return params;
   }
 
@@ -711,8 +610,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     if (modelAttrs.r_external != null) rExternalInput.value = modelAttrs.r_external;
     if (modelAttrs.internal_gain != null) internalGainInput.value = modelAttrs.internal_gain;
     if (modelAttrs.solar_scale != null) solarScaleInput.value = modelAttrs.solar_scale;
-    if (modelAttrs.c_air_fraction != null) cAirFractionInput.value = modelAttrs.c_air_fraction;
-    if (modelAttrs.r_aw_fraction != null) rAwFractionInput.value = modelAttrs.r_aw_fraction;
 
     if (configAttrs.sigma_w != null) sigmaWInput.value = configAttrs.sigma_w;
     if (configAttrs.sigma_v != null) sigmaVInput.value = configAttrs.sigma_v;
@@ -845,10 +742,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       internalGainInput.value = sysidAttrs.internal_gain;
     if (sysidAttrs.solar_scale != null && !lockedParams.has('solar_scale'))
       solarScaleInput.value = sysidAttrs.solar_scale;
-    if (sysidAttrs.c_air_fraction != null && !lockedParams.has('c_air_fraction'))
-      cAirFractionInput.value = sysidAttrs.c_air_fraction;
-    if (sysidAttrs.r_aw_fraction != null && !lockedParams.has('r_aw_fraction'))
-      rAwFractionInput.value = sysidAttrs.r_aw_fraction;
 
     ensureHeaterScaleInputs(st);
     const identifiedScales = sysidAttrs.heater_scales || {};
@@ -859,47 +752,24 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       }
     }
     renderIdentifiedExtras(slug, st);
-    if (sysidAttrs.t_wall_initial != null) applySimulatedTw0(sysidAttrs);
   }
 
-  function renderEkfResults(slug, st, { applyTw0 = false } = {}) {
+  function renderEkfResults(slug, st) {
     const attrs = st[sysidEntityId(slug)]?.attributes || {};
     const rmseStr = formatRmseKpi(attrs.rmse);
     updateKpiCard(kpiEkfRmse, { value: rmseStr });
     updateKpiCard(kpiCompareEkfRmse, { value: rmseStr });
     updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' °C' : '—' });
     buildEkfChart(ekfChart, attrs.simulation);
-    if (applyTw0) applySimulatedTw0(attrs);
   }
 
-  function renderOlResults(slug, st, { applyTw0 = false } = {}) {
+  function renderOlResults(slug, st) {
     const attrs = st[openLoopEntityId(slug)]?.attributes || {};
     const rmseStr = formatRmseKpi(attrs.open_loop_rmse);
     updateKpiCard(kpiOlRmse, { value: rmseStr });
     updateKpiCard(kpiCompareOlRmse, { value: rmseStr });
     updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
-    if (applyTw0) applySimulatedTw0(attrs);
-  }
-
-  function setTw0Hint(source) {
-    if (!tWallInitialHint) return;
-    const labels = {
-      parameter_set: '°C — fitted initial wall state from the current parameter estimate for this dataset (or the window used to estimate it).',
-      window_fit: '°C — fitted on this window for the parameters currently in the form. This dataset was not used to estimate the current parameter set.',
-      locked: '°C — locked; held fixed during estimation and simulation.',
-    };
-    tWallInitialHint.textContent = labels[source] || labels.window_fit;
-  }
-
-  function applySimulatedTw0(attrs) {
-    if (lockedParams.has('t_wall_initial')) {
-      setTw0Hint('locked');
-      return;
-    }
-    if (attrs?.t_wall_initial == null) return;
-    tWallInitialInput.value = formatNumber(attrs.t_wall_initial, 2);
-    setTw0Hint(attrs.t_wall_initial_source || 'window_fit');
   }
 
   function formMatchesParamFingerprint(active) {
@@ -911,7 +781,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     const current = collectCurrentParams();
     const keys = [
       'thermal_mass', 'r_external', 'internal_gain', 'solar_scale',
-      'c_air_fraction', 'r_aw_fraction',
     ];
     for (const key of keys) {
       if (current[key] == null || !Number.isFinite(current[key])) continue;
@@ -921,19 +790,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       if (Math.abs(got - want) > 1e-4 * Math.max(1.0, Math.abs(want))) return false;
     }
     return true;
-  }
-
-  function fittedTw0FromActiveHistory(st) {
-    const config = st[CONFIG_ENTITY]?.attributes || {};
-    const active = Array.isArray(config.parameter_history) ? (config.parameter_history[0] || {}) : {};
-    const ids = active.dataset_ids || [];
-    if (!selectedDatasetId || !ids.includes(selectedDatasetId)) return null;
-    if (!formMatchesParamFingerprint(active)) return null;
-    const byDs = active.t_wall_initial_by_dataset || {};
-    const map = byDs[selectedDatasetId] || active.t_wall_initial || {};
-    const value = map[roomSlug];
-    if (value == null) return null;
-    return { t_wall_initial: value, t_wall_initial_source: 'parameter_set' };
   }
 
   function simTimeRange(simulation) {
@@ -1012,7 +868,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         const series = await connection.getPeInputs(peInputOpts());
         if (series && Array.isArray(series.heating_power) && series.heating_power.length) {
           paintAuxCharts(inputsChart, disturbChart, series, xRange);
-          if (series.t_wall_initial != null) applySimulatedTw0(series);
           return;
         }
       } catch (err) {
@@ -1112,8 +967,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     if (roomData.r_external != null) rExternalInput.value = roomData.r_external;
     if (roomData.internal_gain != null) internalGainInput.value = roomData.internal_gain;
     if (roomData.solar_scale != null) solarScaleInput.value = roomData.solar_scale;
-    if (roomData.c_air_fraction != null) cAirFractionInput.value = roomData.c_air_fraction;
-    if (roomData.r_aw_fraction != null) rAwFractionInput.value = roomData.r_aw_fraction;
     // Loaded values are pending review; protect them from state-sync resets.
     userEditing = true;
     updatePendingIndicators();
@@ -1197,47 +1050,18 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // fields from the result for review. Used by Stored Datasets "Run
   // recommended estimation". Returns true on success.
   async function waitForPeJob() {
-    const fallbackMs = 30 * 60 * 1000;
-    startPeOverlay({ status: 'running' });
-    let originMs = Date.now();
-    let capMs = fallbackMs;
-    while (Date.now() - originMs < capMs) {
-      if (!connection || typeof connection.getPeJob !== 'function') {
-        throw new Error('Parameter estimation status is unavailable.');
-      }
-      const job = await connection.getPeJob();
-      if (job != null) {
-        paintPeOverlay(job);
-        const capS = Number(job.cap_s);
-        if (Number.isFinite(capS) && capS > 0) {
-          capMs = capS * 1000;
-        }
-        const startedAt = Number(job.started_at);
-        if (Number.isFinite(startedAt) && startedAt > 1e9) {
-          originMs = startedAt * 1000;
-        }
-        const status = job.status || 'idle';
-        if (status === 'success') return job;
-        if (status === 'cancelled') {
-          const err = new Error(job.message || 'Estimation stopped');
-          err.peCancelled = true;
-          throw err;
-        }
-        if (status === 'error') {
-          throw new Error(job.message || 'Estimation failed');
-        }
-      }
-      await new Promise((res) => setTimeout(res, 1000));
+    if (peSession && typeof peSession.waitUntilSettled === 'function') {
+      return peSession.waitUntilSettled();
     }
-    try {
-      await cancelParameterEstimation(hass);
-    } catch (cancelErr) {
-      /* job may already have finished */
-    }
-    throw new Error('Parameter estimation timed out');
+    throw new Error('Parameter estimation status is unavailable.');
   }
 
   async function runAutoIdentification(idData, statusEl) {
+    if (peSession && peSession.isRunning()) {
+      peSession.show();
+      setStatus(statusEl, 'An estimation is already running. Stop it before starting another.', '');
+      return false;
+    }
     setStatus(statusEl, 'Running parameter estimation…', 'running');
     try {
       const lp = buildLockedParams();
@@ -1248,6 +1072,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       });
       const payload = started?.response ?? started;
       if (payload && payload.status === 'running') {
+        if (peSession) peSession.noteStarted(payload);
         await waitForPeJob();
       } else if (payload && payload.success === false) {
         throw new Error(payload.message || 'Estimation failed');
@@ -1290,8 +1115,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         r_external: parseFloat(rExternalInput.value),
         internal_gain: parseFloat(internalGainInput.value),
         solar_scale: parseFloat(solarScaleInput.value),
-        c_air_fraction: parseFloat(cAirFractionInput.value),
-        r_aw_fraction: parseFloat(rAwFractionInput.value),
         ...(Number.isFinite(uaOpen) ? { ua_open: uaOpen } : {}),
         ...(Object.keys(heaterScales).length ? { heater_scales: heaterScales } : {}),
         source: 'manual',
@@ -1319,8 +1142,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     rExternalInput.value = DEFAULTS.r_external;
     internalGainInput.value = DEFAULTS.internal_gain;
     solarScaleInput.value = DEFAULTS.solar_scale;
-    cAirFractionInput.value = DEFAULTS.c_air_fraction;
-    rAwFractionInput.value = DEFAULTS.r_aw_fraction;
     sigmaWInput.value = DEFAULTS.sigma_w;
     sigmaVInput.value = DEFAULTS.sigma_v;
     horizonInput.value = DEFAULTS.horizon_hours;
@@ -1341,7 +1162,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       // Let the websocket state event with the fresh results arrive, then plot
       // the temperature fit and the input/disturbance signals over its horizon.
       await new Promise((res) => setTimeout(res, 800));
-      renderEkfResults(roomSlug, latestState, { applyTw0: true });
+      renderEkfResults(roomSlug, latestState);
       await renderEkfAux();
       setStatus(ekfStatusEl, 'Complete.', '');
     } catch (err) {
@@ -1363,7 +1184,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         ...collectSimParams(),
       });
       await new Promise((res) => setTimeout(res, 800));
-      renderOlResults(roomSlug, latestState, { applyTw0: true });
+      renderOlResults(roomSlug, latestState);
       await renderOlAux();
       setStatus(olStatusEl, 'Complete.', '');
     } catch (err) {
@@ -1450,8 +1271,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       olInputsChart.destroy();
       olDisturbChart.destroy();
       if (refreshHandles && refreshHandles.destroy) refreshHandles.destroy();
-      hidePeOverlay();
-      peOverlay.remove();
+      unmountPeBanner();
     },
   };
 }

@@ -5,6 +5,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | In Review | — | docs/agents/PLAN-mpc-load-uncap.md | `/ship SWD-571` closeout |
+| SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | Done | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/694 (`843739e4`) |
+| SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
+| SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
+| SWD-572 | Task | [Iterate] Finish 1R1C surfaces: PE page, plots, wall IC | Done | Relates SWD-570 | docs/agents/ITERATE-1r1c-surfaces.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/693 (`d875c8f9`) |
 | SWD-570 | Task | [Rework] 1R1C live plant for PE, EKF, NMPC | Done | Relates SWD-564 | docs/agents/PLAN-1r1c-control.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/691 (`cc1977f9`) |
 | SWD-564 | Task | [Bug] Wall temperature estimates leave the physical air–outdoor envelope | Done | Relates SWD-554 | docs/agents/PLAN-wall-temp-reconstruction.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/690 (`c62a182b`) |
 | SWD-561 | Task | [Iterate] Revert PE fake slow origin grid | Done | Relates SWD-558, SWD-557 | docs/agents/PLAN-revert-pe-slow-origin-grid.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/688 (`6e0798ce`) |
@@ -284,6 +288,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-09-21 — `/review-fix` SWD-571 CLEAN (focused): 0 blockers / 0 should-fix. COMMENT review (cannot APPROVE own PR). Next `/ship SWD-571`.
 - 2026-09-21 — `/implement` SWD-571: uncap `mpcLoadPercent`; 108.8 s / 90 s → 121%. Gauge bar still saturates at 100% width. Dual tree synced. Next `/review-fix SWD-571`.
 - 2026-09-21 — `/define` SWD-571: uncap Overview MPC Load percent when the planner overruns 10% of the sample interval. Gauge bar may stay full. PLAN `docs/agents/PLAN-mpc-load-uncap.md`. Class tweak / delta-fast. Next `/implement SWD-571`.
+- 2026-09-21 — `/define`+`/architect`+`/implement` SWD-573: background PE overlay session; close hides; Stop cancels; Overview/Tuning/PE banners + Estimating nav chip; exclusive start. PLAN `docs/agents/PLAN-pe-background-progress.md`. Next `/test SWD-573`.
+- 2026-09-21 — `/ship` SWD-572 via PR #693 (`d875c8f9`): 1R1C Identification, room plots, wall IC; review CLEAN (focused); changelog `# 2026.09.29`. Next: Done.
+- 2026-09-21 — `/iterate` SWD-572 from SWD-570: Identification still 2R2C splits/Tw0; room/ID plots still had wall series; Tw0 could write into `x[n:]`. Artifact `docs/agents/ITERATE-1r1c-surfaces.md`. Relates SWD-570. Next `/implement SWD-572`.
 - 2026-09-21 — `/define` SWD-570: live control is NMPC (`U*[k]`), not NMPC+P. Canonical `docs/agents/CONTROL.md`. Stale two-rate docs marked historical. Next `/implement SWD-570`.
 - 2026-09-21 — `/model`+`/define`+`/architect` SWD-570: live plant is 1R1C (user). MODEL `docs/agents/MODEL-1r1c.md`, PLAN `docs/agents/PLAN-1r1c-control.md`, ARCH `docs/agents/ARCHITECTURE-1r1c-control.md`. Next `/implement SWD-570`.
 - 2026-09-20 — `/model` SWD-570: CD-Kalman with \(K_w=0\) (latent wall ODE); not UKF. Artifact `docs/agents/MODEL-state-estimation.md`. Branch `cursor/constrained-cdkf-wall-5de1` (no PR). Relates SWD-564. Next `/define SWD-570`. Superseded by 1R1C plant.

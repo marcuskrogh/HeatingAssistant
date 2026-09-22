@@ -1,9 +1,11 @@
 import { setPanelHash } from '../panel-hash.js?v=124';
 import { formatNumber, modelFitLabel } from '../utils.js?v=124';
-import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=124';
+import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=125';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=171';
 
-export function renderIdentificationIndex(container, rooms, state) {
+export function renderIdentificationIndex(container, rooms, state, connection) {
   container.innerHTML = '';
+  const unmountPeBanner = mountPeRunningBanner(container, peSessionOf(connection));
 
   const header = document.createElement('div');
   header.className = 'section-header';
@@ -66,7 +68,9 @@ export function renderIdentificationIndex(container, rooms, state) {
       }
       latestState = newState;
     },
-    destroy() {},
+    destroy() {
+      unmountPeBanner();
+    },
   };
 }
 

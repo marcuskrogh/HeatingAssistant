@@ -4,11 +4,25 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.29
+# 2026.09.31
 
 - Overview MPC Load shows the true percent when the last planner solve
   overruns its budget, including values above 100%. The bar still fills
   completely when load is over 100%.
+
+# 2026.09.30
+
+- Parameter estimation keeps running if you close the progress window. Overview,
+  Controller Tuning, and Parameter Estimation show that a fit is in progress and
+  reopen it. The page nav shows Estimating while a job is running. The progress
+  window plots fit error and optimiser convergence, each with a title. Start
+  another fit only after you stop the one that is already going.
+
+# 2026.09.29
+
+- Identification and room plots show air temperature only. Parameter
+  estimation fits the one-node room model without a wall split or a wall
+  start temperature.
 
 # 2026.09.28
 

@@ -18,6 +18,11 @@ from heatingassistant.app.sysid_sensors import (
     sysid_sensor_attrs,
 )
 from heatingassistant.engine import const
+from heatingassistant.engine.estimation.constants import (
+    PE_ETA_NOISE,
+    PE_ETA_TOL,
+    PE_LBFGS_FTOL,
+)
 from heatingassistant.engine.datasets import build_dataset
 from heatingassistant.engine.history.datasets import (
     dataset_boundaries,
@@ -534,8 +539,9 @@ def start_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -> dict[
             "n_obs": 0,
             "eta": None,
             "rmse_c": None,
-            "eta_tol": 2.0,
-            "eta_noise": 1.0,
+            "eta_tol": float(PE_ETA_TOL),
+            "eta_noise": float(PE_ETA_NOISE),
+            "ftol": float(PE_LBFGS_FTOL),
             "success": None,
             "cancelled": False,
             "timed_out": False,
