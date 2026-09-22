@@ -107,5 +107,5 @@
 - Workflow: feature-standard
 
 ## Next
-`/review SWD-576` — Lasers then closeout (https://github.com/marcuskrogh/HeatingAssistant/pull/695)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/695
 

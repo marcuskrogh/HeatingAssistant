@@ -32,4 +32,4 @@
 - Branch: cursor/swd-576-pe-fit-results-6f70
 
 ## Next
-`/implement SWD-576` — Build to this shape
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/695
