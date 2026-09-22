@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.10.1
+
+- Finished parameter estimation is stored under Identification Results on the
+  Identification page, even if you are not watching the overlay. Each result
+  shows why it stopped, RMSE, and R². Load it into the form when you want to
+  review, then Apply Parameters to write it to the live model.
+
 # 2026.09.30
 
 - Parameter estimation keeps running if you close the progress window. Overview,

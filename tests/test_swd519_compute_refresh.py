@@ -167,7 +167,7 @@ def test_panel_detects_in_place_mpc_attribute_changes() -> None:
 
 def test_calver_and_cache_bust_for_compute_refresh() -> None:
     init = (_ROOT / "heatingassistant" / "__init__.py").read_text(encoding="utf-8")
-    assert '__version__ = "2026.09.30"' in init
+    assert '__version__ = "2026.10.1"' in init
     changelog = (_ROOT / "heating_assistant" / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "# 2026.09.17" in changelog
     for static in _TREES:
@@ -175,4 +175,4 @@ def test_calver_and_cache_bust_for_compute_refresh() -> None:
         dashboard = (static / "industrial-dashboard.js").read_text(encoding="utf-8")
         assert "industrial-dashboard.js?v=172" in index
         assert "app-hass-shim.js?v=172" in index
-        assert "return '171'" in dashboard
+        assert "return '172'" in dashboard

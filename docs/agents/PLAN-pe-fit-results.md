@@ -107,4 +107,5 @@
 - Workflow: feature-standard
 
 ## Next
-`/architect SWD-576` — Shape persist + Identification list (https://github.com/marcuskrogh/HeatingAssistant/pull/695)
+`/review SWD-576` — Lasers then closeout (https://github.com/marcuskrogh/HeatingAssistant/pull/695)
+

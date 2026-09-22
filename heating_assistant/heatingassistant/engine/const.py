@@ -745,6 +745,7 @@ SERVICE_CANCEL_EXPERIMENT = "cancel_experiment"
 SERVICE_DELETE_EXPERIMENT = "delete_experiment"
 SERVICE_CREATE_DATASET = "create_dataset"
 SERVICE_DELETE_DATASET = "delete_dataset"
+SERVICE_DELETE_PE_FIT_RESULT = "delete_pe_fit_result"
 
 #: Excitation signal types a scheduled experiment can apply to a room's heaters
 #: to gather informative parameter-estimation data.

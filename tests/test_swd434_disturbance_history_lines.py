@@ -137,6 +137,6 @@ def test_room_charts_import_cache_bust() -> None:
         assert "room-charts.js?v=159" in mpc_preview
         assert "mpc-preview-charts.js?v=158" in tuning
         assert "industrial-dashboard.js?v=172" in index
-        assert "return '171'" in dashboard
+        assert "return '172'" in dashboard
         assert "room-charts.js?v=124" not in room_detail
         assert "room-charts.js?v=124" not in mpc_preview
