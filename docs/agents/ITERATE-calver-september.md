@@ -32,6 +32,7 @@
 - Task: SWD-580
 - Relates: SWD-576
 - Branch: `cursor/swd-580-calver-september-6f70`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/696
 
 ## Next
-`/test SWD-580` — Dedicated testing phase, then harden and code review
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/696

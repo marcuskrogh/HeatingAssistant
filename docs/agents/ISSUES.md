@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-580 | Task | [Iterate] Keep App calendar version in September | In Progress | Relates SWD-576 | docs/agents/ITERATE-calver-september.md | `/test SWD-580` |
+| SWD-580 | Task | [Iterate] Keep App calendar version in September | Done | Relates SWD-576 | docs/agents/ITERATE-calver-september.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/696 |
 | SWD-576 | Task | [Feature] Archive finished PE results below stored datasets | Done | Relates SWD-573 | docs/agents/PLAN-pe-fit-results.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/695 |
 | SWD-577 | Sub-task | Persist finished PE results with exit, RMSE, and R² | Done | SWD-576 | docs/agents/PLAN-pe-fit-results.md | — |
 | SWD-578 | Sub-task | UI: identification results list, load, and delete | Done | SWD-576 | docs/agents/PLAN-pe-fit-results.md | — |
