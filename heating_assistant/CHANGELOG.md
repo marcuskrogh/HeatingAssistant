@@ -4,7 +4,7 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.10.1
+# 2026.09.31
 
 - Finished parameter estimation is stored under Identification Results on the
   Identification page, even if you are not watching the overlay. Each result
