@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-583 | Bug | [Bug] Finished parameter estimation is missing from Identification Results | In Review | — | — | `/review SWD-583` — https://github.com/marcuskrogh/HeatingAssistant/pull/699 |
 | SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/698 (`741246f0`) |
 | SWD-581 | Bug | [Bug] Parameter estimation progress window does not scroll | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/697 (`711ae313`) |
 | SWD-580 | Task | [Iterate] Keep App calendar version in September | Done | Relates SWD-576 | docs/agents/ITERATE-calver-september.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/696 |

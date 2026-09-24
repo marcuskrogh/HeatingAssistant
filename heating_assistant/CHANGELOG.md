@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.34
+
+- A finished parameter estimation is saved under Identification Results even
+  when the optimiser stops with a message other than the usual convergence
+  reasons. Cancelled runs are still not saved.
+
 # 2026.09.33
 
 - On a phone, the Estimating pill, health pill, and start/stop button stay

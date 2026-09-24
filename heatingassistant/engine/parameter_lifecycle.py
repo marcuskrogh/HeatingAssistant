@@ -858,18 +858,25 @@ async def async_estimate_parameters_ml(
 
 
 def pe_fit_should_archive(result: Mapping[str, Any] | None) -> bool:
-    """True when a PE job should be stored in the identification catalog."""
+    """True when a finished PE job should be stored in the identification catalog.
+
+    A background fit often ends with a SciPy message that is not one of the
+    named stop reasons. Those runs still have parameters and must appear under
+    Identification Results. Cancelled runs and crashes with no parameter set
+    stay out of the catalog.
+    """
 
     if not isinstance(result, Mapping):
         return False
     if result.get("cancelled"):
         return False
-    if result.get("success") is False and not result.get("timed_out"):
-        return False
-    if str(result.get("exit_label") or "") not in _STOREABLE_PE_EXITS:
-        return False
     params = result.get("estimated_params")
-    return isinstance(params, Mapping) and bool(params)
+    if not isinstance(params, Mapping) or not params:
+        return False
+    if result.get("success") is False and not result.get("timed_out"):
+        if str(result.get("exit_label") or "") not in _STOREABLE_PE_EXITS:
+            return False
+    return True
 
 
 def _catalog_rooms_from_result(result: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
