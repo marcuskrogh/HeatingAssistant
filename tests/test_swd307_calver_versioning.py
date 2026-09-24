@@ -23,7 +23,7 @@ def test_live_version_is_current_calendar_month() -> None:
         (ROOT / "heating_assistant" / "config.yaml").read_text(encoding="utf-8")
     )
     version = str(config["version"])
-    assert version == "2026.09.33"
+    assert version == "2026.09.34"
     match = CALVER_RE.fullmatch(version)
     assert match is not None
     now = datetime.now(timezone.utc)

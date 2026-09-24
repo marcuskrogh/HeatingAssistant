@@ -70,6 +70,21 @@ def test_archive_skips_cancelled_and_crash_exits() -> None:
 
 
 @pytest.mark.parametrize(
+    "exit_label",
+    ["Did not converge", "Optimiser failed", "ABNORMAL_TERMINATION_IN_LNSRCH"],
+)
+def test_archive_keeps_finished_fit_with_unlisted_exit(exit_label: str) -> None:
+    options: dict = {}
+    result = _storeable_result(exit_label=exit_label, success=True)
+    entry = archive_pe_fit_result(options, result, result_id="fit-unlisted")
+    assert entry["id"] == "fit-unlisted"
+    assert entry["exit_label"] == exit_label
+    assert options[PE_FIT_RESULTS_KEY][0]["rooms"]["Living Room"]["thermal_mass"] == pytest.approx(
+        1_250_000.0
+    )
+
+
+@pytest.mark.parametrize(
     "exit_label,timed_out",
     [
         ("Converged (cost reduction)", False),
