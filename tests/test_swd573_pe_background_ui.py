@@ -56,6 +56,11 @@ def test_nav_and_page_surfaces_reopen_overlay() -> None:
     assert "attachPeSession" in dashboard
     assert "js/identification/pe-session.js" in dashboard
     assert "panel-nav__pe-chip" in nav_css
+    mobile_nav = nav_css.split("@media (max-width: 1024px)", 1)[1].split("@media (max-width: 480px)", 1)[0]
+    assert "minmax(0, 1fr)" in mobile_nav
+    assert "text-overflow: ellipsis" in mobile_nav
+    assert "flex-wrap: wrap" in mobile_nav
+    assert "overflow-x: hidden" in nav_css
     assert "pe-running-banner" in ident_css
     for path in (OVERVIEW, TUNING, INDEX, DETAIL):
         text = path.read_text(encoding="utf-8")

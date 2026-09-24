@@ -4,6 +4,12 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.33
+
+- On a phone, the Estimating pill, health pill, and start/stop button stay
+  inside the navigation bar. The title shortens instead of pushing the bar
+  wider than the screen.
+
 # 2026.09.32
 
 - The parameter estimation progress window scrolls on a phone when the fit
