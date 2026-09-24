@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | In Review | — | — | `/review SWD-582` — https://github.com/marcuskrogh/HeatingAssistant/pull/698 |
+| SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/698 (`741246f0`) |
 | SWD-581 | Bug | [Bug] Parameter estimation progress window does not scroll | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/697 (`711ae313`) |
 | SWD-580 | Task | [Iterate] Keep App calendar version in September | Done | Relates SWD-576 | docs/agents/ITERATE-calver-september.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/696 |
 | SWD-576 | Task | [Feature] Archive finished PE results below stored datasets | Done | Relates SWD-573 | docs/agents/PLAN-pe-fit-results.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/695 |
