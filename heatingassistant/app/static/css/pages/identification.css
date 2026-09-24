@@ -372,9 +372,10 @@
   align-items: flex-start;
   justify-content: center;
   padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
-  overflow: auto;
+  /* The card is the scrollport. Scrolling the fixed overlay itself does not
+     receive touch pans when an ancestor clips the panel to the visible area. */
+  overflow: hidden;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 }
 
 .pe-progress-overlay[hidden] {
@@ -385,7 +386,11 @@
   position: relative;
   width: min(980px, 100%);
   margin: auto 0;
-  max-height: calc(100dvh - 32px);
+  /* 100% of the overlay, not 100dvh: the panel sits under the HA header, so a
+     viewport-tall card is clipped and never becomes scrollable. min-height: 0
+     lets this flex item shrink below its content so overflow-y can scroll. */
+  max-height: 100%;
+  min-height: 0;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -394,6 +399,7 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .pe-progress__head {
@@ -665,13 +671,17 @@
 @media (max-width: 768px) {
   .pe-progress-overlay {
     align-items: flex-start;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 12px 10px;
-    -webkit-overflow-scrolling: touch;
   }
 
   .pe-progress {
     width: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   .pe-progress__head,

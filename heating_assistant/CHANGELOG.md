@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.32
+
+- The parameter estimation progress window scrolls on a phone when the fit
+  charts are taller than the screen.
+
 # 2026.09.31
 
 - Finished parameter estimation is stored under Identification Results on the
