@@ -954,6 +954,8 @@ ha-industrial-panel app-toolbar .panel-nav__pe-chip {
      sticky has no reliable reference point inside the shadow DOM. */
   .shell {
     height: 100dvh;
+    max-width: 100%;
+    overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -1003,17 +1005,25 @@ ha-industrial-panel app-toolbar .panel-nav__pe-chip {
   .panel-nav {
     position: relative;
     display: grid;
-    grid-template-columns: 1fr auto;
+    /* minmax(0, 1fr) lets the title shrink. The controls column stays
+       content-sized but cannot grow the bar past the screen. */
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto auto;
     align-items: center;
     padding: 8px 12px;
     gap: 0;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .panel-nav__brand {
     grid-column: 1;
     grid-row: 1;
     justify-self: start;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     padding-right: 12px;
     border-right: none;
     order: unset;
@@ -1021,6 +1031,9 @@ ha-industrial-panel app-toolbar .panel-nav__pe-chip {
 
   .panel-nav__name {
     font-size: var(--type-ui);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .panel-nav__fill {
@@ -1033,10 +1046,20 @@ ha-industrial-panel app-toolbar .panel-nav__pe-chip {
     grid-row: 1;
     justify-self: end;
     width: auto;
+    max-width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
     justify-content: flex-end;
     margin: 0;
     gap: 8px;
+    row-gap: 4px;
     order: unset;
+  }
+
+  .panel-nav__pe-chip,
+  .panel-nav__live-indicator,
+  .panel-nav__run-btn {
+    flex: none;
   }
 
   .panel-nav__live-indicator {
