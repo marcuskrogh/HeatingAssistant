@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | In Review | — | — | `/review SWD-584` — https://github.com/marcuskrogh/HeatingAssistant/pull/700 |
+| SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |
 | SWD-583 | Bug | [Bug] Finished parameter estimation is missing from Identification Results | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/699 (`03ddda49`) |
 | SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/698 (`741246f0`) |
 | SWD-581 | Bug | [Bug] Parameter estimation progress window does not scroll | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/697 (`711ae313`) |
