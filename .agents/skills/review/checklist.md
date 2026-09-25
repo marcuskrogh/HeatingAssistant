@@ -8,19 +8,21 @@ Axes: **Spec**, **Correctness**, **Integration**, **Architecture**, **Standards*
 ## Spec
 
 ### Vertical
-- [ ] Each acceptance criterion / bug expected-result / tweak desired-change / refine preserve-behaviour bar / rework parity bar / PLAN Classification acceptance is implemented in the changed code
+- [ ] Each **pass criteria** row has a **spec lock** (automated check written from that row); a test of an invented helper does not count
+- [ ] Each acceptance criterion / bug expected-result / tweak desired-change / refine preserve-behaviour bar / adopt preserve-behaviour gate / rework parity bar / PLAN Classification acceptance is implemented in the changed code
 - [ ] Work-package / sub-task outcomes are actually delivered (not just TODOs/comments)
-- [ ] Edge cases called out in PLAN/BUG/TWEAK/REFINE/REWORK are handled
+- [ ] Edge cases called out in PLAN/BUG/TWEAK/REFINE/REWORK/ADOPT are handled
 - [ ] Wrong algorithm or behaviour relative to the written spec
 - [ ] PLAN Workflow binding (if present) was followed for verify mode (tests / non-regression / comparative evidence)
 
 ### Horizontal
 - [ ] Related surfaces updated: API, UI, docs, config, migrations, feature flags, metrics
 - [ ] No scope creep beyond the issue (extra behaviour that should be a new Task)
-- [ ] BUG fixes include regression protection called for in acceptance (test or equivalent)
+- [ ] BUG fixes include a spec lock that reproduces the defect (fail-first)
 - [ ] REFINE keeps executable behaviour unchanged; verification matches Preserve behaviour
+- [ ] ADOPT keeps executable behaviour unchanged; Behaviour map rows stay locked (same tests, same expected results); working surfaces still start and mapped UI/API flows still complete
 - [ ] REWORK meets the parity bar; PR/evidence shows baseline vs candidate comparison (not suite-green alone)
-- [ ] MODEL/PLAN/BUG/TWEAK/REFINE/REWORK numeric or domain constraints reflected at all touchpoints
+- [ ] MODEL/PLAN/BUG/TWEAK/REFINE/REWORK/ADOPT numeric or domain constraints reflected at all touchpoints
 
 ## Correctness
 
@@ -62,8 +64,10 @@ Axes: **Spec**, **Correctness**, **Integration**, **Architecture**, **Standards*
 ## Architecture
 
 Deep structural analysis of the change in context of the surrounding codebase.
-Findings must cite evidence (paths, layers, dependency edges) and propose a
-**concrete refactoring** — not vague "consider cleaning this up."
+Applies [CONCEPT_STRUCTURE](../concepts/CONCEPT_STRUCTURE.md) and
+[STRUCTURE-CATALOG.md](../concepts/STRUCTURE-CATALOG.md). Findings must cite
+evidence (paths, layers, dependency edges) and propose a **concrete refactoring**
+— not vague "consider cleaning this up."
 
 Documented ADRs / architecture docs / dependency rules override generic advice.
 
@@ -76,6 +80,7 @@ module/layer/design-shape problems → Architecture.
 - [ ] Module cohesion: changed unit has one clear responsibility; change does not turn it into a god object/service/file
 - [ ] Abstraction quality: interfaces/ports hide the right details; no leaky abstractions exposing persistence/transport internals
 - [ ] Complexity growth: long methods/types/files made worse without an extract/split plan
+- [ ] **CRAP** as a guide: nested conditionals above the target extracted; a flat switch/case over a closed set of types may stay
 - [ ] Speculative frameworks or premature generalization introduced without a second real use
 - [ ] Composition vs inheritance / indirection: new layers earn their keep
 
@@ -97,6 +102,7 @@ When flagging, name a concrete move, for example:
 - Move type or function to the correct layer
 - Invert dependency (introduce port + adapter; depend on abstraction)
 - Split god module along change-axes
+- Extract nested conditionals that drive **CRAP** above the target; leave a justified switch/case
 - Collapse needless indirection / speculative generality
 - Introduce a façade to hide a message chain or unstable neighbor
 - Align with an existing pattern already used for a sibling feature
@@ -108,28 +114,14 @@ optional adjacent cleanup the PR did not cause → `note`. When unsure between
 
 ## Standards (smell baseline)
 
-Repo docs override. **Fix-biased:** actionable named smells in **changed** code
-(clear rename / extract / move) → `should-fix`. Documented convention breaches →
-`should-fix` or `blocker`. Pure taste with no named smell and no repo-doc backing →
-`note`. Skip tooling-enforced style.
-
-### Smell baseline (_Refactoring_, Fowler ch.3)
-
-- **Mysterious Name** — name doesn't reveal role → rename or rethink design
-- **Duplicated Code** — same logic shape in multiple hunks → extract
-- **Feature Envy** — method uses another's data more than its own → move it
-- **Data Clumps** — same fields travel together → introduce a type
-- **Primitive Obsession** — primitive stands in for a domain concept → small type
-- **Repeated Switches** — same type cascade repeated → polymorphism or shared map
-- **Shotgun Surgery** — one change edits many scattered sites → gather
-- **Divergent Change** — one module changed for unrelated reasons → split
-- **Speculative Generality** — abstraction for unneeded future → delete/inline
-- **Message Chains** — long `a.b().c().d()` → hide behind one method
-- **Middle Man** — mostly delegates → remove and call target
-- **Refused Bequest** — ignores most inherited behaviour → prefer composition
+Repo docs override. Apply [STRUCTURE-CATALOG.md](../concepts/STRUCTURE-CATALOG.md).
+**Fix-biased:** actionable named smells in **changed** code (clear rename /
+extract / move) → `should-fix`. Documented convention breaches → `should-fix`
+or `blocker`. Pure taste with no named smell and no repo-doc backing → `note`.
+Skip tooling-enforced style.
 
 ### Vertical / horizontal for standards
-- Vertical: naming, structure, and clarity inside new functions
+- Vertical: naming, structure, **CRAP**, and clarity inside new functions
 - Horizontal: consistency with neighbouring modules and established patterns in the repo
 - [ ] **Dev-surface keys** — [CONCEPT_IMPLEMENTATION](../concepts/CONCEPT_IMPLEMENTATION.md)
 

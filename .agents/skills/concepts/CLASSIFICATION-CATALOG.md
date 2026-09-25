@@ -11,27 +11,33 @@ Apply **discriminators in order**; **first match wins**.
 |------:|-------|--------------------------------|
 | 1 | **bug** | Behaviour is wrong / regressing; fix is the work; expected correct behaviour is known or knowable |
 | 2 | **rework** | Intentional **implementation** change (algorithm, control law, internal path) **and** measured outcomes must not degrade (parity bar needed or implied) |
-| 3 | **refine** | Structure, naming, layering, comments, or docs only; **executable behaviour unchanged** |
-| 4 | **tweak** | Small intentional behaviour delta; not a defect; too light for a full feature slice |
-| 5 | **feature** | Buildable product/system slice that needs scope/behaviour/acceptance as a unit |
-| 6 | **iterate** | Prior Task already **merged**; shipped work still wrong or incomplete (post-ship only) |
+| 3 | **adopt** | Entire existing codebase (or the named tree) was **not built** to the structure bar; apply the catalog across it; **executable behaviour unchanged** |
+| 4 | **refine** | **Bounded** area (module, class, slice, README); structure, naming, layering, comments, docs, or **refactoring** only; **executable behaviour unchanged** |
+| 5 | **tweak** | Small intentional behaviour delta; not a defect; too light for a full feature slice |
+| 6 | **feature** | Buildable product/system slice that needs scope/behaviour/acceptance as a unit |
+| 7 | **iterate** | Prior Task already **merged**; shipped work still wrong or incomplete (post-ship only); straightforward production fix — inspect-each-turn post-merge is sandbox |
 
 If nothing matches cleanly → ask one discriminator question (usually: defect vs
-intentional change vs structure-only vs measured swap).
+intentional change vs whole-tree structure vs bounded structure-only vs measured
+swap).
 
 ## Templates
 
 | Template | Intent | Default chain |
 |----------|--------|---------------|
-| **fix-fast** | Clear defect, contained blast radius | implement → review-fix → ship |
-| **delta-fast** | Small intentional behaviour change | implement → review-fix → ship |
-| **structure-safe** | Behaviour-preserving structural/docs work | implement → review-fix → ship |
-| **parity-iterative** | Impl swap with non-degradation bar | implement (comparative loop) → review-fix → ship |
-| **feature-standard** | Ordinary feature slice | implement → review-fix → ship |
-| **feature-heavy** | Cross-cutting / high-risk feature | implement (multiagent OK) → review-fix (full) → ship |
+| **fix-fast** | Clear defect, contained blast radius | architect → implement → test → restructure → review → ship |
+| **delta-fast** | Small intentional behaviour change | architect → implement → test → restructure → review → ship |
+| **structure-safe** | Behaviour-preserving structural/docs work | architect → implement → test → restructure → review → ship |
+| **parity-iterative** | Impl swap with non-degradation bar | architect → implement (comparative loop) → test → restructure → review → ship |
+| **feature-standard** | Ordinary feature slice | architect → implement → test → restructure → review → ship |
+| **feature-heavy** | Cross-cutting / high-risk feature | architect → implement (multiagent OK) → test → restructure → review (full sequential) → ship |
 
 Optional prefix steps (only when bound): `/research`, `/model` before
-implement — recorded in `side_paths`.
+architect — recorded in `side_paths`. Optional `/sandbox` after architect
+(or before implement) — recorded in `sandbox` (`none` \| `inject`).
+**architect** is always in the chain. Closeout after implement is always
+**test** → **restructure** (`/harden`) → **review** (find, fix, **code review**).
+`test.mode=skip` / `harden.mode=skip` are explicit exceptions, not defaults.
 
 ## Default binding (class → template)
 
@@ -39,6 +45,7 @@ implement — recorded in `side_paths`.
 |-------|------------------|
 | bug | fix-fast |
 | tweak | delta-fast |
+| adopt | structure-safe |
 | refine | structure-safe |
 | rework | parity-iterative |
 | feature | feature-standard |
@@ -53,41 +60,68 @@ Every binding records these keys (use exactly these names):
 | `implement.mode` | `single` \| `multiagent` | Manager-only packages vs delegated multiagent packages |
 | `implement.verify` | `tests` \| `non-regression` \| `comparative` | Suite/acceptance; behaviour-unchanged checks; baseline vs candidate ([../implement/rework.md](../implement/rework.md)) |
 | `implement.iteration` | `one-shot` \| `until-bar` | Stop after one verify vs reiterate until parity/acceptance bar |
+| `test.mode` | `skip` \| `dedicated` | Skip the testing phase vs run `/test` after implement |
+| `harden.mode` | `skip` \| `dedicated` | Skip the structure phase vs run `/restructure` (`/harden`) after test |
 | `review.mode` | `single` \| `multiagent` | Focused worker set vs full multi-axis workers |
 | `review.depth` | `focused` \| `full` | See [../review/depth.md](../review/depth.md) |
+| `review.lasers` | `bundled` \| `sequential` | One worker set then code review vs axis lasers then code review ([../review/lasers.md](../review/lasers.md)) |
 | `side_paths` | `none` \| `research` \| `model` \| `research+model` | Supportive passes before implement |
+| `sandbox` | `none` \| `inject` | Isolated inspect-loop for a contained element before (or instead of jumping into) production implement |
 
 ### Default params by template
 
-| Template | implement.mode | implement.verify | implement.iteration | review.mode | review.depth | side_paths |
-|----------|----------------|------------------|---------------------|-------------|--------------|------------|
-| fix-fast | single | tests | one-shot | single | focused | none |
-| delta-fast | single | tests | one-shot | single | focused | none |
-| structure-safe | single | non-regression | one-shot | single | focused | none |
-| parity-iterative | single | comparative | until-bar | single | focused | none |
-| feature-standard | single | tests | one-shot | single | focused | none |
-| feature-heavy | multiagent | tests | one-shot | multiagent | full | none |
+**Implement**
 
-### Override rules (apply after defaults; efficiency-first)
+| Template | implement.mode | implement.verify | implement.iteration |
+|----------|----------------|------------------|---------------------|
+| fix-fast | single | tests | one-shot |
+| delta-fast | single | tests | one-shot |
+| structure-safe | single | non-regression | one-shot |
+| parity-iterative | single | comparative | until-bar |
+| feature-standard | single | tests | one-shot |
+| feature-heavy | multiagent | tests | one-shot |
+
+**Closeout**
+
+| Template | test.mode | harden.mode | review.mode | review.depth | review.lasers |
+|----------|-----------|-------------|-------------|--------------|---------------|
+| fix-fast | dedicated | dedicated | single | focused | sequential |
+| delta-fast | dedicated | dedicated | single | focused | sequential |
+| structure-safe | dedicated | dedicated | single | focused | sequential |
+| parity-iterative | dedicated | dedicated | single | focused | sequential |
+| feature-standard | dedicated | dedicated | single | focused | sequential |
+| feature-heavy | dedicated | dedicated | multiagent | full | sequential |
+
+`side_paths` and `sandbox` default to `none` on every template.
+
+### Override rules (apply after defaults)
+
+Structure and testing are the **floor**. Efficiency applies to `review.mode`,
+`review.depth`, and `implement.mode` only.
 
 | When | Change |
 |------|--------|
 | Blast radius wide, new layers/modules, public API/schema/migration, authz, or ADR risk | `review.depth=full`, `review.mode=multiagent`; feature → prefer **feature-heavy** |
-| Localized one-concern diff, no new layers | keep `focused` / `single` even on feature-standard |
+| Localized one-concern diff, no new layers | keep `focused` / `single`; keep `test.mode=dedicated`, `harden.mode=dedicated`, `review.lasers=sequential` |
+| Purely non-behavioural docs/comments (no executable change) | `test.mode=skip` only; **harden stays dedicated** |
 | Math/formulation unclear and blocks acceptance | `side_paths=model` (and/or research) before implement |
 | Literature/evidence needed before locking approach | `side_paths=research` |
+| Contained UI/UX slice or isolated method/perf comparison that needs inspect-each-turn before production wiring | `sandbox=inject` |
 | Rework / comparative verify | force `implement.verify=comparative`, `implement.iteration=until-bar` |
 | User asks for thorough/full review | `review.depth=full`, `review.mode=multiagent` |
-| User asks to skip multiagent / save tokens | prefer `single` + `focused` unless override risk rows apply |
+| User asks to skip multiagent / save tokens | prefer `single` + `focused`; **do not** skip test, harden, sequential lasers, or Architecture |
+| User explicitly asks to skip test or harden | that phase only; record the skip on the binding |
+| Class is **adopt** | Walk the route autonomously: inventory (delegated), then each area runs characterize → architect → implement → test → restructure → review → ship, then the next area, until the route is Done. Characterize maps current observable behaviour **and every working surface** (startable backend, startable frontend, composed client-server path) and implements lock tests that fail if those surfaces stop working; structure work does not start until that baseline is green on current code. Force `implement.verify=non-regression` and `test.mode=dedicated`. Refuse `test.mode=skip` even if the user asked — proof is required. `implement.mode=multiagent` when the unit has more than one package or any Moderate/Demanding package. Do not wait for user Next between steps or areas. Do not ship or start the next area until the preserve-behaviour gate holds (lock suite **and** working surfaces). Hard stop on a composed skill's hard stop or a failed proof. Closeout params stay on **structure-safe** except `implement.mode` / forced verify+test as above |
 
-**Cheapest binding that still covers risk wins.** Do not escalate to
-feature-heavy or full multiagent review without a matching override row.
+**Cheapest review breadth that still covers risk wins.** Do not escalate to
+feature-heavy or full multiagent review without a matching override row. Do not
+drop test, harden, or the Architecture/Standards lasers to save tokens.
 
 ## Artifact sections (required on PLAN.md from define)
 
 ```markdown
 ## Classification
-- Class: bug | tweak | refine | rework | feature | iterate
+- Class: bug | tweak | adopt | refine | rework | feature | iterate
 - Confidence: high | medium
 - Why: <one line>
 
@@ -97,23 +131,34 @@ feature-heavy or full multiagent review without a matching override row.
   - implement.mode: single | multiagent
   - implement.verify: tests | non-regression | comparative
   - implement.iteration: one-shot | until-bar
+  - test.mode: skip | dedicated
+  - harden.mode: skip | dedicated
   - review.mode: single | multiagent
   - review.depth: focused | full
+  - review.lasers: bundled | sequential
   - side_paths: none | research | model | research+model
-- Chain: implement → review-fix → ship
-- Rationale: <one line efficiency + risk>
+  - sandbox: none | inject
+- Chain: architect → implement → test → restructure → review → ship   # adopt: characterize → architect → implement → test → restructure → review → ship per area
+- Rationale: <one line efficiency + risk; test/harden are the floor>
 ```
 
-Adjust **Chain** when `side_paths` ≠ none (e.g. `research → implement → …`).
+Adjust **Chain** when `side_paths` ≠ none (e.g. `research → architect → implement → …`) or
+`sandbox=inject` (e.g. `architect → sandbox → implement → test → restructure → review → ship`).
+Class **adopt** is an orchestrator: inventory, then `characterize → architect → implement → test → restructure → review → ship` per area until the route is Done.
+Adopt does **not** drop characterize or `test` (proof is required). Drop `test` on other classes only when `test.mode=skip` (docs-only or explicit user ask). Drop
+`harden` / restructure only when the user explicitly asked to skip it. Prefix order:
+side_paths, then architect, then sandbox, then implement (or adopt's unit chain).
 
 ## Legacy fallback
 
 When the Task has no `## Workflow` section:
 
-| Artifact | Treat as class | verify | review.depth |
-|----------|----------------|--------|--------------|
-| `BUG.md` / `ITERATE.md` | bug / iterate | tests | focused |
-| `TWEAK.md` | tweak | tests | focused |
-| `REFINE.md` | refine | non-regression | focused |
-| `REWORK.md` | rework | comparative | focused |
-| `PLAN.md` without Classification | feature | tests | per [../review/depth.md](../review/depth.md) |
+| Artifact | Treat as class | verify | test.mode | harden.mode | review.depth | review.lasers |
+|----------|----------------|--------|-----------|-------------|--------------|---------------|
+| `BUG.md` / `ITERATE.md` | bug / iterate | tests | dedicated | dedicated | focused | sequential |
+| `TWEAK.md` | tweak | tests | dedicated | dedicated | focused | sequential |
+| `ADOPT.md` | adopt | non-regression | dedicated | dedicated | focused | sequential |
+| `REFINE.md` | refine | non-regression | dedicated | dedicated | focused | sequential |
+| `REWORK.md` | rework | comparative | dedicated | dedicated | focused | sequential |
+| `SANDBOX.md` without PLAN | feature / post-merge sandbox | measure kind → comparative; else tests | dedicated | dedicated | focused | sequential |
+| `PLAN.md` without Classification | feature | tests | dedicated | dedicated | per [../review/depth.md](../review/depth.md) | sequential |

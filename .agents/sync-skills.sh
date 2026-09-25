@@ -133,5 +133,83 @@ if [ -n "${HOME:-}" ]; then
   echo "Mirrored skills to ${HOME}/.cursor/skills and ${HOME}/.agents/skills"
 fi
 
+# Refresh prefer-workflow pointers from the skills checkout. Skill files move
+# on every sync; AGENTS.md and the Cursor rule do not, so model slugs and the
+# language extract go stale unless this step runs.
+upsert_agents_block() {
+  local dest="$1"
+  local block_file="$2"
+  local begin="<!-- marcuskrogh/skills:begin -->"
+  local end="<!-- marcuskrogh/skills:end -->"
+  local tmp before after first
+
+  tmp="$(mktemp)"
+  cat "$block_file" > "$tmp"
+  if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l)" -eq 0 ]; then
+    echo >> "$tmp"
+  fi
+
+  if [ ! -f "$dest" ]; then
+    mv "$tmp" "$dest"
+    return
+  fi
+
+  if grep -qF "$begin" "$dest"; then
+    before="$(mktemp)"
+    after="$(mktemp)"
+    awk -v b="$begin" -v e="$end" '
+      $0 == b { exit }
+      { print }
+    ' "$dest" > "$before"
+    awk -v b="$begin" -v e="$end" '
+      $0 == e { saw_end=1; next }
+      saw_end { print }
+    ' "$dest" > "$after"
+    {
+      cat "$before"
+      cat "$tmp"
+      if [ -s "$after" ]; then
+        first="$(head -n 1 "$after")"
+        if [ -n "$first" ]; then
+          echo ""
+        fi
+        cat "$after"
+      fi
+    } > "$dest"
+    rm -f "$before" "$after" "$tmp"
+  else
+    {
+      cat "$tmp"
+      echo ""
+      cat "$dest"
+    } > "${tmp}.out"
+    mv "${tmp}.out" "$dest"
+    rm -f "$tmp"
+  fi
+}
+
+refresh_pointers() {
+  local tpl="$CACHE_DIR/templates/agent-install"
+  local block_file="$tpl/AGENTS.block.md"
+  local rule_file="$tpl/github-skills.mdc"
+
+  if [ ! -f "$block_file" ] || [ ! -f "$rule_file" ]; then
+    echo "Warning: skills templates missing under $tpl; pointers left unchanged" >&2
+    return
+  fi
+
+  upsert_agents_block "AGENTS.md" "$block_file"
+  if [ -L "CLAUDE.md" ] || [ ! -e "CLAUDE.md" ]; then
+    ln -sfn AGENTS.md CLAUDE.md
+  else
+    upsert_agents_block "CLAUDE.md" "$block_file"
+  fi
+  mkdir -p .cursor/rules
+  cp "$rule_file" .cursor/rules/github-skills.mdc
+  echo "Refreshed pointers: AGENTS.md, CLAUDE.md, .cursor/rules/github-skills.mdc"
+}
+
+refresh_pointers
+
 echo "Synced skills + concepts to $TARGET_DIR"
 echo "Version: $SKILLS_REF @ $SHORT_SHA ($SKILLS_REPO)"
