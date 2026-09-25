@@ -169,7 +169,8 @@ assert(approx(kpi.houseHeatingPowerGaugeMax(null), 10000), 'invalid live power m
   const nmpcState = { [MPC]: ent('0.18', { last_planner_duration_s: 24.7, dt_s: 7200, mpc_mode: 'nmpc' }) };
   assert(approx(kpi.mpcLoadBudgetS(7200), 720), 'budget must be 10% of the sample interval');
   assert(approx(kpi.mpcLoadPercent(nmpcState), (24.7 / 720) * 100), '24.7 s of 720 s budget must be about 3% load');
-  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('0.18', { last_planner_duration_s: 800, dt_s: 7200 }) }), 100), 'load must clamp at 100%');
+  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('0.18', { last_planner_duration_s: 800, dt_s: 7200 }) }), (800 / 720) * 100), 'over-budget load must exceed 100%');
+  assert(approx(kpi.mpcLoadPercent({ [MPC]: ent('0.18', { last_planner_duration_s: 108.8, dt_s: 900 }) }), (108.8 / 90) * 100), '108.8 s of 90 s budget must be about 121%');
   assert(kpi.mpcLoadPercent({}) === null, 'missing planner duration must hide load');
   const linear = { [MPC]: ent('1.8', { mpc_mode: 'linear', dt_s: 900 }) };
   assert(approx(kpi.mpcLoadPercent(linear), (1.8 / 90) * 100), 'Linear load uses control-cycle duration vs 10% of dt');

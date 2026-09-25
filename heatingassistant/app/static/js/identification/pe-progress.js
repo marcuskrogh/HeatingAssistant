@@ -202,7 +202,47 @@ function drawConvPlot(canvas, snap) {
   return drawLogPlot(canvas, hist, pointRelRed, ftol, null);
 }
 
-export function renderPeProgress(overlay, snap) {
+function paintPlots(overlay, snap) {
+  const etaCanvas = overlay.querySelector('[data-pe-plot="eta"]');
+  const convCanvas = overlay.querySelector('[data-pe-plot="ftol"]');
+  const paint = () => {
+    const etaOk = drawEtaPlot(etaCanvas, snap);
+    const convOk = drawConvPlot(convCanvas, snap);
+    if (!etaOk || !convOk) requestAnimationFrame(paint);
+  };
+  paint();
+}
+
+function patchPeProgress(card, view) {
+  const title = card.querySelector('.pe-progress__title');
+  if (title) title.textContent = view.phase;
+  const rmseEl = card.querySelector('.pe-progress__metric-value--lead');
+  if (rmseEl) {
+    rmseEl.className = view.rmseClass;
+    rmseEl.textContent = `${view.rmseText} °C`;
+  }
+  const sub = card.querySelector('.pe-progress__metric-sub');
+  if (sub) sub.textContent = view.subText;
+  const metrics = card.querySelectorAll('.pe-progress__metric-value--lead');
+  const nfevEl = metrics[1];
+  if (nfevEl) nfevEl.textContent = view.nfevText;
+  const remainEl = card.querySelector('.pe-progress__time-remain');
+  if (remainEl) {
+    remainEl.className = view.timeClass;
+    remainEl.textContent = view.remainText;
+  }
+  const meta = card.querySelector('.pe-progress__time-meta');
+  if (meta) meta.textContent = view.metaText;
+  const fill = card.querySelector('.pe-progress__bar-fill');
+  if (fill) {
+    fill.style.width = `${view.usedPct}%`;
+    fill.classList.toggle('pe-progress__bar-fill--done', view.barDone);
+  }
+  const exitEl = card.querySelector('.pe-progress__timeout');
+  if (exitEl) exitEl.textContent = view.exitLine;
+}
+
+function progressView(snap) {
   const clock = liveClock(snap);
   const remain = clock.remaining;
   const cap = clock.cap || 1;
@@ -235,23 +275,55 @@ export function renderPeProgress(overlay, snap) {
   const exitLine = snap.exit_label
     || (!running ? (snap.message || '') : '');
   const remainText = running ? `${fmtClock(remain)} left` : 'Done';
+  return {
+    phase: phaseLabel(snap),
+    rmseClass,
+    rmseText: fmtRmse(rmse),
+    subText: `${fmtEta(etaHero)}× noise${within ? ' · within tolerance' : ' · above tolerance'}`,
+    nfevText: snap.nfev ?? '—',
+    timeClass,
+    remainText,
+    metaText: `${fmtClock(elapsed)} elapsed · ${fmtClock(cap)} maximum`,
+    usedPct,
+    barDone: !running || timedOut,
+    exitLine,
+    running,
+    etaTolText: fmtEta(etaTol),
+    ftolText: fmtTick(ftol),
+  };
+}
 
+export function renderPeProgress(overlay, snap) {
+  const view = progressView(snap);
+  const card = overlay.querySelector('.pe-progress');
+  const stopBtn = overlay.querySelector('[data-pe-stop]');
+  const exitEl = overlay.querySelector('.pe-progress__timeout');
+  const sameSkeleton = card
+    && Boolean(stopBtn) === view.running
+    && Boolean(exitEl) === Boolean(view.exitLine);
+  if (sameSkeleton) {
+    patchPeProgress(card, view);
+    paintPlots(overlay, snap);
+    return;
+  }
+
+  const scrollTop = card ? card.scrollTop : 0;
   overlay.innerHTML = `
     <div class="pe-progress" role="dialog" aria-live="polite" aria-label="Parameter estimation progress">
       <button type="button" class="pe-progress__close" data-pe-close aria-label="Hide progress">×</button>
       <div class="pe-progress__head">
         <div class="pe-progress__kicker">Parameter estimation</div>
-        <p class="pe-progress__title">${phaseLabel(snap)}</p>
+        <p class="pe-progress__title">${view.phase}</p>
       </div>
       <div class="pe-progress__metrics">
         <div>
           <div class="pe-progress__metric-label">RMS error</div>
-          <div class="${rmseClass}">${fmtRmse(rmse)} °C</div>
-          <div class="pe-progress__metric-sub">${fmtEta(etaHero)}× noise${within ? ' · within tolerance' : ' · above tolerance'}</div>
+          <div class="${view.rmseClass}">${view.rmseText} °C</div>
+          <div class="pe-progress__metric-sub">${view.subText}</div>
         </div>
         <div>
           <div class="pe-progress__metric-label">Evaluations</div>
-          <div class="pe-progress__metric-value pe-progress__metric-value--lead">${snap.nfev ?? '—'}</div>
+          <div class="pe-progress__metric-value pe-progress__metric-value--lead">${view.nfevText}</div>
         </div>
       </div>
       <div class="pe-progress__plots">
@@ -263,7 +335,7 @@ export function renderPeProgress(overlay, snap) {
           </div>
           <div class="pe-progress__legend">
             <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>normalised RMS</span>
-            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>reasonable fit (η ≤ ${fmtEta(etaTol)} ≈ 1 °C)</span>
+            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>reasonable fit (η ≤ ${view.etaTolText} ≈ 1 °C)</span>
           </div>
         </div>
         <div class="pe-progress__plot-wrap">
@@ -274,29 +346,24 @@ export function renderPeProgress(overlay, snap) {
           </div>
           <div class="pe-progress__legend">
             <span><i class="pe-progress__swatch pe-progress__swatch--j"></i>relative cost drop</span>
-            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>ftol (${fmtTick(ftol)})</span>
+            <span><i class="pe-progress__swatch pe-progress__swatch--tol"></i>ftol (${view.ftolText})</span>
           </div>
         </div>
       </div>
       <div class="pe-progress__time">
-        <div class="${timeClass}">${remainText}</div>
+        <div class="${view.timeClass}">${view.remainText}</div>
         <div class="pe-progress__time-meta">
-          ${fmtClock(elapsed)} elapsed · ${fmtClock(cap)} maximum
+          ${view.metaText}
         </div>
         <div class="pe-progress__bar" aria-hidden="true">
-          <div class="pe-progress__bar-fill${!running || timedOut ? ' pe-progress__bar-fill--done' : ''}" style="width:${usedPct}%"></div>
+          <div class="pe-progress__bar-fill${view.barDone ? ' pe-progress__bar-fill--done' : ''}" style="width:${view.usedPct}%"></div>
         </div>
       </div>
-      ${exitLine ? `<p class="pe-progress__timeout">${exitLine}</p>` : ''}
-      ${running ? `<div class="pe-progress__actions"><button type="button" class="btn btn--ghost pe-progress__stop" data-pe-stop>Stop estimation</button></div>` : ''}
+      ${view.exitLine ? `<p class="pe-progress__timeout">${view.exitLine}</p>` : ''}
+      ${view.running ? `<div class="pe-progress__actions"><button type="button" class="btn btn--ghost pe-progress__stop" data-pe-stop>Stop estimation</button></div>` : ''}
     </div>
   `;
-  const etaCanvas = overlay.querySelector('[data-pe-plot="eta"]');
-  const convCanvas = overlay.querySelector('[data-pe-plot="ftol"]');
-  const paint = () => {
-    const etaOk = drawEtaPlot(etaCanvas, snap);
-    const convOk = drawConvPlot(convCanvas, snap);
-    if (!etaOk || !convOk) requestAnimationFrame(paint);
-  };
-  paint();
+  const next = overlay.querySelector('.pe-progress');
+  if (next) next.scrollTop = scrollTop;
+  paintPlots(overlay, snap);
 }

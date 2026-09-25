@@ -4,6 +4,17 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.09.36
+
+- Overview MPC Load shows the true percent when the last planner solve
+  overruns its budget, including values above 100%. The bar still fills
+  completely when load is over 100%.
+
+# 2026.09.35
+
+- The parameter estimation progress window stays where you scrolled. It no
+  longer jumps back to the top while the fit is updating.
+
 # 2026.09.34
 
 - A finished parameter estimation is saved under Identification Results even
