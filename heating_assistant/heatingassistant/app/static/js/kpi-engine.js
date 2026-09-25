@@ -361,12 +361,12 @@ function lastPlannerDurationS(state) {
   return null;
 }
 
-/** Last planner duration versus 10% of the sample interval, clamped at 100%. */
+/** Last planner duration versus 10% of the sample interval. Not capped at 100%. */
 export function mpcLoadPercent(state) {
   const duration = lastPlannerDurationS(state);
   const budget = mpcLoadBudgetS(sampleIntervalS(state));
   if (!Number.isFinite(duration) || budget == null || budget <= 0) return null;
-  return Math.min(100, (duration / budget) * 100);
+  return (duration / budget) * 100;
 }
 
 /** @deprecated Use mpcLoadPercent. */
