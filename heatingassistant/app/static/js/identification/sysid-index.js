@@ -1,7 +1,7 @@
 import { setPanelHash } from '../panel-hash.js?v=124';
 import { formatNumber, modelFitLabel } from '../utils.js?v=124';
 import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=125';
-import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=171';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=172';
 
 export function renderIdentificationIndex(container, rooms, state, connection) {
   container.innerHTML = '';

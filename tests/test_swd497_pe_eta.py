@@ -99,7 +99,9 @@ def test_panel_overlay_shows_rms_and_stays_in_view() -> None:
     overlay_css = css.split(".pe-progress-overlay {", 1)[1].split("}", 1)[0]
     dialog_css = css.split(".pe-progress {", 1)[1].split("}", 1)[0]
     assert "position: fixed" in overlay_css
-    assert "overflow: auto" in overlay_css
+    assert "overflow: hidden" in overlay_css
     assert "overflow-y: auto" in dialog_css
-    assert "max-height:" in dialog_css
+    assert "max-height: 100%" in dialog_css
+    assert "min-height: 0" in dialog_css
+    assert "touch-action: pan-y" in dialog_css
     assert "Time remaining" not in progress

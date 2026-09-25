@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -247,6 +248,41 @@ def compute_model_fit_metrics(
         residual_std=residual_std,
         residual_autocorr_lag1=autocorr_lag1,
     )
+
+
+def r_squared_from_rmse(measurements: Sequence[float], rmse: float) -> float:
+    """R² from identification-window air temperatures and PE RMS (°C).
+
+    Same coefficient as ``compute_model_fit_metrics``:
+    ``1 - SS_res / SS_tot`` with ``SS_res = n * RMSE^2``.
+    """
+
+    meas = [float(value) for value in measurements]
+    n = len(meas)
+    if n == 0:
+        raise ValueError("Cannot compute metrics on empty arrays")
+    mean = sum(meas) / float(n)
+    ss_tot = sum((value - mean) ** 2 for value in meas)
+    ss_res = float(n) * float(rmse) ** 2
+    return 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+
+def air_temperatures_from_history(history: Sequence[Mapping[str, Any]] | None) -> List[float]:
+    """Collect room air measurements from a PE history window."""
+
+    temps: List[float] = []
+    for record in list(history or []):
+        if not isinstance(record, Mapping):
+            continue
+        samples = record.get("y")
+        if not isinstance(samples, Sequence) or isinstance(samples, (str, bytes)):
+            continue
+        for value in samples:
+            try:
+                temps.append(float(value))
+            except (TypeError, ValueError):
+                continue
+    return temps
 
 
 def analyze_residuals(
@@ -551,8 +587,10 @@ __all__ = [
     "R_EXTERNAL_MIN",
     "R_EXTERNAL_MAX",
     "build_identification_warnings",
+    "air_temperatures_from_history",
     "compute_model_fit_metrics",
     "compute_open_loop_predictions",
+    "r_squared_from_rmse",
     "is_default_thermal_configuration",
     "validate_parameters",
 ]

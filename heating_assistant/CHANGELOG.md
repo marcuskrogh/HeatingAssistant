@@ -4,11 +4,40 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
-# 2026.09.31
+# 2026.09.36
 
 - Overview MPC Load shows the true percent when the last planner solve
   overruns its budget, including values above 100%. The bar still fills
   completely when load is over 100%.
+
+# 2026.09.35
+
+- The parameter estimation progress window stays where you scrolled. It no
+  longer jumps back to the top while the fit is updating.
+
+# 2026.09.34
+
+- A finished parameter estimation is saved under Identification Results even
+  when the optimiser stops with a message other than the usual convergence
+  reasons. Cancelled runs are still not saved.
+
+# 2026.09.33
+
+- On a phone, the Estimating pill, health pill, and start/stop button stay
+  inside the navigation bar. The title shortens instead of pushing the bar
+  wider than the screen.
+
+# 2026.09.32
+
+- The parameter estimation progress window scrolls on a phone when the fit
+  charts are taller than the screen.
+
+# 2026.09.31
+
+- Finished parameter estimation is stored under Identification Results on the
+  Identification page, even if you are not watching the overlay. Each result
+  shows why it stopped, RMSE, and R². Load it into the form when you want to
+  review, then Apply Parameters to write it to the live model.
 
 # 2026.09.30
 

@@ -5,6 +5,15 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | In Review | — | docs/agents/PLAN-mpc-load-uncap.md | `/ship SWD-571` closeout |
+| SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |
+| SWD-583 | Bug | [Bug] Finished parameter estimation is missing from Identification Results | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/699 (`03ddda49`) |
+| SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/698 (`741246f0`) |
+| SWD-581 | Bug | [Bug] Parameter estimation progress window does not scroll | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/697 (`711ae313`) |
+| SWD-580 | Task | [Iterate] Keep App calendar version in September | Done | Relates SWD-576 | docs/agents/ITERATE-calver-september.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/696 |
+| SWD-576 | Task | [Feature] Archive finished PE results below stored datasets | Done | Relates SWD-573 | docs/agents/PLAN-pe-fit-results.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/695 |
+| SWD-577 | Sub-task | Persist finished PE results with exit, RMSE, and R² | Done | SWD-576 | docs/agents/PLAN-pe-fit-results.md | — |
+| SWD-578 | Sub-task | UI: identification results list, load, and delete | Done | SWD-576 | docs/agents/PLAN-pe-fit-results.md | — |
+| SWD-579 | Sub-task | Tests, CalVer, changelog, App sync for PE result archive | Done | SWD-576 | docs/agents/PLAN-pe-fit-results.md | — |
 | SWD-573 | Task | [Feature] Background PE progress: dismiss overlay, reopen from Overview/Tuning/nav | Done | Relates SWD-504 | docs/agents/PLAN-pe-background-progress.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/694 (`843739e4`) |
 | SWD-574 | Sub-task | Panel PE session, dismiss overlay, banners, nav, start-guard | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |
 | SWD-575 | Sub-task | Tests, CalVer, changelog, App sync for background PE UI | Done | SWD-573 | docs/agents/PLAN-pe-background-progress.md | — |

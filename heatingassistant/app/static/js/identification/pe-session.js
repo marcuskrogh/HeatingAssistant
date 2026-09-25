@@ -1,5 +1,5 @@
-import { renderPeProgress } from './pe-progress.js?v=171';
-import { cancelParameterEstimation } from '../ha-services.js?v=171';
+import { renderPeProgress } from './pe-progress.js?v=172';
+import { cancelParameterEstimation } from '../ha-services.js?v=172';
 
 const POLL_MS = 1000;
 const CLOCK_MS = 250;

@@ -8,12 +8,13 @@ import {
   createDataset,
   deleteDataset,
   deleteParameterHistory,
+  deletePeFitResult,
   estimateParametersMl,
   runOpenLoopSimulation,
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=124';
+} from '../ha-services.js?v=172';
 import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=125';
 import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=146';
 import {
@@ -23,7 +24,7 @@ import {
   historyBodyHtml,
   buildValidationSection,
 } from './sysid-detail-markup.js?v=151';
-import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=171';
+import { peSessionOf, mountPeRunningBanner } from './pe-session.js?v=172';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -150,10 +151,23 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const historyCollapsible = createCollapsible({ title: 'Applied Model History', open: false });
   historyCollapsible.body.innerHTML = historyBodyHtml();
   historySection.appendChild(historyCollapsible.element);
-  // historySection is appended after setupDatasetsAndExperiments() so that
-  // Stored Datasets appears above Applied Model History in the page.
+  // historySection is appended after Identification Results so Stored Datasets
+  // sits above Identification Results, then Applied Model History.
 
   const historyListEl = historyCollapsible.element.querySelector('#param-history-list');
+
+  const resultsSection = document.createElement('div');
+  resultsSection.className = 'card tuning-section';
+  const resultsCollapsible = createCollapsible({ title: 'Identification Results', open: true });
+  resultsCollapsible.body.innerHTML = `
+    <p class="tuning-section__desc" style="margin:0 0 12px">
+      Finished parameter estimation runs. Load a result to review the fields,
+      then click Apply Parameters to write it to the live model.
+    </p>
+    <div id="pe-fit-results-list" class="store-list"></div>
+  `;
+  resultsSection.appendChild(resultsCollapsible.element);
+  const resultsListEl = resultsCollapsible.element.querySelector('#pe-fit-results-list');
 
   // -----------------------------------------------------------------------
   // Input references
@@ -731,29 +745,6 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     }
   }
 
-  function populateModelFromSysid(slug, st) {
-    const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
-    if (!sysidAttrs) return;
-    if (sysidAttrs.thermal_mass != null && !lockedParams.has('thermal_mass'))
-      thermalMassInput.value = sysidAttrs.thermal_mass;
-    if (sysidAttrs.r_external != null && !lockedParams.has('r_external'))
-      rExternalInput.value = sysidAttrs.r_external;
-    if (sysidAttrs.internal_gain != null && !lockedParams.has('internal_gain'))
-      internalGainInput.value = sysidAttrs.internal_gain;
-    if (sysidAttrs.solar_scale != null && !lockedParams.has('solar_scale'))
-      solarScaleInput.value = sysidAttrs.solar_scale;
-
-    ensureHeaterScaleInputs(st);
-    const identifiedScales = sysidAttrs.heater_scales || {};
-    for (const [srcName, scale] of Object.entries(identifiedScales)) {
-      if (heaterScaleInputs[srcName] != null && scale != null
-          && !lockedParams.has(`heater_scale:${srcName}`)) {
-        heaterScaleInputs[srcName].value = scale;
-      }
-    }
-    renderIdentifiedExtras(slug, st);
-  }
-
   function renderEkfResults(slug, st) {
     const attrs = st[sysidEntityId(slug)]?.attributes || {};
     const rmseStr = formatRmseKpi(attrs.rmse);
@@ -962,15 +953,25 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // Populate the editable parameter fields from a stored history entry's room
   // data, for review before Apply. Mirrors the dataset "Load" affordance but for
   // parameter snapshots — it never applies anything to the live model.
-  function loadParamsFromHistory(roomData) {
+  function loadParamsFromHistory(roomData, sources) {
     if (roomData.thermal_mass != null) thermalMassInput.value = roomData.thermal_mass;
     if (roomData.r_external != null) rExternalInput.value = roomData.r_external;
     if (roomData.internal_gain != null) internalGainInput.value = roomData.internal_gain;
     if (roomData.solar_scale != null) solarScaleInput.value = roomData.solar_scale;
+    if (roomData.ua_open != null && uaOpenInput) uaOpenInput.value = roomData.ua_open;
+    ensureHeaterScaleInputs(latestState);
+    if (sources && typeof sources === 'object') {
+      for (const [srcName, info] of Object.entries(sources)) {
+        const scale = info && typeof info === 'object' ? info.power_scale : info;
+        if (heaterScaleInputs[srcName] != null && scale != null) {
+          heaterScaleInputs[srcName].value = scale;
+        }
+      }
+    }
     // Loaded values are pending review; protect them from state-sync resets.
     userEditing = true;
     updatePendingIndicators();
-    setStatus(actionStatusEl, 'Loaded from history — review the fields above, then click Apply Parameters.', '');
+    setStatus(actionStatusEl, 'Loaded — review the fields above, then click Apply Parameters.', '');
   }
 
   function renderParamHistory(st) {
@@ -1040,14 +1041,67 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     });
   }
 
+  function renderPeFitResults(st) {
+    const config = st[CONFIG_ENTITY]?.attributes || {};
+    const rows = Array.isArray(config.pe_fit_results) ? config.pe_fit_results : [];
+    resultsCollapsible.setBadge(rows.length ? `${rows.length}` : '');
+    if (rows.length === 0) {
+      resultsListEl.innerHTML = '<span class="tuning-section__desc">No finished identification results yet.</span>';
+      return;
+    }
+    const stat = (label, value) => `<span class="store-stat"><span class="store-stat__k">${label}</span><span class="store-stat__v">${value}</span></span>`;
+    resultsListEl.innerHTML = rows.map((entry) => {
+      const date = entry.finished_at
+        ? new Date(entry.finished_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '—';
+      const exitLabel = entry.exit_label || 'Finished';
+      const rmse = entry.rmse != null ? `${formatNumber(entry.rmse, 3)} °C` : '—';
+      const r2 = entry.r_squared != null ? formatNumber(entry.r_squared, 3) : '—';
+      const roomData = entry.rooms?.[roomSlug] || {};
+      const hasRoom = roomData.thermal_mass != null;
+      return `
+        <div class="store-row store-row--dataset" data-id="${entry.id}">
+          <div class="store-row__main">
+            <div class="store-row__name">
+              <span class="store-row__title">${date}</span>
+              <span class="store-row__tag store-row__tag--accent">${exitLabel}</span>
+            </div>
+            <div class="store-row__meta">
+              ${stat('RMSE', rmse)}${stat('R²', r2)}
+            </div>
+          </div>
+          <div class="store-row__actions">
+            <button class="btn btn--sm btn--ghost" data-load="${entry.id}" ${hasRoom ? '' : 'disabled'}>Load</button>
+            <button class="btn btn--ghost btn--sm store-row__del" data-del="${entry.id}">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+    resultsListEl.querySelectorAll('[data-load]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const entry = rows.find((row) => String(row.id) === String(btn.dataset.load));
+        if (entry) loadParamsFromHistory(entry.rooms?.[roomSlug] || {}, entry.sources);
+      });
+    });
+    resultsListEl.querySelectorAll('[data-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!window.confirm('Delete this identification result? This cannot be undone.')) return;
+        btn.disabled = true;
+        try {
+          await deletePeFitResult(hass, btn.dataset.del);
+        } catch (err) {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Button interactions
   // -----------------------------------------------------------------------
 
   // Shared parameter estimation routine: starts a background ML fit over the
-  // data described by ``idData`` (a window, horizon, single dataset_id or a
-  // list of dataset_ids), waits for the job, then populates the parameter
-  // fields from the result for review. Used by Stored Datasets "Run
+  // data described by ``idData``. On finish the result is stored under
+  // Identification Results; the form is not filled automatically.
   // recommended estimation". Returns true on success.
   async function waitForPeJob() {
     if (peSession && typeof peSession.waitUntilSettled === 'function') {
@@ -1081,11 +1135,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         await hass.refresh();
       }
       await new Promise((res) => setTimeout(res, 200));
-      populateModelFromSysid(roomSlug, latestState);
-      // Loaded values are pending review; protect them from state-sync resets.
-      userEditing = true;
-      updatePendingIndicators();
-      setStatus(statusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
+      setStatus(statusEl, 'Finished — load a result below when you want to apply it.', '');
       return true;
     } catch (err) {
       if (err && err.peCancelled) {
@@ -1224,7 +1274,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   windowModeCustomBtn.addEventListener('click', refreshAuxFromWindow);
 
   // Stored Datasets section is already appended inside setupDatasetsAndExperiments();
-  // append Applied Model History here so it appears below Stored Datasets.
+  // Identification Results sit immediately below it; Applied Model History last.
+  container.appendChild(resultsSection);
   container.appendChild(historySection);
 
   // -----------------------------------------------------------------------
@@ -1235,6 +1286,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   renderEkfResults(roomSlug, state);
   renderOlResults(roomSlug, state);
   renderParamHistory(state);
+  renderPeFitResults(state);
   // Plot heater/disturbances from the current window or dataset, not leftover
   // simulate attrs from a previous run.
   refreshAuxFromWindow();
@@ -1262,6 +1314,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       renderOlResults(roomSlug, newState);
       renderIdentifiedExtras(roomSlug, newState);
       renderParamHistory(newState);
+      renderPeFitResults(newState);
     },
     destroy() {
       ekfChart.destroy();

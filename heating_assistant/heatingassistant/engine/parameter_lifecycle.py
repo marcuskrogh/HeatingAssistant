@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Mapping, MutableMapping, Sequence
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -21,12 +22,25 @@ from .const import (
     ESTIMATION_HISTORY_SIZE,
 )
 from .history.window import select_recent_window
+from .model_diagnostics import air_temperatures_from_history, r_squared_from_rmse
 from .nmpc_timing import timing_from_options
 
 _LOGGER = logging.getLogger(__name__)
 PARAMETER_HISTORY_KEY = "parameter_history"
 ESTIMATION_HISTORY_KEY = "estimation_history"
+PE_FIT_RESULTS_KEY = "pe_fit_results"
 _MAX_PARAMETER_HISTORY = 10
+_MAX_PE_FIT_RESULTS = 25
+_STOREABLE_PE_EXITS = frozenset(
+    {
+        "Converged (cost reduction)",
+        "Converged (gradient small enough)",
+        "Maximum iterations reached",
+        "Maximum evaluations reached",
+        "Time limit reached",
+        "Fit stopped improving",
+    }
+)
 
 
 def _now_iso() -> str:
@@ -843,6 +857,140 @@ async def async_estimate_parameters_ml(
     return result
 
 
+def pe_fit_should_archive(result: Mapping[str, Any] | None) -> bool:
+    """True when a finished PE job should be stored in the identification catalog.
+
+    A background fit often ends with a SciPy message that is not one of the
+    named stop reasons. Those runs still have parameters and must appear under
+    Identification Results. Cancelled runs and crashes with no parameter set
+    stay out of the catalog.
+    """
+
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("cancelled"):
+        return False
+    params = result.get("estimated_params")
+    if not isinstance(params, Mapping) or not params:
+        return False
+    if result.get("success") is False and not result.get("timed_out"):
+        if str(result.get("exit_label") or "") not in _STOREABLE_PE_EXITS:
+            return False
+    return True
+
+
+def _catalog_rooms_from_result(result: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    gains = result.get("estimated_internal_gains") or {}
+    solar = result.get("estimated_solar_scales") or {}
+    ua_open = result.get("estimated_ua_open") or {}
+    splits = result.get("estimated_envelope_splits") or {}
+    rooms: Dict[str, Dict[str, Any]] = {}
+    for name, params in dict(result.get("estimated_params") or {}).items():
+        if not isinstance(params, Mapping):
+            continue
+        entry: Dict[str, Any] = {
+            "thermal_mass": params.get("thermal_mass"),
+            "r_external": params.get("r_external"),
+        }
+        if name in gains:
+            entry["internal_gain"] = gains[name]
+        if name in solar:
+            entry["solar_scale"] = solar[name]
+        if name in ua_open:
+            entry["ua_open"] = ua_open[name]
+        split = splits.get(name) if isinstance(splits, Mapping) else None
+        if isinstance(split, Mapping):
+            if "c_air_fraction" in split:
+                entry["c_air_fraction"] = split["c_air_fraction"]
+            if "r_aw_fraction" in split:
+                entry["r_aw_fraction"] = split["r_aw_fraction"]
+        rooms[str(name)] = entry
+    return rooms
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if number == number else None  # NaN check
+
+
+def archive_pe_fit_result(
+    options: MutableMapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    history: Sequence[Mapping[str, Any]] | None = None,
+    now_iso: str | None = None,
+    result_id: str | None = None,
+) -> Dict[str, Any]:
+    """Append a finished PE snapshot to the house-level catalog. Does not apply."""
+
+    if not pe_fit_should_archive(result):
+        return {}
+    rmse = _optional_float(result.get("rmse_c_best"))
+    r_squared = _optional_float(result.get("r_squared"))
+    if r_squared is None and rmse is not None:
+        temps = air_temperatures_from_history(history)
+        if temps:
+            try:
+                r_squared = float(r_squared_from_rmse(temps, rmse))
+            except ValueError:
+                r_squared = None
+    sources = {
+        str(name): {"power_scale": float(scale)}
+        for name, scale in dict(result.get("estimated_heater_scales") or {}).items()
+        if scale is not None
+    }
+    connections = {
+        str(key): float(value)
+        for key, value in dict(result.get("estimated_inter_room_r") or {}).items()
+    }
+    entry: Dict[str, Any] = {
+        "id": result_id or uuid.uuid4().hex,
+        "finished_at": now_iso or _now_iso(),
+        "exit_label": str(result.get("exit_label") or ""),
+        "rmse": rmse,
+        "r_squared": r_squared,
+        "rooms": _catalog_rooms_from_result(result),
+        "sources": sources,
+        "connections": connections,
+        **pe_fit_record(
+            result.get("estimated_params"),
+            estimated_internal_gains=result.get("estimated_internal_gains"),
+            estimated_solar_scales=result.get("estimated_solar_scales"),
+            estimated_envelope_splits=result.get("estimated_envelope_splits"),
+            dataset_ids=result.get("dataset_ids"),
+            estimated_t_wall_initial=result.get("estimated_t_wall_initial"),
+            estimated_t_wall_per_dataset=result.get("estimated_t_wall_per_dataset"),
+            window_start=result.get("window_start"),
+            window_end=result.get("window_end"),
+        ),
+    }
+    catalog = [
+        dict(item)
+        for item in list(options.get(PE_FIT_RESULTS_KEY) or [])
+        if isinstance(item, Mapping)
+    ]
+    catalog.insert(0, entry)
+    options[PE_FIT_RESULTS_KEY] = catalog[:_MAX_PE_FIT_RESULTS]
+    return entry
+
+
+def delete_pe_fit_result(options: MutableMapping[str, Any], result_id: str) -> bool:
+    """Remove one catalog entry. Does not change the live model."""
+
+    catalog = [
+        dict(item)
+        for item in list(options.get(PE_FIT_RESULTS_KEY) or [])
+        if isinstance(item, Mapping)
+    ]
+    remaining = [item for item in catalog if str(item.get("id")) != str(result_id)]
+    if len(remaining) == len(catalog):
+        return False
+    options[PE_FIT_RESULTS_KEY] = remaining
+    return True
+
+
 __all__ = [
     "ESTIMATION_HISTORY_KEY",
     "PARAMETER_HISTORY_KEY",
@@ -851,11 +999,15 @@ __all__ = [
     "apply_inter_room_resistances",
     "apply_manual_parameters",
     "async_estimate_parameters_ml",
+    "PE_FIT_RESULTS_KEY",
+    "archive_pe_fit_result",
+    "delete_pe_fit_result",
     "delete_parameter_history",
     "estimated_params_snapshot",
     "fingerprints_match",
     "lookup_fitted_t_wall_initial",
     "pe_fit_record",
+    "pe_fit_should_archive",
     "restore_estimated_parameters",
     "structural_param_fingerprint",
     "t_wall_initial_by_dataset",

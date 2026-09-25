@@ -35,9 +35,10 @@ from heatingassistant.engine.history.window import (
 )
 from heatingassistant.engine.model_diagnostics import compute_open_loop_predictions
 from heatingassistant.engine.parameter_lifecycle import (
-    PARAMETER_HISTORY_KEY,
+    archive_pe_fit_result,
     async_estimate_parameters_ml,
     delete_parameter_history,
+    delete_pe_fit_result,
     estimated_params_snapshot,
     lookup_fitted_t_wall_initial,
     pe_fit_record,
@@ -337,6 +338,26 @@ def _attach_aux_and_tw0(
         if room_name in t_wall:
             room_data["t_wall_initial"] = float(t_wall[room_name])
             room_data["t_wall_initial_source"] = source
+
+
+def _pe_archive_payload(
+    runtime: Any,
+    result: Mapping[str, Any],
+    values: Mapping[str, Any],
+    dataset_ids: list[str] | None,
+) -> dict[str, Any]:
+    payload = dict(result)
+    if payload.get("rmse_c_best") is None:
+        lock = getattr(runtime, "_pe_lock", None)
+        if lock is not None:
+            with lock:
+                snap = dict(getattr(runtime, "_pe_job", None) or {})
+            if snap.get("rmse_c_best") is not None:
+                payload["rmse_c_best"] = snap["rmse_c_best"]
+    payload["dataset_ids"] = dataset_ids
+    payload["window_start"] = values.get("window_start")
+    payload["window_end"] = values.get("window_end")
+    return payload
 
 
 def _persist_runtime_config(runtime: Any) -> None:
@@ -646,11 +667,13 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
             window_start=values.get("window_start"),
             window_end=values.get("window_end"),
         )
-        if apply_params:
-            _persist_runtime_config(runtime)
+    payload = _pe_archive_payload(runtime, result, values, dataset_ids)
+    archive_pe_fit_result(runtime.options, payload, history=history)
+    if apply_params and payload.get("success"):
+        _persist_runtime_config(runtime)
     else:
         save_config(runtime.data_dir, runtime.options)
-    return dict(result)
+    return payload
 
 
 async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
@@ -981,6 +1004,13 @@ async def handle_delete_parameter_history(runtime: Any, data: Mapping[str, Any])
     return {"deleted": True, "estimated_params": snapshot}
 
 
+async def handle_delete_pe_fit_result(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
+    values = _payload(data)
+    deleted = delete_pe_fit_result(runtime.options, str(values["result_id"]))
+    save_config(runtime.data_dir, runtime.options)
+    return {"deleted": bool(deleted)}
+
+
 async def handle_create_dataset(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
     values = _payload(data)
     name = str(values.get("name") or "").strip()
@@ -1023,6 +1053,7 @@ __all__ = [
     "handle_create_dataset",
     "handle_delete_dataset",
     "handle_delete_parameter_history",
+    "handle_delete_pe_fit_result",
     "handle_estimate_parameters_ml",
     "pe_job_snapshot",
     "start_estimate_parameters_ml",
