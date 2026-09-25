@@ -76,6 +76,18 @@ copy_tree() {
   fi
 }
 
+STAMP_FILE="$TARGET_DIR/.skills-version"
+PREV_REPO=""
+PREV_REF=""
+PREV_SHA=""
+PREV_SYNCED=""
+if [ -f "$STAMP_FILE" ]; then
+  PREV_REPO="$(grep '^repo=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_REF="$(grep '^ref=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_SHA="$(grep '^sha=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_SYNCED="$(grep '^synced_at=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+fi
+
 find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
 for skill_path in "$SOURCE_DIR"/*; do
@@ -95,12 +107,18 @@ fi
 
 SHA="$(git -C "$CACHE_DIR" rev-parse HEAD)"
 SHORT_SHA="$(git -C "$CACHE_DIR" rev-parse --short HEAD)"
-STAMP_FILE="$TARGET_DIR/.skills-version"
+# Keep the previous timestamp when the installed commit is unchanged so a
+# Cloud boot does not dirty a committed install.
+SYNCED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "$PREV_REPO" = "$SKILLS_REPO" ] && [ "$PREV_REF" = "$SKILLS_REF" ] \
+  && [ "$PREV_SHA" = "$SHA" ] && [ -n "$PREV_SYNCED" ]; then
+  SYNCED_AT="$PREV_SYNCED"
+fi
 cat > "$STAMP_FILE" <<EOF
 repo=$SKILLS_REPO
 ref=$SKILLS_REF
 sha=$SHA
-synced_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+synced_at=$SYNCED_AT
 EOF
 
 # Keep a project .cursor/skills pointer for Cursor discovery (same tree).
