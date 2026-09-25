@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | In Review | — | docs/agents/PLAN-mpc-load-uncap.md | `/ship SWD-571` closeout |
+| SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | Done | — | docs/agents/PLAN-mpc-load-uncap.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/692 (`39708164`) |
 | SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |
 | SWD-583 | Bug | [Bug] Finished parameter estimation is missing from Identification Results | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/699 (`03ddda49`) |
 | SWD-582 | Bug | [Bug] Mobile nav pills overflow the bar | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/698 (`741246f0`) |
@@ -294,6 +294,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-09-25 — `/ship` SWD-571 via PR #692 (`39708164`): Overview MPC Load can show above 100% when the planner overruns; review CLEAN (focused); changelog `# 2026.09.36`. Next: Done.
 - 2026-09-21 — `/review-fix` SWD-571 CLEAN (focused): 0 blockers / 0 should-fix. COMMENT review (cannot APPROVE own PR). Next `/ship SWD-571`.
 - 2026-09-21 — `/implement` SWD-571: uncap `mpcLoadPercent`; 108.8 s / 90 s → 121%. Gauge bar still saturates at 100% width. Dual tree synced. Next `/review-fix SWD-571`.
 - 2026-09-21 — `/define` SWD-571: uncap Overview MPC Load percent when the planner overruns 10% of the sample interval. Gauge bar may stay full. PLAN `docs/agents/PLAN-mpc-load-uncap.md`. Class tweak / delta-fast. Next `/implement SWD-571`.
