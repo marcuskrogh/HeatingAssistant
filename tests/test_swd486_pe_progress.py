@@ -121,3 +121,5 @@ def test_panel_js_renders_pe_progress_overlay() -> None:
     assert "overflow-y: auto" in css
     assert "overlayHost.appendChild" in session
     assert 'data-pe-plot="ftol"' in progress
+    assert "sameSkeleton" in progress
+    assert "next.scrollTop = scrollTop" in progress
