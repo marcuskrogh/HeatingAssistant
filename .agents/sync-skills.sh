@@ -76,6 +76,18 @@ copy_tree() {
   fi
 }
 
+STAMP_FILE="$TARGET_DIR/.skills-version"
+PREV_REPO=""
+PREV_REF=""
+PREV_SHA=""
+PREV_SYNCED=""
+if [ -f "$STAMP_FILE" ]; then
+  PREV_REPO="$(grep '^repo=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_REF="$(grep '^ref=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_SHA="$(grep '^sha=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+  PREV_SYNCED="$(grep '^synced_at=' "$STAMP_FILE" | head -n 1 | cut -d= -f2-)"
+fi
+
 find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
 for skill_path in "$SOURCE_DIR"/*; do
@@ -95,12 +107,18 @@ fi
 
 SHA="$(git -C "$CACHE_DIR" rev-parse HEAD)"
 SHORT_SHA="$(git -C "$CACHE_DIR" rev-parse --short HEAD)"
-STAMP_FILE="$TARGET_DIR/.skills-version"
+# Keep the previous timestamp when the installed commit is unchanged so a
+# Cloud boot does not dirty a committed install.
+SYNCED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "$PREV_REPO" = "$SKILLS_REPO" ] && [ "$PREV_REF" = "$SKILLS_REF" ] \
+  && [ "$PREV_SHA" = "$SHA" ] && [ -n "$PREV_SYNCED" ]; then
+  SYNCED_AT="$PREV_SYNCED"
+fi
 cat > "$STAMP_FILE" <<EOF
 repo=$SKILLS_REPO
 ref=$SKILLS_REF
 sha=$SHA
-synced_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+synced_at=$SYNCED_AT
 EOF
 
 # Keep a project .cursor/skills pointer for Cursor discovery (same tree).
@@ -132,6 +150,84 @@ if [ -n "${HOME:-}" ]; then
   mirror_home "${HOME}/.agents/skills"
   echo "Mirrored skills to ${HOME}/.cursor/skills and ${HOME}/.agents/skills"
 fi
+
+# Refresh prefer-workflow pointers from the skills checkout. Skill files move
+# on every sync; AGENTS.md and the Cursor rule do not, so model slugs and the
+# language extract go stale unless this step runs.
+upsert_agents_block() {
+  local dest="$1"
+  local block_file="$2"
+  local begin="<!-- marcuskrogh/skills:begin -->"
+  local end="<!-- marcuskrogh/skills:end -->"
+  local tmp before after first
+
+  tmp="$(mktemp)"
+  cat "$block_file" > "$tmp"
+  if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l)" -eq 0 ]; then
+    echo >> "$tmp"
+  fi
+
+  if [ ! -f "$dest" ]; then
+    mv "$tmp" "$dest"
+    return
+  fi
+
+  if grep -qF "$begin" "$dest"; then
+    before="$(mktemp)"
+    after="$(mktemp)"
+    awk -v b="$begin" -v e="$end" '
+      $0 == b { exit }
+      { print }
+    ' "$dest" > "$before"
+    awk -v b="$begin" -v e="$end" '
+      $0 == e { saw_end=1; next }
+      saw_end { print }
+    ' "$dest" > "$after"
+    {
+      cat "$before"
+      cat "$tmp"
+      if [ -s "$after" ]; then
+        first="$(head -n 1 "$after")"
+        if [ -n "$first" ]; then
+          echo ""
+        fi
+        cat "$after"
+      fi
+    } > "$dest"
+    rm -f "$before" "$after" "$tmp"
+  else
+    {
+      cat "$tmp"
+      echo ""
+      cat "$dest"
+    } > "${tmp}.out"
+    mv "${tmp}.out" "$dest"
+    rm -f "$tmp"
+  fi
+}
+
+refresh_pointers() {
+  local tpl="$CACHE_DIR/templates/agent-install"
+  local block_file="$tpl/AGENTS.block.md"
+  local rule_file="$tpl/github-skills.mdc"
+
+  if [ ! -f "$block_file" ] || [ ! -f "$rule_file" ]; then
+    echo "Warning: skills templates missing under $tpl; pointers left unchanged" >&2
+    return
+  fi
+
+  upsert_agents_block "AGENTS.md" "$block_file"
+  if [ -L "CLAUDE.md" ] || [ ! -e "CLAUDE.md" ]; then
+    ln -sfn AGENTS.md CLAUDE.md
+  else
+    upsert_agents_block "CLAUDE.md" "$block_file"
+  fi
+  mkdir -p .cursor/rules
+  cp "$rule_file" .cursor/rules/github-skills.mdc
+  echo "Refreshed pointers: AGENTS.md, CLAUDE.md, .cursor/rules/github-skills.mdc"
+}
+
+refresh_pointers
 
 echo "Synced skills + concepts to $TARGET_DIR"
 echo "Version: $SKILLS_REF @ $SHORT_SHA ($SKILLS_REPO)"

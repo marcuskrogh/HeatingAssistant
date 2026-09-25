@@ -112,17 +112,23 @@ Agreed agent workspace setup.
 | Bug | BUG.md |
 | Tweak | TWEAK.md |
 | Refine | REFINE.md |
+| Adopt | ADOPT.md |
 | Rework | REWORK.md |
 | Iterate | ITERATE.md |
 | Model | MODEL.md |
 | Research | RESEARCH.md |
+| Sandbox | SANDBOX.md |
+| Architecture | ARCHITECTURE.md |
+| Sandbox root | sandbox/ |
 | Changelog | CHANGELOG.md (optional; auto-detect when empty) |
 
 Artifact paths are relative to the repo root when **Location** is `repo`, and to
 the **External artifact root** when it is `external`.
 
 Plans and models may use a subdirectory (e.g. `docs/plans/<slug>.md`) if agreed;
-record the convention here.
+record the convention here. The sandbox isolation tree (default `sandbox/`) is
+source on the delivery branch even when **Location** is `external`; only
+`SANDBOX.md` follows Artifact location.
 
 ### External artifacts
 
@@ -164,6 +170,8 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 - …
 ```
 
+`Agent language` rows in an older WORKSPACE.md are ignored.
+
 ## Defaults (only if user opts out of full setup)
 
 | Field | Default |
@@ -176,7 +184,7 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 | Key prefix | `MD` |
 | Mirror | `true` |
 | Mirror path | `docs/agents/ISSUES.md` |
-| Roadmap / Plan / Bug / Tweak / Refine / Rework / Iterate / Model | repo root `ROADMAP.md`, `PLAN.md`, `BUG.md`, `TWEAK.md`, `REFINE.md`, `REWORK.md`, `ITERATE.md`, `MODEL.md` |
+| Roadmap / Plan / Bug / Tweak / Refine / Rework / Adopt / Iterate / Model / Research / Sandbox | repo root `ROADMAP.md`, `PLAN.md`, `BUG.md`, `TWEAK.md`, `REFINE.md`, `REWORK.md`, `ADOPT.md`, `ITERATE.md`, `MODEL.md`, `RESEARCH.md`, `SANDBOX.md`; sandbox tree under `sandbox/` |
 | Base branch | `main` |
 | Open PR | `true` |
 | One delivery PR per Task | `true` |
@@ -187,7 +195,7 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 Regardless of remote tracker, when **Mirror to markdown** is true (recommended):
 
 1. Create/update rows in the mirror file whenever issues are created, transitioned, or handed off.
-2. Always write keys + **Next** into `ROADMAP.md` / `PLAN.md` / `BUG.md` / `TWEAK.md` / `REFINE.md` / `REWORK.md` / `ITERATE.md` / issue bodies.
+2. Always write keys + **Next** into `ROADMAP.md` / `PLAN.md` / `BUG.md` / `TWEAK.md` / `REFINE.md` / `REWORK.md` / `ADOPT.md` / `ITERATE.md` / `SANDBOX.md` / issue bodies.
 3. Remote tracker remains authoritative for status **except** for `markdown` provider, where issue files are authoritative.
 
 When **Mirror to markdown** is false, the remote tracker is the *only* continuity

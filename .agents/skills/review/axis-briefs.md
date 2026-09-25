@@ -28,8 +28,10 @@ optional polish, out-of-scope follow-ups, or speculative cleanup outside blast r
 
 Include: context pack + Spec checklist from [checklist.md](checklist.md#spec).
 
-Trace **each** acceptance criterion / work package / bug repro expectation /
-tweak desired-change / refine preserve-behaviour / rework parity bar through
+Trace **each** pass-criteria row (legacy Acceptance rows count) / work package /
+bug repro expectation /
+tweak desired-change / refine preserve-behaviour / rework parity bar /
+adopt preserve-behaviour (including working surfaces) through
 the diff and neighbors. Vertical: is this requirement fully implemented inside the
 changed paths? Horizontal: are related UI/API/docs/migrations/flags updated? Flag
 missing, partial, wrong, or scope-creep behaviour. Quote the spec line in `body`.
@@ -45,7 +47,8 @@ Vertical deep-dive — logic bugs, edges, error handling, null/empty, off-by-one
 resource lifecycle, concurrency, idempotency. Horizontal: tests cover new behaviour
 and failure paths; existing tests still match contracts? Prefer `blocker`/`should-fix`
 for real failure modes. Missing/outdated tests for new behaviour → `should-fix`.
-Unexplained tooling failures from the manager run → `blocker`. Micro-optimizations
+The dedicated **testing phase** having run is **not** a reason to skip coverage
+findings. Unexplained tooling failures from the manager run → `blocker`. Micro-optimizations
 with no correctness impact → `note`.
 
 ## Integration
@@ -63,10 +66,11 @@ risk → `note`.
 ## Architecture
 
 Include: context pack + Architecture checklist + architecture pack + neighbor map
-+ package/module tree around changed paths.
++ package/module tree around changed paths + [STRUCTURE-CATALOG.md](../concepts/STRUCTURE-CATALOG.md).
 
 **Vertical:** cohesion, responsibility creep, wrong-layer logic, god types growing,
-abstraction leaks, premature frameworks.
+abstraction leaks, premature frameworks, nested-conditional **CRAP** above the
+target on changed functions.
 
 **Horizontal:** dependency direction/cycles introduced or worsened, shotgun surgery,
 divergent change, eroded boundaries, duplication vs false sharing, consistency with
@@ -84,9 +88,12 @@ structural fix.
 
 ## Standards
 
-Include: standards pack + smell baseline.
+Include: standards pack + [STRUCTURE-CATALOG.md](../concepts/STRUCTURE-CATALOG.md).
 
 Documented standard breaches → `blocker` / `should-fix`. Actionable named smells in
-changed code (clear rename/extract/move) → `should-fix`. Name the smell. Repo
-overrides baseline. Skip tooling-enforced style. Leave structural redesign to
+changed code (clear rename/extract/move) → `should-fix`. Name the smell.
+Nested-conditional **CRAP** above the target → `should-fix`. A flat switch/case
+over a closed set of types may stay; the score alone is not `should-fix`.
+Repo overrides catalog. Skip tooling-enforced style. Leave structural redesign to
 Architecture. Pure taste without named smell or repo-doc backing → `note`.
+Harden having already run is **not** a reason to demote a remaining smell.

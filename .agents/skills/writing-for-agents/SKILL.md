@@ -3,8 +3,8 @@ name: writing-for-agents
 description: >-
   Writing skills and concepts for agents. Use when creating or editing a
   SKILL.md, CONCEPT_*.md, skill reference file, AGENTS.md, or CLAUDE.md in
-  this repo — especially to prune duplication, sharpen terminology, or
-  apply the lean concept/skill shapes.
+  this repo — especially to prune duplication, sharpen terminology, apply the
+  lean concept/skill shapes, or apply the human-cadence overlay.
 ---
 
 Reference for writing any document an agent in this repo consumes — a **skill**,
@@ -33,6 +33,12 @@ purpose specialises.
 fill the extension table; write skill-only steps (artifact shape, tracker,
 handoff). Restating an invariant is **duplication** — it inflates prominence
 and drifts.
+
+**User-facing prose** is not this skill. Messages the operator reads follow
+[CONCEPT_LANGUAGE](../concepts/CONCEPT_LANGUAGE.md) from the always-on extract.
+This skill's leading words and compact tokens are for skill and concept files
+only. Skill prose still uses simple verbs and drops leftover assistant lines;
+the skill **shape** (bold leading words, tables, required headings) stays.
 
 ## Context pointers
 
@@ -98,15 +104,39 @@ Repo tokens (use these; do not paraphrase into soft synonyms):
 | **tweak** | Small intentional change to existing behaviour; lightweight define sibling of bug |
 | **refine** | Bounded structural/descriptive improvement without behaviour change; lightweight define sibling of bug/tweak |
 | **rework** | Intentional implementation change with measured non-degradation (parity bar + comparative eval); lightweight define sibling of refine/tweak |
-| **class** | Closed label for kind of work (bug/tweak/refine/rework/feature/…); from CONCEPT_CLASSIFICATION |
+| **sandbox** | Isolated, representative vehicle for one contained unit, outside production paths; inspect-each-turn then promote via implement; post-merge instead of iterate when each turn needs inspection |
+| **test** | Shipping-phase dedicated testing pass after implement (`test.mode=dedicated`) |
+| **harden** | shipping-phase **refactoring** (`harden.mode=dedicated`); user-facing name **restructure** (`/harden` alias) |
+| **architect** | Always-on shape step after define; `ARCHITECTURE.md` on the delivery branch |
+| **restructure** | Shipping-phase structure pass after test; alias `/harden` |
+| **campground** | Leave each opened unit cleaner; prove before tidy |
+| **refactoring** | Behaviour-preserving structure edit (extract, rename, move, split, invert); campground and restructure apply these; CRAP guides which extract; not a phase or class |
+| **architecture neighbourhood** | Opened module/boundary; refine only when the benefit is major |
+| **adopt** | Apply the structure catalog across an existing codebase that was not built to the bar; characterize current behaviour into tests first (including working surfaces); delegated walk until the route is Done |
+| **characterize** | Map current observable behaviour to tests and prove them green on current code before structure-only edits |
+| **working surface** | Startable backend, startable frontend, or composed client-server path the area already owns |
+| **CRAP** | Change Risk Anti-Patterns score; a guide toward extract vs justified dispatch; target below 8 unless repo docs set another threshold |
+| **pass criteria** | Checkable success rows on the definition artifact, distinct from the specification; each row is one observable a spec lock can fail |
+| **spec lock** | Automated check written from a pass-criteria row; fails if that row is unmet; a test of an invented helper does not count |
+| **prove** | Recorded lock suite plus working-surface commands must still hold before the next structure-only step or area |
+| **laser** | Sequential single-axis (or small-bundle) review pass; under review-fix, fix before the next laser |
+| **code review** | Final published pull-request review after lasers; the closeout gate |
+| **class** | Closed label for kind of work (bug/tweak/adopt/refine/rework/feature/…); from CONCEPT_CLASSIFICATION |
 | **binding** | Selected workflow template + parameters persisted on the definition artifact |
 | **template** | Named delivery bundle (fix-fast, parity-iterative, …) |
 | **front door** | Primary human entry: explore (fog) or define (concrete) |
 | **manager** | Orchestrating agent — stays high-capability; plans, evaluates, tracks |
 | **worker** | Delegated sub-agent — value-routed low/mid/high |
-| **depth** | Proportional intensity preset (review: `full` vs `focused`; define/bug/tweak/refine/rework: Full vs Lightweight) |
+| **depth** | Proportional intensity preset (review: `full` vs `focused`; define/bug/tweak/adopt/refine/rework: Full vs Lightweight) |
 | **dev-surface** | (pl. **dev-surfaces**) Development linking surface where issue keys belong — full list: CONCEPT_IMPLEMENTATION Leading words |
 | **product surface** | (pl. **product surfaces**) End-user facing shipped source and copy — product language exclusively; full list: CONCEPT_IMPLEMENTATION Leading words |
+| **user-facing** | Prose the operator reads — [CONCEPT_LANGUAGE](../concepts/CONCEPT_LANGUAGE.md) |
+| **human cadence** | Overlay in [LANGUAGE-HUMANIZER.md](../concepts/LANGUAGE-HUMANIZER.md) |
+| **pace** | One unit per user turn; wait for **advance** or **block** before the next; each waited message ends on a short continue cue |
+| **advance** | Approving reply that continues a paced sequence (yes, okay, move on, and similar; a successful result counts) |
+| **block** | Reply that the current unit failed, is unclear, or does not fit the environment; reevaluate the remaining sequence |
+| **guidance** | Paced walkthrough of a task the user wants walked — [CONCEPT_GUIDANCE](../concepts/CONCEPT_GUIDANCE.md) |
+| **explanation** | Paced teaching of the current step and its decisions — [CONCEPT_EXPLANATION](../concepts/CONCEPT_EXPLANATION.md) |
 
 Hunt restatements that a leading word retires. Prefer an existing pretrained
 word over a coined one when the prior is strong enough.
@@ -116,6 +146,14 @@ State the **positive** target. A prohibition earns its place only as a hard
 guardrail you cannot phrase positively — and even then pair it with the
 positive. Prefer **invariants** over **anti-pattern** lists; the latter are
 usually invariants written twice in negative form.
+
+## Human cadence in skill files
+
+Apply [LANGUAGE-HUMANIZER.md](../concepts/LANGUAGE-HUMANIZER.md) content
+patterns. Keep the skill **shape**: bold leading words, labeled tables, required
+headings, and em dashes used as skill punctuation. Operator-directed replies are
+not this skill; they follow [CONCEPT_LANGUAGE](../concepts/CONCEPT_LANGUAGE.md)
+from the always-on extract.
 
 ## Steps and completion criteria
 
@@ -138,6 +176,13 @@ across a real context boundary (hand-off / subagent), not an inline call.
   "What this is not" that only negates the purpose). Concepts open on
   **Intent**; the one-line Uninvokable role line in the concept shape is the
   allowed exception (do not expand it into a section).
+- **Always-on language extract** names CONCEPT_LANGUAGE, LANGUAGE-PHRASES, and
+  LANGUAGE-HUMANIZER, plus two caches (`GeneralProcessSimulator`, agent-host
+  **harness**).
+  Do not copy the phrase or cadence tables into AGENTS.md, Cursor rules, or
+  skill On-invoke lines. Pipeline skills load [../workflow/SKILL.md](../workflow/SKILL.md)
+  instead of listing delivery/handoff/tracker-sync files. Manual class skills
+  share [../define/overrides.md](../define/overrides.md).
 
 ## Concept shape
 
@@ -196,7 +241,7 @@ description: >-
 
 Applies [CONCEPT_…](../concepts/…) to <subject>. <One sentence on outcome.>
 
-**On invoke:** read <concept(s)>, <workflow/tracker as needed>, <disclosed refs>.
+**On invoke:** read <concept(s)>, [../workflow/SKILL.md](../workflow/SKILL.md) when pipeline, <disclosed refs>.
 
 ## Extensions
 
@@ -233,10 +278,13 @@ for routers and authoring aids the agent must discover (`workflows`,
 
 When touching a concept or skill:
 
-1. **Whose meaning is this?** Concept, skill, disclosed ref, or environment?
+1. **Whose meaning is this?** Concept, skill, disclosed ref, environment, or
+   **user-facing** prose ([CONCEPT_LANGUAGE](../concepts/CONCEPT_LANGUAGE.md))?
 2. **Already said?** Delete the restatement; link the source.
 3. **Negation → positive?** Convert anti-patterns into invariants or delete.
 4. **Leading word available?** Collapse the triad into the token.
 5. **Ladder correct?** Disclose catalogs and branch-only material.
 6. **Completion criteria sharp?** Especially on alignment stop and verify.
-7. **Validate:** `.\scripts\validate-skills.ps1`
+7. **Human cadence?** Apply LANGUAGE-HUMANIZER. User-facing also follows its
+   marks. Skill files keep their shape.
+8. **Validate:** `.\scripts\validate-skills.ps1`

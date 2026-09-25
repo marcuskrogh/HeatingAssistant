@@ -27,19 +27,15 @@ zero-deviation agent-from-git procedure; keep `npx` as the supported CLI path.
 | `skills/concepts/` | **Uninvokable concepts** (`CONCEPT_*.md`) + disclosed refs (e.g. `PLATFORM-CATALOGS.md`) — synced as sibling `concepts/` |
 | `~/.agents/skills/` | Shared / standard global mirror — sync only |
 | `~/.claude/skills/`, `~/.codex/skills/`, `~/.copilot/skills/`, `~/.cursor/skills/` | Per-harness global mirrors — sync only |
+| `~/.claude/CLAUDE.md`, `~/.cursor/rules/marcuskrogh-skills.mdc` | Global language extract — written by `sync-local` |
 | Project `.agents/skills/` | Per-project install (agent-from-git and skills.sh default) |
 | `.claude-plugin/` | Optional Claude Code marketplace manifests |
 
-## Concepts vs skills
-
-| | Skills | Concepts |
-|-|--------|----------|
-| Path | `skills/<name>/SKILL.md` | `skills/concepts/CONCEPT_<NAME>.md` |
-| In agent skill list | Yes (name + description) | **No** |
-| Invokable | Yes (unless `disable-model-invocation`) | Never |
-| Loaded when | Skill is invoked / composed | An invoked skill instructs the agent to read the concept file |
-
-Shared composed skills (`jira`, `tracker`, `workflow`) must stay **siblings** of the skills that link to them. Concepts must stay at `../concepts/CONCEPT_*.md` relative to each skill so installs that copy `concepts/` alongside skill folders keep links intact.
+Ownership and shapes: [writing-for-agents](../writing-for-agents/SKILL.md).
+Layout rule: shared composed skills (`jira`, `tracker`, `workflow`) stay
+**siblings** of the skills that link to them. Concepts stay at
+`../concepts/CONCEPT_*.md` relative to each skill so installs that copy
+`concepts/` alongside skill folders keep links intact.
 
 Do not nest shared material under a category folder that skills.sh would flatten away on install — except the dedicated `concepts/` bundle, which sync scripts always copy.
 
@@ -55,8 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/marcuskrogh/skills/main/scripts/ins
 ```
 
 Installs `.agents/skills/` (skills + `concepts/`), writes `.skills-version`, and
-wires `AGENTS.md` / `CLAUDE.md` / `.cursor/rules/github-skills.mdc`. Agents must
-not freestyle an alternate copy layout.
+wires `AGENTS.md` / `CLAUDE.md` / `.cursor/rules/github-skills.mdc` (prefer-workflow
+plus the language extract). Agents must not freestyle an alternate copy layout.
 
 **skills.sh / npx (also supported):**
 
@@ -130,9 +126,7 @@ Validates skills, syncs to local agent homes, installs git hooks so `git pull` r
 ## Writing skills and concepts
 
 Before creating or editing skill/concept prose, read
-[writing-for-agents](../writing-for-agents/SKILL.md) — lean shapes, leading words,
-single source of truth (concepts own invariants; skills fill **extensions** only),
-progressive disclosure, and pruning. Skill invocation tradeoffs:
+[writing-for-agents](../writing-for-agents/SKILL.md). Invocation tradeoffs:
 [SKILL-MECHANICS.md](../writing-for-agents/SKILL-MECHANICS.md).
 
 Autonomous discovery of which pipeline to run is the model-invoked

@@ -9,11 +9,24 @@ Continuation cues: bare **next** / **ship** still apply (see
 `.agents/skills/workflow/reference.md`). Explicit `/skill` names win over
 re-routing. Lost on which skill to use → [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md).
 
-**Cursor models (catalog-closed).** On Cursor, every sub-agent / `Task` `model`
-must be `composer-2.5` (Routine / Moderate) or `cursor-grok-4.5-high` (Demanding /
-manager). No `*-fast` variants. Third-party picker models bill the API budget.
-Before spawning workers, load [`.agents/skills/concepts/CONCEPT_DELEGATION.md`](.agents/skills/concepts/CONCEPT_DELEGATION.md)
-and [`.agents/skills/concepts/platforms/cursor.md`](.agents/skills/concepts/platforms/cursor.md).
+**Cursor models (catalog-closed).** On Cursor (Desktop, Cloud, CLI, Mobile), every `Task` spawn of any type —
+including `computerUse` and `videoReview` — passes `model` `composer-2.5`
+(Routine / Moderate) or `grok-4.7-high` (Demanding / manager). If that
+slug is absent from the Task enum, pass `cursor-grok-4.6-high` when present,
+else `composer-2.5`. Never `inherit`, omit
+`model`, or pick a picker slug. No `*-fast` variants. Third-party picker models
+bill the API budget. Load
+[`.agents/skills/concepts/CONCEPT_DELEGATION.md`](.agents/skills/concepts/CONCEPT_DELEGATION.md)
+and [`.agents/skills/concepts/platforms/cursor.md`](.agents/skills/concepts/platforms/cursor.md)
+before every spawn.
+
+**Language.** Before any reply the operator will see, read
+[`.agents/skills/concepts/CONCEPT_LANGUAGE.md`](.agents/skills/concepts/CONCEPT_LANGUAGE.md),
+[`.agents/skills/concepts/LANGUAGE-PHRASES.md`](.agents/skills/concepts/LANGUAGE-PHRASES.md),
+and [`.agents/skills/concepts/LANGUAGE-HUMANIZER.md`](.agents/skills/concepts/LANGUAGE-HUMANIZER.md).
+Follow those files. Spell names in full (`GeneralProcessSimulator`, not `GPS`).
+Keep **harness** for the agent host (Cursor, Claude Code, Codex, …). Do not call
+a sandbox tree, wrapper, or other code a harness.
 
 Authoring skills or concepts → [`.agents/skills/writing-for-agents/SKILL.md`](.agents/skills/writing-for-agents/SKILL.md).
 <!-- marcuskrogh/skills:end -->
