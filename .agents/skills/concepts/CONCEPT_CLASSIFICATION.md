@@ -6,9 +6,11 @@ when a skill's On-invoke pointer fires.
 
 ## Intent
 
-After (or with) lightweight definition alignment, turn the agreed description
-into a **deterministic** class + workflow **binding**. Downstream skills honor
-the binding; they do not reclassify unless the user overturns it.
+After definition alignment — the user has approved the artifact — turn the
+agreed description into a **deterministic** class + workflow **binding**.
+Downstream skills honor the binding; they do not reclassify unless the user
+overturns it. A provisional class may choose alignment depth earlier; it does
+not settle definition probes and it does not approve the plan.
 
 Catalogs (classes, templates, discriminators, default params):
 [CLASSIFICATION-CATALOG.md](CLASSIFICATION-CATALOG.md).
@@ -60,8 +62,9 @@ Catalogs (classes, templates, discriminators, default params):
    one short confirmation (or one discriminator question). Done when the user
    accepts or corrects the binding.
 5. **Persist** — Write Classification + Workflow on the definition artifact and
-   tracker; set **Next** to the first step of the bound chain. Done when durable
-   surfaces agree.
+   tracker. Do not name a successor. The workflow records **Next** from the
+   bound chain ([../workflow/pipelines.md](../workflow/pipelines.md)). Done when
+   durable surfaces agree.
 
 ## Reference
 

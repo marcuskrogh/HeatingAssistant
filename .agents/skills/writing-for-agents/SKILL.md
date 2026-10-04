@@ -23,7 +23,7 @@ invocation tradeoffs, see [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md).
 | Kind | Path | Invokable? | Owns |
 |------|------|------------|------|
 | **Concept** | `skills/concepts/CONCEPT_<NAME>.md` | Never | Shared **invariants**, **flow**, and **extension slots** |
-| **Skill** | `skills/<name>/SKILL.md` | Yes | **Extensions filled**, artifact paths, tracker duties, **Next** |
+| **Skill** | `skills/<name>/SKILL.md` | Yes | **Extensions filled**, inputs, output, tracker duties. No successor |
 
 A skill **applies** one or more concepts. The concept is the single source of
 truth for behaviour every applying skill shares. The skill adds only what that
@@ -98,7 +98,7 @@ Repo tokens (use these; do not paraphrase into soft synonyms):
 | **extension** | Skill-filled slot the concept declares but does not specialise |
 | **invariant** | Concept-owned rule every applying skill inherits — never restated |
 | **probe** | Domain question area; selection order still follows divergence value |
-| **Next** | Persisted handoff cue naming the following skill + key |
+| **Next** | Persisted cue the **workflow** writes after a skill's outcome. Names the following skill + key. Skills do not author it |
 | **fix-forward** | Same open PR; address review findings only |
 | **iterate** | Post-ship delta on a **new** branch/PR |
 | **tweak** | Small intentional change to existing behaviour; lightweight define sibling of bug |
@@ -177,12 +177,15 @@ across a real context boundary (hand-off / subagent), not an inline call.
   **Intent**; the one-line Uninvokable role line in the concept shape is the
   allowed exception (do not expand it into a section).
 - **Always-on language extract** names CONCEPT_LANGUAGE, LANGUAGE-PHRASES, and
-  LANGUAGE-HUMANIZER, plus two caches (`GeneralProcessSimulator`, agent-host
-  **harness**).
-  Do not copy the phrase or cadence tables into AGENTS.md, Cursor rules, or
-  skill On-invoke lines. Pipeline skills load [../workflow/SKILL.md](../workflow/SKILL.md)
-  instead of listing delivery/handoff/tracker-sync files. Manual class skills
-  share [../define/overrides.md](../define/overrides.md).
+LANGUAGE-HUMANIZER, plus caches: spell out `GeneralProcessSimulator`; keep
+**harness** for the agent host; concrete work interviews before bind; a short
+description does not approve the plan; a finished skill reply ends with the
+exact `## Next` block. Do not copy the phrase or cadence tables into AGENTS.md,
+Cursor rules, or skill On-invoke lines. Pipeline skills load
+[../workflow/SKILL.md](../workflow/SKILL.md) and
+[../workflow/handoff.md](../workflow/handoff.md) instead of listing
+delivery/tracker-sync files. Manual class skills share
+[../define/overrides.md](../define/overrides.md).
 
 ## Concept shape
 
@@ -263,9 +266,23 @@ Applies [CONCEPT_…](../concepts/…) to <subject>. <One sentence on outcome.>
 # template
 \`\`\`
 
-## Tracker / Handoff
+## Inputs
 
-<Duties table + Next block>
+| Input | When present | When absent |
+|-------|----------------|-------------|
+| … | Apply it | Define it in this invocation (required) or continue (supportive) |
+
+## Output
+
+`<FILE>` — … Outcome: `ready`.
+
+This skill does not name a successor. The workflow transition
+([../workflow/handoff.md](../workflow/handoff.md)) writes **Next** when a
+workflow is bound.
+
+## Tracker
+
+<Status duties only. No successor skill.>
 ```
 
 **Description** is a context pointer: leading word front, one trigger per

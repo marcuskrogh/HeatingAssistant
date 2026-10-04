@@ -4,46 +4,46 @@ Load when running `/ship` — remaining-tail detection or closed-loop closeout.
 
 ## Remaining workflow
 
-`/ship` finalizes whatever is still left after define / bug / tweak / refine /
-rework / adopt / sandbox / iterate-ready.
+`/ship` runs the **suffix** of the bound chain in
+[pipelines.md](pipelines.md), then closeout. It does not invent a second order.
 It is not limited to “clean review → merge”.
 
-```text
-detect stage
-  → not ready-to-build → stop; tell user /define|/bug|/tweak|/refine|/rework|/adopt|/iterate|/sandbox
-  → sandbox outstanding (`sandbox=inject`, SANDBOX.md not promotion-ready) → /sandbox
-  → adopt outstanding (`ADOPT.md` present, route not Done) → /adopt
-  → architecture outstanding (no ARCHITECTURE.md after define) → /architect
-  → implementation outstanding → /implement on delivery branch/PR
-  → testing outstanding (`test.mode` not an explicit skip, no testing-phase comment) → /test
-  → restructure outstanding (`harden.mode` not an explicit user skip, Task not yet In Review from restructure) → /restructure
-  → review not CLEAN → /review on same PR (lasers + fix + code review)
-  → CLEAN / ship-ready → closeout
-  → review-fix FAILED → stop; do not merge; report Next
-```
+Detect the current position, then run every later step in that chain (mode
+**immediate** through closeout). Honor `test.mode` / `harden.mode` /
+`review.lasers` by using the chain assembly rules. Treat a missing skip as
+**dedicated**. Class **adopt** uses the adopt chain and
+[../adopt/route.md](../adopt/route.md); do not drop characterize or test.
+When Shipping procedure is `human review`, the suffix after a CLEAN agent
+review is human review, then fix-forward, then closeout
+([human-review.md](human-review.md)). Position detection for sandbox,
+architect, implement, test, restructure, and review is otherwise unchanged.
 
-| Invoked when | Remaining |
-|--------------|-----------|
-| After define / bug / tweak / refine / rework (To Do, plan ready) | architect → implement → test → restructure → review → closeout (sandbox first when `sandbox=inject` and not promotion-ready) |
-| After adopt (route not Done) | `/adopt` — resume the route (inventory if needed, characterize if the map is not locked, then remaining unit chains) |
-| After sandbox (promotion-ready) | implement → test → restructure → review → closeout |
-| After implement (In Progress, PR has impl) | test → restructure → review → closeout |
-| After test | restructure → review → closeout |
-| After restructure / harden (In Review) | review → closeout |
-| After review CLEAN / clean code review | closeout |
-| After iterate (new Task, impl done) | remaining closeout chain from Next |
+| Evidence | Position in the chain |
+|----------|------------------------|
+| No definition spec | Stop. The work is not ready. Ask the user to define it (or invoke the matching skill). |
+| `ADOPT.md`; route not Done | **adopt** workflow — resume at the first open area |
+| `sandbox=inject` and `SANDBOX.md` is not promotion-ready | **sandbox** |
+| Definition spec exists; no `ARCHITECTURE.md` | **architect** |
+| Shape recorded; implementation incomplete | **implement** |
+| Implementation complete; testing phase not done (`test` is in the chain) | **test** |
+| Testing done or test not in the chain; restructure not done (`restructure` is in the chain) | **restructure** |
+| Review outcome FAILED | Stop. Do not merge. The delivery transition names **implement** |
+| In Review; review not CLEAN | **review** |
+| CLEAN, and Shipping procedure is automatic or absent | closeout |
+| CLEAN, Shipping procedure is human review, and no human review is on the pull request yet | **human review** |
+| Shipping procedure is human review, the human review is on the pull request, and fix-forward is not done | **fix-forward** |
+| fix-forward outcome FAILED | Stop. Do not merge. |
+| Shipping procedure is human review, and fix-forward is CLEAN | closeout |
 
-Composed skills keep their full contracts. Ship only chooses **which** still need
-to run. Done when remaining skills have completed or a hard stop is reported.
-
-Honor bound `test.mode` / `harden.mode` / `review.lasers`. Treat missing skip as
-**dedicated**. Drop a closeout step only when the user explicitly asked to skip
-it (or docs-only for test). Class **adopt** / `ADOPT.md`: do not drop characterize or `/test`.
+Composed skills keep their full contracts, including defining a required input
+that is missing. Done when the suffix has completed or a hard stop is reported.
 
 ## Closeout
 
-Closed-loop on the Task’s **single delivery PR**. Run only after CLEAN **code
-review** (or already ship-ready / explicit user override).
+Closed-loop on the Task’s **single delivery PR**. Automatic shipping runs
+only after a CLEAN agent review. When Shipping procedure is human review,
+run only after that agent review was CLEAN and the later fix-forward ended
+CLEAN. A FAILED agent review or a FAILED fix-forward stops the merge.
 
 1. **Pre-merge continuity (PR still open)** — commit and push on the delivery branch:
    - PLAN / BUG / TWEAK / REFINE / REWORK / ITERATE / ADOPT / SANDBOX — shipped / **Next: Done** + PR link

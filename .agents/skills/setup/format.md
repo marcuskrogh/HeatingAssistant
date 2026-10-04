@@ -155,6 +155,9 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 | Merge strategy | merge \| squash \| rebase |
 | Require `gh` for review/ship | true |
 | One delivery PR per Task | true (define→ship closed-loop; reuse branch/PR on Next) |
+| Shipping procedure | automatic \| human review |
+
+`automatic` keeps agent review, then ship. `human review` inserts human review, then fix-forward of that review's findings, then ship. human review is the final review. Absent means `automatic`. A FAILED agent review still returns to implement. Setup records the choice and does not bind a workflow.
 
 ## Pipeline
 
@@ -188,6 +191,7 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 | Base branch | `main` |
 | Open PR | `true` |
 | One delivery PR per Task | `true` |
+| Shipping procedure | `automatic` |
 | Merge | `squash` if repo uses squash; else `merge` |
 
 ## Continuity rule
@@ -195,7 +199,7 @@ When **Location** is `external`, no pipeline artifact is written into the repo:
 Regardless of remote tracker, when **Mirror to markdown** is true (recommended):
 
 1. Create/update rows in the mirror file whenever issues are created, transitioned, or handed off.
-2. Always write keys + **Next** into `ROADMAP.md` / `PLAN.md` / `BUG.md` / `TWEAK.md` / `REFINE.md` / `REWORK.md` / `ADOPT.md` / `ITERATE.md` / `SANDBOX.md` / issue bodies.
+2. Always write keys into `ROADMAP.md` / `PLAN.md` / `BUG.md` / `TWEAK.md` / `REFINE.md` / `REWORK.md` / `ADOPT.md` / `ITERATE.md` / `SANDBOX.md` / issue bodies. The workflow appends **Next** when a pipeline skill finishes.
 3. Remote tracker remains authoritative for status **except** for `markdown` provider, where issue files are authoritative.
 
 When **Mirror to markdown** is false, the remote tracker is the *only* continuity
