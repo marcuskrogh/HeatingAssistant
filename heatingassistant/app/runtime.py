@@ -2097,9 +2097,7 @@ class HeatingRuntime(
     def _source_display_power(
         source: HeatSource, fraction: float, outdoor_temp: float
     ) -> float:
-        if hasattr(source, "display_smooth_thermal_power"):
-            return float(source.display_smooth_thermal_power(fraction, outdoor_temp))
-        return float(source.display_thermal_power(fraction, outdoor_temp))
+        return float(source.configured_display_power(fraction, outdoor_temp))
 
     def _actuator_write_value(self, tag: str, fraction: float) -> Any:
         """Map an MPC fraction to the HA write payload for ``tag``."""

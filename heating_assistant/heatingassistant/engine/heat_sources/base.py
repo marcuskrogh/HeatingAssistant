@@ -150,6 +150,20 @@ class HeatSource(ABC):
         fraction = max(0.0, min(1.0, float(setpoint_fraction)))
         return self.rated_heating_capacity(outdoor_temp) * fraction
 
+    def configured_display_power(
+        self, setpoint_fraction: float, outdoor_temp: float = 0.0,
+    ) -> float:
+        """Plot watts for one command, same seam as room view.
+
+        Piecewise ``display_smooth_thermal_power`` when the source has it,
+        otherwise ``display_thermal_power``. Ignores identified
+        ``power_scale``. Does not cap the returned watts.
+        """
+        smooth = getattr(self, "display_smooth_thermal_power", None)
+        if callable(smooth):
+            return float(smooth(float(setpoint_fraction), float(outdoor_temp)))
+        return float(self.display_thermal_power(setpoint_fraction, outdoor_temp))
+
     def set_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
         Apply a control set-point, update internal state, and return the

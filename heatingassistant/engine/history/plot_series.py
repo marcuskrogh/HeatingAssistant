@@ -30,53 +30,24 @@ def _u_fraction(raw: Any) -> float:
     return value
 
 
-def _call_thermal(fn: Any, u_frac: float, outdoor: float) -> float | None:
-    try:
-        return float(fn(u_frac, outdoor))
-    except TypeError:
-        try:
-            return float(fn(u_frac))
-        except Exception:
-            return None
-    except Exception:
-        return None
-
-
 def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
     """Convert a stored command with the configured model power map [W].
 
-    Parameter-estimation Heating Input uses the same map as room view:
-    ``display_smooth_thermal_power`` / ``display_thermal_power``. Those
-    evaluate rated heating and cooling capacity at the stored command, so
-    a half command is half of the configured capacity and a full command
-    is that capacity. Identified ``power_scale`` stays in the plant model.
-    Applying it here moved the whole trace, including mid-range commands,
-    above the heat pump the user configured.
+    Uses :meth:`HeatSource.configured_display_power`, the same entry as
+    room-view totals. A half command is half of the configured capacity
+    and a full command is that capacity. Identified ``power_scale`` stays
+    in the plant model. This is not a cap on an already-scaled trace.
 
-    This is not a cap on an already-scaled trace. Cooling-capable sources
-    still use the piecewise display map, so a negative command is cooling
-    capacity, not ``−heating_capacity``.
+    If that entry is missing, a negative command on a cooling-capable
+    source stays at 0 rather than ``−heating_capacity`` (SWD-459).
     """
-    if bool(getattr(source, "can_cool", False)):
-        smooth = getattr(source, "display_smooth_thermal_power", None)
-        if callable(smooth):
-            power = _call_thermal(smooth, u_frac, outdoor)
-            if power is not None:
-                return power
-        fn = getattr(source, "display_thermal_power", None)
-        if callable(fn):
-            power = _call_thermal(fn, u_frac, outdoor)
-            if power is not None:
-                return power
+    try:
+        return float(source.configured_display_power(u_frac, outdoor))
+    except Exception:
         # Never map cooling through heating capacity if the display
         # call failed — that is the SWD-459 bug.
-        if u_frac < 0.0:
+        if bool(getattr(source, "can_cool", False)) and u_frac < 0.0:
             return 0.0
-    fn = getattr(source, "display_thermal_power", None)
-    if callable(fn):
-        power = _call_thermal(fn, u_frac, outdoor)
-        if power is not None:
-            return power
     rated = getattr(source, "rated_heating_capacity", None)
     if callable(rated):
         try:

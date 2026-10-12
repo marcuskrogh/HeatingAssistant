@@ -117,6 +117,24 @@ def test_pe_series_heat_pump_partial_cool_scales_cooling_capacity():
     )
 
 
+def test_pe_series_heat_only_matches_room_display_entry():
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6300.0,
+        cop_rated=3.5,
+        hvac_mode="heat",
+        power_scale=2.0,
+    )
+    series = identification_aux_series(
+        [_record(0.4, outdoor=7.0)], [hp], "living_room",
+    )
+    plotted = series["heating_power"][0]["value"]
+    expected = round(hp.configured_display_power(0.4, 7.0), 2)
+    assert plotted == pytest.approx(expected)
+    assert plotted == pytest.approx(round(hp.display_smooth_thermal_power(0.4, 7.0), 2))
+
+
 def test_pe_series_heat_only_heat_pump_ignores_negative_u():
     hp = HeatPump(
         "hp",
