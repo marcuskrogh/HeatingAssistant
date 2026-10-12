@@ -57,3 +57,6 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/703
 - Classification: bug
 - Workflow: fix-fast
+
+## Next
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/703
