@@ -39,7 +39,7 @@ Reply from this skill; do not load every pipeline skill.
 |---------|-----|----------------|
 | Have no workspace yet | `/setup` | `WORKSPACE.md` |
 | Feel a big/foggy goal but not the steps | `/explore` | `ROADMAP.md` + route Tasks; research/model/sandbox = artifacts on the delivery branch → `/define` |
-| Have concrete work (bug, tweak, refine, rework, feature, …) | `/define` | Align → agent **classifies** → binds **workflow** → `PLAN.md` + **Next** |
+| Have concrete work (bug, tweak, refine, rework, feature, …) | `/define` | Interview, then classify and bind → `PLAN.md`. A short description starts the interview and does not approve the plan. The workflow writes **Next** |
 
 ### Whole-repo structure
 
@@ -55,7 +55,9 @@ Reply from this skill; do not load every pipeline skill.
 | Want the current step or a decision taught | `/explain` | paced teaching |
 | Want to be walked through a manual task | `/guide` | one step at a time |
 
-After define, follow persisted **Next** (or bare **next** / **ship**). You do **not** need to remember architect / implement / test / restructure / review /
+After define, follow persisted **Next** (or bare **next** / **ship**). The bound
+workflow writes that cue. Skills do not choose the following skill. You do
+**not** need to remember architect / implement / test / restructure / review /
 class-specific entry skills.
 
 Define infers **class** and binds a **template** after alignment —
@@ -72,6 +74,8 @@ brownfield structure:  adopt (inventory → [characterize → architect → impl
 post-merge fix:  ship → iterate → test → restructure → review → ship
 post-merge inspect-loop:  ship → sandbox → implement → test → restructure → review → ship
 ```
+
+Those diagrams are automatic shipping. When WORKSPACE **Shipping procedure** is `human review`, insert `human review → fix-forward` after `review` and before `ship` on delivery, iterate, and adopt. human review is the final review. A failed agent review still returns to implement.
 
 After ship, `/iterate` when tests/review on a new PR suffice; `/sandbox` when
 each turn needs visual, plot, or report inspection. The sandbox must match

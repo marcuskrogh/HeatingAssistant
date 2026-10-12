@@ -44,6 +44,7 @@ Agreed agent workspace setup for this repository.
 | Open PR by default | true |
 | Merge strategy | merge |
 | Require `gh` for review/ship | true |
+| Shipping procedure | automatic |
 
 ## Pipeline
 

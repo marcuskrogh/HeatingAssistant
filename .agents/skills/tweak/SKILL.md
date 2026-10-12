@@ -2,8 +2,8 @@
 name: tweak
 description: >-
   Tweak alignment and lightweight definition for a small intentional change to
-  existing behaviour. Produces TWEAK.md and one tracker Task, then hands off to
-  implementation. Prefer /define for new work (agent classifies).
+  existing behaviour. Produces TWEAK.md and one tracker Task with a delta-fast
+  binding. Prefer /define for new work (agent classifies).
 disable-model-invocation: true
 ---
 
@@ -12,7 +12,8 @@ disable-model-invocation: true
 Applies [CONCEPT_ALIGNMENT](../concepts/CONCEPT_ALIGNMENT.md) and
 [CONCEPT_DEFINITION](../concepts/CONCEPT_DEFINITION.md) to a **small intentional
 delta** on existing behaviour. Produces `TWEAK.md`. Shared persist/track
-contract: [../define/overrides.md](../define/overrides.md).
+contract: [../define/overrides.md](../define/overrides.md). Applies
+[CONCEPT_SKILL](../concepts/CONCEPT_SKILL.md).
 
 **On invoke:** read [../define/overrides.md](../define/overrides.md).
 
@@ -22,7 +23,7 @@ contract: [../define/overrides.md](../define/overrides.md).
 |------|------------|
 | **Subject** | Small intentional change to existing behaviour (extend a pattern, add a field, adjust a clear edge) |
 | **Probes** | Desired change; where it applies; precedent elsewhere in the codebase (if any); **pass criteria**; out of scope; optional parent Story/Task link |
-| **Stop condition** | Desired change, where, and pass criteria are clear enough to implement |
+| **Stop condition** | The user has stated the desired change, where it applies, and pass criteria (or explicitly deferred one) and approved the readiness prompt |
 | **Alignment / definition artifact** | `TWEAK.md` (path from WORKSPACE) |
 | **Readiness prompt** | "Is this enough to implement the tweak?" |
 | **Opening** | Thin: "What do you want to tweak?" Rich (change + area pasted): first question on highest-impact gap |
@@ -62,6 +63,25 @@ contract: [../define/overrides.md](../define/overrides.md).
 - Branch: <delivery-branch>
 - PR: <url or draft url>
 
-## Next
-`/implement <KEY>` — Apply per TWEAK.md (same branch/PR)
+## Classification
+- Class: tweak
+- Confidence: high
+- Why: explicit /tweak
+
+## Workflow
+- Template: delta-fast
+- Parameters: catalog defaults for delta-fast
+- Chain: delivery chain for that template
 ```
+
+## Inputs
+
+| Input | When present | When absent |
+|-------|----------------|-------------|
+| Desired change | Apply it as the subject | Ask "What do you want to tweak?" once |
+
+## Output
+
+`TWEAK.md` — delta spec plus the delta-fast binding. Outcome: `ready`.
+
+This skill does not name a successor. Apply the workflow transition before the turn ends.

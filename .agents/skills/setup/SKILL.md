@@ -12,8 +12,9 @@ disable-model-invocation: true
 
 # Setup
 
-Applies [CONCEPT_ALIGNMENT](../concepts/CONCEPT_ALIGNMENT.md) to **workspace
-configuration**. Produces a `WORKSPACE.md` all pipeline skills read first:
+Applies [CONCEPT_ALIGNMENT](../concepts/CONCEPT_ALIGNMENT.md) and
+[CONCEPT_SKILL](../concepts/CONCEPT_SKILL.md) to **workspace configuration**.
+Produces a `WORKSPACE.md` all pipeline skills read first:
 
 | Scope | Path | Use when |
 |-------|------|----------|
@@ -22,7 +23,9 @@ configuration**. Produces a `WORKSPACE.md` all pipeline skills read first:
 
 Repository fields override global field-by-field — [format.md](format.md) → **Resolution order**.
 
-**On invoke:** read CONCEPT_ALIGNMENT, [format.md](format.md), and
+**On invoke:** read CONCEPT_ALIGNMENT,
+[CONCEPT_SKILL](../concepts/CONCEPT_SKILL.md),
+[format.md](format.md), and
 [../tracker/reference.md](../tracker/reference.md).
 
 ## Extensions
@@ -30,8 +33,8 @@ Repository fields override global field-by-field — [format.md](format.md) → 
 | Slot | This skill |
 |------|------------|
 | **Subject** | How the agent pipeline runs — this repo, or every repo (global) |
-| **Probes** | Scope; tracker provider + provider settings; markdown mirror; artifact location (repo vs external); artifact roots; base branch / naming / PR default / merge; confirm one delivery PR per Task; invent-defaults policy (recommend: no — run setup) |
-| **Stop condition** | Scope, tracker, artifact location/paths, and delivery defaults are unambiguous |
+| **Probes** | Scope; tracker provider + provider settings; markdown mirror; artifact location (repo vs external); artifact roots; base branch / naming / PR default / merge; shipping procedure (automatic shipping, or human review between the agent review and close-out); confirm one delivery PR per Task; invent-defaults policy (recommend: no — run setup) |
+| **Stop condition** | Scope, tracker, artifact location/paths, delivery defaults, and shipping procedure are unambiguous |
 | **Alignment artifact** | `docs/agents/WORKSPACE.md` or `~/.agents/WORKSPACE.md` ([format.md](format.md)) |
 | **Readiness prompt** | "Does this workspace setup look right to commit?" (repo) / "…to save as your global default?" (global) |
 | **Opening** | Thin: scope then tracker. Rich / existing file: load effective workspace; ask highest-impact divergence. Global exists, repo does not: show inherited; ask only what this repo must differ |
@@ -42,7 +45,20 @@ Repository fields override global field-by-field — [format.md](format.md) → 
 1. **Align** — Follow CONCEPT_ALIGNMENT with the extensions above. Done when stop condition + readiness approval hold.
 2. **Write workspace** — Persist per [format.md](format.md) (repo: only fields that differ from global when a global layer exists). Done when the file exists at the agreed path.
 3. **Provision paths** — Repo scope: ensure agents dir; markdown provider → issues dir + INDEX stub; mirror → ISSUES stub; external artifacts → create root outside the repo. Done when required dirs exist.
-4. **Verify and hand off** — Check provider credentials ([../tracker/reference.md](../tracker/reference.md)); report path, scope, tracker, gaps, and **Next** (`/explore`, `/define`, `/help`, or none). Done when the user has the Next cue. Commit only on ask — never commit a global workspace file.
+4. **Verify** — Check provider credentials ([../tracker/reference.md](../tracker/reference.md)); report path, scope, tracker, and gaps. Record outcome `ready`. No workflow is bound by setup, so **Next** is none. Commit only on ask — never commit a global workspace file. Done when the user has that report.
+
+## Inputs
+
+| Input | When present | When absent |
+|-------|----------------|-------------|
+| Existing `WORKSPACE.md` for the scope being edited | Apply it and ask only about real divergences | Align from the opening probes |
+| Global workspace, when editing a repo | Show inherited fields | Align repo fields in full |
+
+## Output
+
+`WORKSPACE.md` — tracker, paths, and delivery defaults for the chosen scope. Outcome: `ready`.
+
+This skill does not name a successor.
 
 ## Re-run
 

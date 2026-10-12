@@ -13,7 +13,8 @@ disable-model-invocation: true
 Applies [CONCEPT_ALIGNMENT](../concepts/CONCEPT_ALIGNMENT.md) and
 [CONCEPT_DEFINITION](../concepts/CONCEPT_DEFINITION.md) to a **bounded
 refinement**. Produces `REFINE.md`. Shared persist/track contract:
-[../define/overrides.md](../define/overrides.md).
+[../define/overrides.md](../define/overrides.md). Applies
+[CONCEPT_SKILL](../concepts/CONCEPT_SKILL.md).
 
 **On invoke:** read [../define/overrides.md](../define/overrides.md).
 
@@ -23,7 +24,7 @@ refinement**. Produces `REFINE.md`. Shared persist/track contract:
 |------|------------|
 | **Subject** | Limited area (class, module, functionality, README, comments, or similar) whose structure or description is outdated or otherwise needs refinement |
 | **Probes** | Area boundary; thin description of what feels outdated or rough; target architecture/conventions to align with; preserve-behaviour constraint (executable behaviour stays the same); **pass criteria**; out of scope; optional parent Story/Task link |
-| **Stop condition** | Area, refinement intent, preserve-behaviour bar, and pass criteria are clear enough to implement |
+| **Stop condition** | The user has stated the area, refinement intent, preserve-behaviour bar, and pass criteria (or explicitly deferred one) and approved the readiness prompt |
 | **Alignment / definition artifact** | `REFINE.md` (path from WORKSPACE) |
 | **Readiness prompt** | "Is this enough to implement the refinement?" |
 | **Opening** | Thin description **required**. Missing area → "What area should be refined?" Rich (area + why pasted): first question on highest-impact gap |
@@ -70,6 +71,25 @@ refinement**. Produces `REFINE.md`. Shared persist/track contract:
 - Branch: <delivery-branch>
 - PR: <url or draft url>
 
-## Next
-`/implement <KEY>` — Apply per REFINE.md (same branch/PR)
+## Classification
+- Class: refine
+- Confidence: high
+- Why: explicit /refine
+
+## Workflow
+- Template: structure-safe
+- Parameters: catalog defaults for structure-safe
+- Chain: delivery chain for that template
 ```
+
+## Inputs
+
+| Input | When present | When absent |
+|-------|----------------|-------------|
+| Area to refine | Apply it | Ask "What area should be refined?" once |
+
+## Output
+
+`REFINE.md` — bounded refinement spec plus the structure-safe binding. Outcome: `ready`.
+
+This skill does not name a successor. Apply the workflow transition before the turn ends.
