@@ -4,8 +4,8 @@
 - Parameter-estimation Heating Input was rebuilt from the stored command
   with the identified heater scale (`power_scale`).
 - Room view uses configured display capacity and did not show 10–12 kW.
-- The series on this page now uses that same configured capacity, and
-  clamps the command to the actuator bounds.
+- The series on this page now uses that same configured power map.
+  Partial commands stay proportional. The trace is not clipped to the maximum.
 
 ## Scope / Decisions / Constraints
 - In: `identification_aux_series` (the series `getPeInputs` returns when a
@@ -37,12 +37,11 @@
   exists for room view.
 
 ## Pass criteria
-- A heat pump with `power_scale` 2 and `max_power` 6300 W plots rated
-  heating capacity, at or below 6300 W, not the scaled model power.
-- A command outside `[u_min, u_max]` plots the same watts as a command on
-  the bound.
-- A negative command plots configured cooling capacity, not scaled cooling
-  and not negative heating capacity.
+- A heat pump with `power_scale` 2 and `max_power` 6300 W plots the
+  configured map: full command at rated capacity (about 6300 W), half
+  command at half of that. Half command is not `min(scaled power, 6300 W)`.
+- A negative command plots configured cooling capacity on that same map,
+  not scaled cooling and not negative heating capacity.
 - Calendar version is the current month.
 
 ## Work packages
@@ -55,5 +54,6 @@
 - Provider: jira
 - Task: SWD-585
 - Branch: cursor/pe-heating-power-bounds-718a
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/703
 - Classification: bug
 - Workflow: fix-fast

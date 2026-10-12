@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-585 | Bug | [Bug] Parameter estimation Heating Input exceeds configured heat-pump power | In Progress | — | docs/agents/PLAN-pe-heating-power-bounds.md | /review-fix SWD-585 |
+| SWD-585 | Bug | [Bug] Parameter estimation Heating Input exceeds configured heat-pump power | In Progress | — | docs/agents/PLAN-pe-heating-power-bounds.md | /review-fix SWD-585 — https://github.com/marcuskrogh/HeatingAssistant/pull/703 |
 | SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | Done | — | docs/agents/PLAN-mpc-load-uncap.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/692 (`39708164`) |
 | SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |
 | SWD-583 | Bug | [Bug] Finished parameter estimation is missing from Identification Results | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/699 (`03ddda49`) |
