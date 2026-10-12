@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.10.0
+
+- First October App version. The version month matches the current calendar month.
+
 # 2026.09.36
 
 - Overview MPC Load shows the true percent when the last planner solve
