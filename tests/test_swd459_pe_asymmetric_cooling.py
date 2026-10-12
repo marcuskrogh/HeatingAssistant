@@ -48,7 +48,7 @@ def test_pe_series_heat_pump_full_heat_still_uses_heating_capacity():
     )
 
 
-def test_pe_series_heat_pump_cooling_respects_power_scale():
+def test_pe_series_heat_pump_cooling_uses_configured_capacity_not_power_scale():
     hp = HeatPump(
         "hp",
         "living_room",
@@ -58,9 +58,65 @@ def test_pe_series_heat_pump_cooling_respects_power_scale():
         power_scale=0.5,
     )
     series = identification_aux_series([_record(-1.0)], [hp], "living_room")
-    assert series["heating_power"][0]["value"] == pytest.approx(
-        hp.cooling_power(outdoor_temp=20.0)
+    value = series["heating_power"][0]["value"]
+    assert value == pytest.approx(-hp.rated_cooling_power)
+    assert value != pytest.approx(hp.cooling_power(outdoor_temp=20.0))
+
+
+def test_pe_series_heat_pump_heating_stays_inside_configured_capacity():
+    """Identified power_scale must not push Heating Input above the datasheet."""
+
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6300.0,
+        cop_rated=3.5,
+        power_scale=2.0,
     )
+    series = identification_aux_series(
+        [_record(1.0, outdoor=20.0)], [hp], "living_room",
+    )
+    value = series["heating_power"][0]["value"]
+    rated = hp.rated_heating_capacity(20.0)
+    assert value == pytest.approx(rated)
+    assert value <= 6300.0
+    assert value < hp.smooth_thermal_power(1.0, 20.0)
+
+
+def test_pe_series_command_outside_actuator_bounds_is_clamped():
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6300.0,
+        cop_rated=3.5,
+        cooling_cop=2.5,
+        power_scale=1.8,
+    )
+    full_heat = identification_aux_series(
+        [_record(1.0, outdoor=20.0)], [hp], "living_room",
+    )
+    over_heat = identification_aux_series(
+        [_record(1.4, outdoor=20.0)], [hp], "living_room",
+    )
+    full_cool = identification_aux_series([_record(-1.0)], [hp], "living_room")
+    over_cool = identification_aux_series([_record(-1.4)], [hp], "living_room")
+    assert over_heat["heating_power"][0]["value"] == pytest.approx(
+        full_heat["heating_power"][0]["value"]
+    )
+    assert over_heat["heating_power"][0]["value"] <= 6300.0
+    assert over_cool["heating_power"][0]["value"] == pytest.approx(
+        full_cool["heating_power"][0]["value"]
+    )
+    assert over_cool["heating_power"][0]["value"] == pytest.approx(
+        -hp.rated_cooling_power
+    )
+
+
+def test_pe_series_electric_heater_ignores_power_scale():
+    heater = ElectricHeater("h", "living_room", 2000.0, power_scale=3.0)
+    series = identification_aux_series([_record(1.0)], [heater], "living_room")
+    assert series["heating_power"][0]["value"] == pytest.approx(2000.0)
+    assert series["heating_power"][0]["value"] < heater.thermal_power(1.0)
 
 
 def test_pe_series_heat_pump_partial_cool_scales_cooling_capacity():

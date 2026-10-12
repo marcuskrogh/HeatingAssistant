@@ -42,43 +42,112 @@ def _call_thermal(fn: Any, u_frac: float, outdoor: float) -> float | None:
         return None
 
 
-def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
-    """Convert a stored command fraction to model thermal power [W].
+def _command_bounds(source: Any) -> tuple[float, float]:
+    """Configured command limits. Missing bounds stay on the heat-only range."""
 
-    Cooling-capable sources use the piecewise heating/cooling map
-    (``smooth_thermal_power``) so negative ``u`` is cooling capacity, not
-    ``−heating_capacity``. Heat-only sources stay on linear
-    ``thermal_power``.
-    """
-    if bool(getattr(source, "can_cool", False)):
-        smooth = getattr(source, "smooth_thermal_power", None)
-        if callable(smooth):
-            power = _call_thermal(smooth, u_frac, outdoor)
-            if power is not None:
-                return power
-        fn = getattr(source, "thermal_power", None)
-        if callable(fn):
-            power = _call_thermal(fn, u_frac, outdoor)
-            if power is not None:
-                return power
-        # Never map cooling through heating capacity if the piecewise
-        # call failed — that is the SWD-459 bug.
-        if u_frac < 0.0:
+    try:
+        lo = float(getattr(source, "u_min", 0.0))
+        hi = float(getattr(source, "u_max", 1.0))
+    except (TypeError, ValueError):
+        return 0.0, 1.0
+    if lo != lo or hi != hi:
+        return 0.0, 1.0
+    if hi < lo:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+def _clamp_command(source: Any, u_frac: float) -> float:
+    lo, hi = _command_bounds(source)
+    return min(hi, max(lo, u_frac))
+
+
+def _rated_heating_watts(source: Any, outdoor: float) -> float:
+    rated = getattr(source, "rated_heating_capacity", None)
+    if callable(rated):
+        try:
+            return max(0.0, float(rated(outdoor)))
+        except (TypeError, ValueError):
+            pass
+    try:
+        return max(0.0, float(getattr(source, "max_power", 0.0) or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _rated_cooling_watts(source: Any, outdoor: float) -> float:
+    """Positive heat-removal capacity [W]. Heat-only sources have none."""
+
+    if not bool(getattr(source, "can_cool", False)):
+        return 0.0
+    rated = getattr(source, "rated_cooling_power", None)
+    if rated is None:
+        rated = getattr(source, "rated_cooling_capacity", None)
+    if callable(rated):
+        try:
+            rated = rated(outdoor)
+        except TypeError:
+            try:
+                rated = rated()
+            except Exception:
+                return 0.0
+        except Exception:
             return 0.0
-    fn = getattr(source, "thermal_power", None)
+    try:
+        return abs(float(rated or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _clip_configured_power(source: Any, power: float, outdoor: float) -> float:
+    """Keep plotted watts inside configured heating and cooling capacity."""
+
+    heat = _rated_heating_watts(source, outdoor)
+    cool = _rated_cooling_watts(source, outdoor)
+    return min(heat, max(-cool, power))
+
+
+def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
+    """Convert a stored command to configured thermal power [W].
+
+    Parameter-estimation Heating Input uses the same display map as room
+    view: rated heating and cooling capacity, with the command clamped to
+    ``[u_min, u_max]``. Identified ``power_scale`` stays inside the plant
+    model. Applying it here made historical watts exceed the heat pump
+    the user configured.
+
+    Cooling-capable sources still use the piecewise display map so a
+    negative command is cooling capacity, not ``−heating_capacity``.
+    """
+    bounded = _clamp_command(source, u_frac)
+    if bool(getattr(source, "can_cool", False)):
+        smooth = getattr(source, "display_smooth_thermal_power", None)
+        if callable(smooth):
+            power = _call_thermal(smooth, bounded, outdoor)
+            if power is not None:
+                return _clip_configured_power(source, power, outdoor)
+        fn = getattr(source, "display_thermal_power", None)
+        if callable(fn):
+            power = _call_thermal(fn, bounded, outdoor)
+            if power is not None:
+                return _clip_configured_power(source, power, outdoor)
+        # Never map cooling through heating capacity if the display
+        # call failed — that is the SWD-459 bug.
+        if bounded < 0.0:
+            return 0.0
+    fn = getattr(source, "display_thermal_power", None)
     if callable(fn):
-        power = _call_thermal(fn, u_frac, outdoor)
+        power = _call_thermal(fn, bounded, outdoor)
         if power is not None:
-            return power
-    gain = float(getattr(source, "max_power", 0.0) or 0.0)
-    gain *= float(getattr(source, "power_scale", 1.0) or 1.0)
+            return _clip_configured_power(source, power, outdoor)
+    gain = _rated_heating_watts(source, outdoor)
     efficiency = getattr(source, "efficiency", None)
-    if efficiency is not None:
+    if efficiency is not None and not callable(getattr(source, "rated_heating_capacity", None)):
         try:
             gain *= float(efficiency)
         except (TypeError, ValueError):
             pass
-    return gain * u_frac
+    return _clip_configured_power(source, gain * bounded, outdoor)
 
 
 def identification_aux_series(
