@@ -204,7 +204,7 @@ def test_handle_get_pe_inputs_returns_identification_series(monkeypatch):
     assert result["heating_power"][1]["value"] == pytest.approx(800.0)
 
 
-def test_handle_get_pe_inputs_applies_heater_scales():
+def test_handle_get_pe_inputs_plot_ignores_heater_scale():
     hist = _history()
     runtime = _runtime(hist)
     result = asyncio.run(
@@ -213,7 +213,7 @@ def test_handle_get_pe_inputs_applies_heater_scales():
             {"room_name": "living_room", "heater_scales": {"h": 0.5}},
         )
     )
-    assert result["heating_power"][1]["value"] == pytest.approx(400.0)
+    assert result["heating_power"][1]["value"] == pytest.approx(800.0)
 
 
 def test_handle_get_pe_inputs_unknown_room_raises():

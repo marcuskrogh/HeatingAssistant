@@ -30,48 +30,34 @@ def _u_fraction(raw: Any) -> float:
     return value
 
 
-def _call_thermal(fn: Any, u_frac: float, outdoor: float) -> float | None:
-    try:
-        return float(fn(u_frac, outdoor))
-    except TypeError:
-        try:
-            return float(fn(u_frac))
-        except Exception:
-            return None
-    except Exception:
-        return None
-
-
 def _source_thermal_power(source: Any, u_frac: float, outdoor: float) -> float:
-    """Convert a stored command fraction to model thermal power [W].
+    """Convert a stored command with the configured model power map [W].
 
-    Cooling-capable sources use the piecewise heating/cooling map
-    (``smooth_thermal_power``) so negative ``u`` is cooling capacity, not
-    ``−heating_capacity``. Heat-only sources stay on linear
-    ``thermal_power``.
+    Uses :meth:`HeatSource.configured_display_power`, the same entry as
+    room-view totals. A half command is half of the configured capacity
+    and a full command is that capacity. Identified ``power_scale`` stays
+    in the plant model. This is not a cap on an already-scaled trace.
+
+    If that entry is missing, a negative command on a cooling-capable
+    source stays at 0 rather than ``−heating_capacity`` (SWD-459).
     """
-    if bool(getattr(source, "can_cool", False)):
-        smooth = getattr(source, "smooth_thermal_power", None)
-        if callable(smooth):
-            power = _call_thermal(smooth, u_frac, outdoor)
-            if power is not None:
-                return power
-        fn = getattr(source, "thermal_power", None)
-        if callable(fn):
-            power = _call_thermal(fn, u_frac, outdoor)
-            if power is not None:
-                return power
-        # Never map cooling through heating capacity if the piecewise
+    try:
+        return float(source.configured_display_power(u_frac, outdoor))
+    except Exception:
+        # Never map cooling through heating capacity if the display
         # call failed — that is the SWD-459 bug.
-        if u_frac < 0.0:
+        if bool(getattr(source, "can_cool", False)) and u_frac < 0.0:
             return 0.0
-    fn = getattr(source, "thermal_power", None)
-    if callable(fn):
-        power = _call_thermal(fn, u_frac, outdoor)
-        if power is not None:
-            return power
-    gain = float(getattr(source, "max_power", 0.0) or 0.0)
-    gain *= float(getattr(source, "power_scale", 1.0) or 1.0)
+    rated = getattr(source, "rated_heating_capacity", None)
+    if callable(rated):
+        try:
+            return float(rated(outdoor)) * u_frac
+        except (TypeError, ValueError):
+            pass
+    try:
+        gain = float(getattr(source, "max_power", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        gain = 0.0
     efficiency = getattr(source, "efficiency", None)
     if efficiency is not None:
         try:

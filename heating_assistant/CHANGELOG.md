@@ -4,6 +4,13 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.10.1
+
+- Parameter estimation Heating Input uses the configured model power map.
+  A partial command stays at that fraction of heating or cooling capacity,
+  and a full command is the configured capacity. An identified heater scale
+  no longer lifts the historical trace above the heat pump maximum.
+
 # 2026.09.36
 
 - Overview MPC Load shows the true percent when the last planner solve

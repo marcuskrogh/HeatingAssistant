@@ -48,7 +48,7 @@ def test_pe_series_heat_pump_full_heat_still_uses_heating_capacity():
     )
 
 
-def test_pe_series_heat_pump_cooling_respects_power_scale():
+def test_pe_series_heat_pump_cooling_uses_configured_capacity_not_power_scale():
     hp = HeatPump(
         "hp",
         "living_room",
@@ -58,8 +58,48 @@ def test_pe_series_heat_pump_cooling_respects_power_scale():
         power_scale=0.5,
     )
     series = identification_aux_series([_record(-1.0)], [hp], "living_room")
-    assert series["heating_power"][0]["value"] == pytest.approx(
-        hp.cooling_power(outdoor_temp=20.0)
+    value = series["heating_power"][0]["value"]
+    assert value == pytest.approx(-hp.rated_cooling_power)
+    assert value != pytest.approx(hp.cooling_power(outdoor_temp=20.0))
+
+
+def test_pe_series_follows_configured_model_map_not_a_power_cap():
+    """Mid-range commands stay on the configured line. They are not clipped peaks."""
+
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6300.0,
+        cop_rated=3.5,
+        cooling_cop=2.5,
+        power_scale=2.0,
+    )
+    outdoor = 20.0
+    half = identification_aux_series([_record(0.5, outdoor=outdoor)], [hp], "living_room")
+    full = identification_aux_series([_record(1.0, outdoor=outdoor)], [hp], "living_room")
+    half_cool = identification_aux_series([_record(-0.5)], [hp], "living_room")
+    half_w = half["heating_power"][0]["value"]
+    full_w = full["heating_power"][0]["value"]
+    cool_w = half_cool["heating_power"][0]["value"]
+    assert full_w == pytest.approx(hp.display_smooth_thermal_power(1.0, outdoor))
+    assert half_w == pytest.approx(hp.display_smooth_thermal_power(0.5, outdoor))
+    assert half_w == pytest.approx(0.5 * full_w)
+    assert full_w == pytest.approx(hp.rated_heating_capacity(outdoor))
+    assert full_w <= 6300.0
+    scaled_half = hp.smooth_thermal_power(0.5, outdoor)
+    assert half_w != pytest.approx(min(scaled_half, 6300.0))
+    assert cool_w == pytest.approx(-0.5 * hp.rated_cooling_power)
+    assert cool_w != pytest.approx(max(hp.smooth_thermal_power(-0.5, outdoor), -hp.rated_cooling_power))
+
+
+def test_pe_series_electric_heater_ignores_power_scale():
+    heater = ElectricHeater("h", "living_room", 2000.0, power_scale=3.0)
+    half = identification_aux_series([_record(0.5)], [heater], "living_room")
+    full = identification_aux_series([_record(1.0)], [heater], "living_room")
+    assert half["heating_power"][0]["value"] == pytest.approx(1000.0)
+    assert full["heating_power"][0]["value"] == pytest.approx(2000.0)
+    assert half["heating_power"][0]["value"] != pytest.approx(
+        min(heater.thermal_power(0.5), 2000.0)
     )
 
 
@@ -75,6 +115,24 @@ def test_pe_series_heat_pump_partial_cool_scales_cooling_capacity():
     assert series["heating_power"][0]["value"] == pytest.approx(
         0.5 * hp.cooling_power(outdoor_temp=20.0)
     )
+
+
+def test_pe_series_heat_only_matches_room_display_entry():
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6300.0,
+        cop_rated=3.5,
+        hvac_mode="heat",
+        power_scale=2.0,
+    )
+    series = identification_aux_series(
+        [_record(0.4, outdoor=7.0)], [hp], "living_room",
+    )
+    plotted = series["heating_power"][0]["value"]
+    expected = round(hp.configured_display_power(0.4, 7.0), 2)
+    assert plotted == pytest.approx(expected)
+    assert plotted == pytest.approx(round(hp.display_smooth_thermal_power(0.4, 7.0), 2))
 
 
 def test_pe_series_heat_only_heat_pump_ignores_negative_u():
