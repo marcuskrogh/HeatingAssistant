@@ -1,6 +1,4 @@
 {
-  "install": "bash .agents/sync-skills.sh",
-  "start": "bash .agents/sync-skills.sh",
   "repositoryDependencies": [
     "github.com/marcuskrogh/skills"
   ]
