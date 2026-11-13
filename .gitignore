@@ -36,3 +36,6 @@ docs/*
 
 # Claude Code internal
 .claude/
+
+# Synced agent skills at environment startup — do not commit
+.agents/skills/

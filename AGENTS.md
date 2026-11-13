@@ -1,3 +1,3 @@
 <!-- marcuskrogh/skills:begin -->
-The marcuskrogh/skills catalog is not vendored in this repo. Before delivery work, read ~/src/skills/AGENTS.md and use the catalog at ~/src/skills/skills/. If that checkout is missing, clone https://github.com/marcuskrogh/skills.git to ~/src/skills. The home repo (~/src/home) lists the same pointer.
+Skills load from `.agents/skills/`, gitignored and refreshed from `marcuskrogh/skills` `main` on cloud install and start (`bash scripts/cloud-start.sh`). Cross-repo work starts from `marcuskrogh/home`.
 <!-- marcuskrogh/skills:end -->
