@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.1
+
+- Room temperature filtered is the estimator air temperature. Heat loss is the outdoor model loss, including extra loss while a window override is active. Heating power measured is labelled as commanded model power, and heating power model publishes the same value. Parameter confidence shows the mass, resistance, and time-constant parts.
+
 # 2026.11.0
 
 - The App stores a control log of each control step, each planner solve, and each parameter change. Ingress can download it with `/api/export` and read the columns from `/api/export/schema`. The heat pump energy meter and internal temperature are included when those sensors are available. The controller is unchanged.

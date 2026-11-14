@@ -43,7 +43,8 @@ Nonlinear was then put on the same sample grid as Linear (SWD-532).
 ## Plant
 
 Live thermal plant is **1R1C** (one air node per room) plus CD-EKF on
-`x = [Ta, phi, b]`. There is no hidden wall state and no P tracker.
+`x = [Ta, phi]` with `augment_offsets=False`. There is no integrating
+disturbance state and no bias state. There is no hidden wall state and no P tracker.
 
 ## Pointers
 

@@ -17,6 +17,7 @@ const ROOM_METRICS = [
   '_temperature_offset',
   '_internal_gain_estimated',
   '_heating_power_measured',
+  '_heating_power_model',
   '_heating_power_forecast',
   '_solar_gain_measured',
   '_solar_gain_forecast',
