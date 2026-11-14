@@ -79,6 +79,7 @@ from heatingassistant.app.runtime_const import (
     _MQTT_DISCOVERY_RETRY_MAX_S,
     _logger,
 )
+from heatingassistant.app.control_log_runtime import ControlLogMixin
 from heatingassistant.app.runtime_history import HistoryMixin
 from heatingassistant.app.runtime_nmpc import NmpcMixin
 from heatingassistant.app.runtime_states import HassStatesMixin
@@ -116,6 +117,7 @@ class Binding:
 
 
 class HeatingRuntime(
+    ControlLogMixin,
     TickerMixin,
     NmpcMixin,
     HassStatesMixin,
@@ -276,6 +278,7 @@ class HeatingRuntime(
             retention_days=id_days,
             data_dir=self.data_dir,
         )
+        self._init_control_log()
         self._restore_durable_history(plot_hours=plot_hours)
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
@@ -729,6 +732,7 @@ class HeatingRuntime(
                         _logger.exception(
                             "Failed to purge old identification history"
                         )
+            self._record_control_log_tick(now)
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             return dict(self.actuator_outputs)
@@ -760,6 +764,8 @@ class HeatingRuntime(
         save_config(self.data_dir, self.options)
         self._rebuild_window_maps()
         self.control_engine.update_config(self.options)
+        self._bind_control_log()
+        self._record_control_log_params()
         for key in (
             const.CONF_UPDATE_INTERVAL,
             const.CONF_HORIZON,

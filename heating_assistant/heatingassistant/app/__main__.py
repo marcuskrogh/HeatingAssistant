@@ -155,6 +155,18 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/experiments":
             self._send_json({"experiments": self.runtime.experiments()})
             return
+        if path == "/api/export/schema":
+            self._send_json(self.runtime.export_schema())
+            return
+        if path == "/api/export":
+            query = parse_qs(parsed.query)
+            try:
+                content_type, lines = self.runtime.open_export(query)
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_stream(content_type, lines)
+            return
         if path == "/api/history":
             query = parse_qs(parsed.query)
             entity_ids = query.get("entity_ids", [])
@@ -293,6 +305,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_stream(self, content_type: str, lines: Any) -> None:
+        """Write an export generator without buffering the whole range."""
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for line in lines:
+            self.wfile.write(str(line).encode("utf-8"))
+            self.wfile.flush()
 
     def _send_static(self, path: str, *, prefix: str = "/static/") -> None:
         relative = Path(unquote(path.removeprefix(prefix)))
