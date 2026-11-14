@@ -255,6 +255,10 @@ def parameter_confidence_sensor(runtime: Any, room_name: str) -> tuple[Any, dict
             n_samples=n_samples,
         )
         return round(score, 1), {
+            "confidence_mass": 33.3 if validation.mass_valid else 0.0,
+            "confidence_r_external": 33.3 if validation.r_external_valid else 0.0,
+            "confidence_tau": 33.4 if validation.time_constant_valid else 0.0,
+            "tau_h": round(float(validation.time_constant_hours), 2),
             "thermal_mass": validation.thermal_mass,
             "r_external": validation.r_external,
             "internal_gain": round(float(getattr(room, "internal_gain", 0.0) or 0.0), 2),

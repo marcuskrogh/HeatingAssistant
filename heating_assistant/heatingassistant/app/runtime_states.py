@@ -8,6 +8,7 @@ from typing import Any
 
 from heatingassistant.app import sysid_services
 from heatingassistant.app.runtime_const import _ELECTRICITY_PRICE_ENTITY
+from heatingassistant.app.series import filtered_room_temperature, room_heat_loss_w
 from heatingassistant.engine import const
 
 
@@ -101,6 +102,9 @@ class HassStatesMixin:
                 "last_planner_duration_s": self._last_planner_duration_s(),
                 "mean_tracking_error": mean_error,
                 "unit_of_measurement": "s",
+                "value_kind": "control_cycle_duration",
+                "control_cycle_duration_s": self._last_control_duration_s,
+                "friendly_name": "Control cycle duration",
             },
             now,
         )
@@ -169,18 +173,20 @@ class HassStatesMixin:
                 {"room": name, "unit_of_measurement": "°C"},
                 now,
             )
+            filtered_value = filtered_room_temperature(self, name)
             filtered_attrs: dict[str, Any] = {
                 "room": name,
                 "unit_of_measurement": "°C",
+                "quantity": "ekf_x_hat",
                 "comfort_deviation": None
-                if temperature is None
-                else abs(float(temperature) - float(setpoint)),
+                if filtered_value is None
+                else abs(float(filtered_value) - float(setpoint)),
                 "time_in_range_pct_24h": None,
             }
             filtered_attrs.update(self._live_room_thermal_attrs(name))
             states[f"sensor.heating_assistant_{slug}_temperature_filtered"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_temperature_filtered",
-                "unknown" if temperature is None else temperature,
+                "unknown" if filtered_value is None else filtered_value,
                 filtered_attrs,
                 now,
             )
@@ -202,10 +208,29 @@ class HassStatesMixin:
                 {"room": name, "unit_of_measurement": "°C"},
                 now,
             )
+            power_attrs = {
+                "room": name,
+                "unit_of_measurement": "W",
+                "quantity": "commanded_model_power",
+                "measured": False,
+                "semantics": (
+                    "Configured display power from the applied control fraction. "
+                    "Not a sensor measurement."
+                ),
+            }
             states[f"sensor.heating_assistant_{slug}_heating_power_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_heating_power_measured",
                 power,
-                {"room": name, "unit_of_measurement": "W"},
+                power_attrs,
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_heating_power_model"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_heating_power_model",
+                power,
+                {
+                    **power_attrs,
+                    "legacy_entity_id": f"sensor.heating_assistant_{slug}_heating_power_measured",
+                },
                 now,
             )
             sysid_attrs = sysid_services.sysid_sensor_attrs(self, name)
@@ -249,10 +274,25 @@ class HassStatesMixin:
                 },
                 now,
             )
+            t_air = filtered_value if filtered_value is not None else (
+                None if temperature is None else float(temperature)
+            )
+            heat_loss = room_heat_loss_w(
+                self,
+                name,
+                t_air,
+                None if outdoor is None else float(outdoor),
+                window_open=self.is_window_override_active(name),
+            )
             states[f"sensor.heating_assistant_{slug}_heat_loss"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_heat_loss",
-                0.0,
-                {"room": name, "unit_of_measurement": "W"},
+                "unknown" if heat_loss is None else round(float(heat_loss), 1),
+                {
+                    "room": name,
+                    "unit_of_measurement": "W",
+                    "quantity": "outdoor_heat_loss_model",
+                    "formula": "UA(T_a - T_out) + ua_open term when the window override is active",
+                },
                 now,
             )
             states[f"sensor.heating_assistant_{slug}_energy_total"] = self._ha_state(
