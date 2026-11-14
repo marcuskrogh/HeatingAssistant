@@ -56,17 +56,32 @@ class NmpcMixin:
     def _nmpc_worker_thread(self) -> None:
         started = time.time()
         applied = False
+        result: Any = None
+        plan_logged = False
         try:
             result = self.control_engine.solve_nmpc_blocking()
             self._last_nmpc_duration_s = max(0.0, time.time() - started)
             stamp = time.time()
+            controller = getattr(self.control_engine, "_controller", None)
+            watchdog_before = bool(getattr(controller, "_watchdog_tripped", False))
+            epoch = self._slow_slot_start(stamp)
             applied = bool(
                 self.control_engine.apply_nmpc_result(
                     result,
-                    plan_epoch=self._slow_slot_start(stamp),
+                    plan_epoch=epoch,
                     now=stamp,
                 )
             )
+            watchdog_after = bool(getattr(controller, "_watchdog_tripped", False))
+            self._record_control_log_plan(
+                result if isinstance(result, dict) else None,
+                applied=applied,
+                watchdog_before=watchdog_before,
+                watchdog_after=watchdog_after,
+                now=stamp,
+                epoch=epoch,
+            )
+            plan_logged = True
             note = self.control_engine.consume_watchdog_notification()
             if note:
                 self._emit_nmpc_notify(note)
@@ -80,6 +95,14 @@ class NmpcMixin:
                 note = controller.consume_watchdog_notification()
                 if note:
                     self._emit_nmpc_notify(note)
+            if not plan_logged:
+                self._record_control_log_plan(
+                    result if isinstance(result, dict) else {"accepted": False, "message": "worker failed"},
+                    applied=False,
+                    watchdog_before=bool(getattr(controller, "_watchdog_tripped", False)),
+                    watchdog_after=bool(getattr(controller, "_watchdog_tripped", False)),
+                    now=time.time(),
+                )
         finally:
             self._nmpc_result_ts = time.time()
             self._nmpc_computing = False

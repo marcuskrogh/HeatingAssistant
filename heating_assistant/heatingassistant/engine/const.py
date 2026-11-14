@@ -673,6 +673,18 @@ CONF_PARAMETER_ESTIMATION_HISTORY_DAYS = "parameter_estimation_history_days"
 #: Default number of days the integration-managed JSONL parameter-estimation history
 #: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
 DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS = 90
+#: App-owned control log (schema 2). Ticks and parameter records default to
+#: 400 days; plan records default to 60. ``control_log_retention_days`` may be
+#: an int (ticks and parameters; plans stay at most 60) or a mapping
+#: ``{tick, plan, params}``.
+CONF_CONTROL_LOG_RETENTION_DAYS = "control_log_retention_days"
+DEFAULT_CONTROL_LOG_TICK_RETENTION_DAYS = 400
+DEFAULT_CONTROL_LOG_PLAN_RETENTION_DAYS = 60
+DEFAULT_CONTROL_LOG_PARAMS_RETENTION_DAYS = 400
+CONTROL_LOG_SCHEMA = 2
+CONTROL_LOG_GZIP_AFTER_DAYS = 2
+#: Optional logged input. Not used by the controller.
+HEAT_PUMP_ENERGY_ENTITY = "sensor.heat_pump_energi"
 #: Wall-clock cap for one PE NLP [s]. Configurable under Configuration → Advanced.
 CONF_PE_MAX_COMPUTE_S = "pe_max_compute_s"
 DEFAULT_PE_MAX_COMPUTE_S = 60.0
