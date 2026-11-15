@@ -23,10 +23,13 @@ each sample (default 900 s), once:
 
 Room-temperature tags between samples update the estimator with the real
 elapsed time. They do not solve and they do not write. Price tags and other
-sensor tags only store the new value. A sample does not write the previous
-plan's next step while the solve is still running: the last accepted command
-stays in place until the one write for that sample. Consecutive rejects can
-trip the watchdog to `u = 0`, and that zeroing is one write.
+sensor tags only store the new value. Saving configuration or a room schedule
+runs one immediate cycle: the estimator steps by the real elapsed time since
+its last update, then there is one planner solve and one actuator write.
+A sample does not write the previous plan's next step while the solve is
+still running: the last accepted command stays in place until the one write
+for that sample. Consecutive rejects can trip the watchdog to `u = 0`, and
+that zeroing is one write.
 
 Leftover names in code (`refresh_p_command`, `_p_command_vector`,
 `u_ref_gate`) are API leftovers. They **hold `U*`**, they do not run

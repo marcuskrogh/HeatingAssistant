@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from heatingassistant.app.runtime import HeatingRuntime
+from heatingassistant.engine.controller.ekf import _InnovationEKF
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
 from heatingassistant.mqtt.topics import MqttTagPayload
 
@@ -56,15 +57,15 @@ def _watch(runtime: HeatingRuntime) -> dict[str, list]:
         return original(dt, *args, **kwargs)
 
     ekf.predict_for = _predict_for  # type: ignore[method-assign]
-    n_slow = controller.timing.n_slow
-    n_fast = controller.timing.n_fast
 
     def _solve():
+        live = runtime.control_engine._controller
+        assert live is not None
         seen["solves"].append(runtime._active_tick_now)
         return {
             "accepted": True,
-            "u_star": np.full((n_slow, 1), 0.55),
-            "t_ref": np.full((n_fast, 1), 21.0),
+            "u_star": np.full((live.timing.n_slow, 1), 0.55),
+            "t_ref": np.full((live.timing.n_fast, 1), 21.0),
             "fun": 0.0,
             "message": "ok",
         }
@@ -174,3 +175,31 @@ def test_predict_dt_is_real_elapsed_time(tmp_path: Path) -> None:
     assert seen["dt"] == pytest.approx([37.0, 900.0, 1800.0])
     assert seen["solves"] == [origin + 900.0, origin + 1800.0]
     assert len(seen["writes"]) == 2
+
+
+def test_config_save_predicts_real_elapsed_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = _runtime(tmp_path)
+    seen = _watch(runtime)
+    origin = 20_000.0
+    runtime._ekf_last_t = origin
+    runtime._anchor_schedule_epoch(origin)
+    original = _InnovationEKF.predict_for
+
+    def _predict_for(self, dt, *args, **kwargs):
+        seen["dt"].append(float(dt))
+        return original(self, dt, *args, **kwargs)
+
+    monkeypatch.setattr(_InnovationEKF, "predict_for", _predict_for)
+
+    async def _run() -> None:
+        await _tag(runtime, "living_temp", 19.0, origin)
+        await runtime.update_config({"energy_price_weight": 0.0}, now=origin + 123.0)
+        thread = getattr(runtime, "_nmpc_thread", None)
+        if thread is not None:
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+
+    asyncio.run(_run())
+    assert seen["dt"] == pytest.approx([123.0])
+    assert seen["solves"] == [origin + 123.0]
+    assert seen["writes"] == pytest.approx([0.55])

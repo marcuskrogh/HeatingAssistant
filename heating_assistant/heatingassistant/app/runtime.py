@@ -809,7 +809,11 @@ class HeatingRuntime(
             finally:
                 self._control_lock.release()
 
-    async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
+    async def update_config(
+        self,
+        updates: Mapping[str, Any],
+        now: float | None = None,
+    ) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""
 
         reject_negative_p_gating_knobs(updates)
@@ -850,7 +854,7 @@ class HeatingRuntime(
         # Persist locally even when Mosquitto is down (SWD-269) — Ingress must
         # not 502 on Controller Tuning Apply / config writes.
         await self._best_effort_mqtt(self.publish_bindings(), "bindings")
-        await self.run_control_cycle()
+        await self.run_control_tick(now=now)
         return dict(self.options)
 
     async def update_schedule(
@@ -859,6 +863,7 @@ class HeatingRuntime(
         *,
         periods: list[Mapping[str, Any]] | None = None,
         enabled: bool | None = None,
+        now: float | None = None,
     ) -> dict[str, Any]:
         """Persist one room schedule in App config for dashboard edits."""
 
@@ -881,7 +886,7 @@ class HeatingRuntime(
         self.control_engine.update_config(self.options)
         self._restore_estimated_parameters()
         self._save_runtime_state()
-        await self.run_control_cycle()
+        await self.run_control_tick(now=now)
         return self.schedules()
 
     async def apply_service(self, domain: str, service: str, data: Mapping[str, Any]) -> dict[str, Any]:
