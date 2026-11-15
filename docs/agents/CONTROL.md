@@ -52,6 +52,27 @@ Live thermal plant is **1R1C** (one air node per room) plus CD-EKF on
 `x = [Ta, phi]` with `augment_offsets=False`. There is no integrating
 disturbance state and no bias state. There is no hidden wall state and no P tracker.
 
+## Identified parameters
+
+The estimator and the planner copy capacitance, drift, and solar gain from
+the house model when they are built, and again whenever stored parameters
+are restored. The estimator's temperature and covariance stay on the same
+filter. A config save still rebuilds the controller after that restore, so
+the copied matrices match the restored model.
+
+The Living Room fit from 8–12 Nov 2026 is in
+`heatingassistant/engine/data/living_room_estimated_params.json`. If the
+active snapshot is still the 26 Sep set (about 277 MJ/K, 284 W/K, solar
+scale 0.25), startup replaces it with that fit and keeps the 26 Sep entry
+at the front of parameter history. `revert_parameters(..., history_index=0)`
+promotes the 26 Sep entry back to active.
+
+The fit's heat loss is 110.12 W/K. Capacity is 1.329e7 J/K, solar scale is
+0.179, and the heat pump power scale is 0.15. The pump's minimum output is
+`internal_gain = 1550` W. `min_power` on the heat pump does not change
+thermal output. The split between that constant and the heat per degree of
+offset is the uncertain part. The heat-loss coefficient is the reliable one.
+
 ## Pointers
 
 | Live | Historical (do not treat as current) |

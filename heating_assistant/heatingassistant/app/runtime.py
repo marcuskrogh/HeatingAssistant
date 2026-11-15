@@ -41,6 +41,7 @@ from heatingassistant.engine.electricity_price import (
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.solar_model import coerce_solar_gain_smoothing_tau_s
+from heatingassistant.engine.living_room_fit import apply_living_room_fit
 from heatingassistant.engine.parameter_lifecycle import (
     PARAMETER_HISTORY_KEY,
     PE_FIT_RESULTS_KEY,
@@ -174,6 +175,8 @@ class HeatingRuntime(
             self.state.get("room_temperatures") or {}
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
+        if apply_living_room_fit(self.options):
+            save_config(self.data_dir, self.options)
         self.control_engine = ControlEngine(self.options)
         self.control_engine.restore_solar_lpf_runtime(
             filt=self.state.get(const.STATE_SOLAR_GAIN_FILT),
@@ -819,6 +822,8 @@ class HeatingRuntime(
         reject_negative_p_gating_knobs(updates)
         was_enabled = bool(self.options.get("system_enabled", False))
         self.options = {**self.options, **dict(updates)}
+        if apply_living_room_fit(self.options):
+            save_config(self.data_dir, self.options)
         now_enabled = bool(self.options.get("system_enabled", False))
         if now_enabled and not was_enabled:
             self._anchor_schedule_epoch(time.time())
