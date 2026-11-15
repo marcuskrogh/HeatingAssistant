@@ -21,10 +21,10 @@ published, tomorrow slots are filled from ``forecast`` until ``tomorrow`` or
 from __future__ import annotations
 
 import logging
-import statistics
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -377,20 +377,21 @@ def _local_day_start(now: datetime, day_offset: int) -> datetime:
     return midnight + timedelta(days=day_offset)
 
 
-# A tariff-less republish drops every overlapping slot at once. One changed
-# hour must not trip the guard, so require a handful of shared stamps and a
-# majority of them.
-PRICE_TARIFF_MIN_OVERLAP = 8
-PRICE_TARIFF_MOST_FRACTION = 0.5
-# Hourly slots still cover "now". A stamp older than this does not.
+# A stamp older than this does not cover the current quarter.
 PRICE_TARIFF_COVER_S = 3600.0
+# Published consumer prices are DKK/kWh. A residual outside this band is not a spot price.
+_SPOT_MIN = -0.05
+_SPOT_MAX = 15.0
+# Systemtariff notes, slugified the same way the integration publishes them.
+_FIXED_ADDITION_KEYS = ("transmissions_nettarif", "systemtarif", "elafgift")
+_COPENHAGEN = ZoneInfo("Europe/Copenhagen")
+PRICE_LATCH_STATE_KEY = "price_day_latch"
 
 # consider() results
-PRICE_GUARD_ACCEPT = "accept"
-PRICE_GUARD_ENGAGE = "engage"
-PRICE_GUARD_HOLD = "hold"
-PRICE_GUARD_CLEAR = "clear"
-PRICE_GUARD_EXPIRE = "expire"
+PRICE_LATCH_PASSTHROUGH = "passthrough"
+PRICE_LATCH_LATCHED = "latched"
+PRICE_LATCH_IGNORED = "ignored"
+PRICE_LATCH_AWAITING = "awaiting"
 
 
 def tariff_hour_map(attrs: Mapping[str, Any]) -> Optional[dict]:
@@ -440,102 +441,308 @@ def series_covers_now(attrs: Mapping[str, Any], now: datetime) -> bool:
 def live_price_from_series(attrs: Mapping[str, Any], now: datetime) -> Optional[float]:
     """Price at ``now`` from ``attrs``, without using the sensor state."""
 
+    if not series_covers_now(attrs, now):
+        return None
     series = collect_price_series(dict(attrs), now)
     if not series:
         return None
-    if series_covers_now(attrs, now):
-        aligned = align_prices_to_horizon(series, now, 1, 900.0, 0.0, current_price=None)
-        return float(aligned[0]) if aligned else None
-    sorted_series = sorted(series, key=lambda tp: _as_utc(tp[0]))
-    return float(sorted_series[0][1])
+    aligned = align_prices_to_horizon(series, now, 1, 900.0, 0.0, current_price=None)
+    return float(aligned[0]) if aligned else None
 
 
-def _median_drop_is_tariff_strip(
-    good: Mapping[str, Any],
-    incoming: Mapping[str, Any],
-    now: datetime,
-    drop_fraction: float,
-) -> bool:
-    previous = _prices_by_stamp(good, now)
-    current = _prices_by_stamp(incoming, now)
-    drops: list[float] = []
-    for stamp, old in previous.items():
-        if stamp not in current or old <= 1e-9:
+def _copenhagen_date(stamp: datetime) -> date:
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=_COPENHAGEN)
+    return stamp.astimezone(_COPENHAGEN).date()
+
+
+def _row_date(row: Mapping[str, Any]) -> Optional[date]:
+    stamp = _extract_timestamp(dict(row))
+    if stamp is None:
+        return None
+    return _copenhagen_date(stamp)
+
+
+def _dated_rows(raw: Any) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(raw, list):
+        return grouped
+    for row in raw:
+        if not isinstance(row, Mapping):
             continue
-        drops.append((old - current[stamp]) / old)
-    if len(drops) < PRICE_TARIFF_MIN_OVERLAP:
+        day = _row_date(row)
+        if day is None:
+            continue
+        grouped.setdefault(day.isoformat(), []).append(dict(row))
+    return grouped
+
+
+def _hourly_tariffs(attrs: Mapping[str, Any]) -> Optional[dict[int, float]]:
+    """24 hourly tariffs, or None. An empty map is the empty-dataset path."""
+
+    hours = tariff_hour_map(attrs)
+    if not hours:
+        return None
+    parsed: dict[int, float] = {}
+    for key, value in hours.items():
+        try:
+            hour = int(str(key))
+            amount = float(value)
+        except (TypeError, ValueError):
+            return None
+        if hour < 0 or hour > 23 or amount <= 0.0:
+            return None
+        parsed[hour] = amount
+    if set(parsed) != set(range(24)):
+        return None
+    return parsed
+
+
+def _fixed_additions(attrs: Mapping[str, Any]) -> Optional[float]:
+    """Sum of VAT-inclusive fixed additions, or None when one is missing."""
+
+    raw = attrs.get("tariffs")
+    if not isinstance(raw, Mapping):
+        return None
+    additions = raw.get("additional_tariffs")
+    if not isinstance(additions, Mapping) or not additions:
+        return None
+    total = 0.0
+    for key in _FIXED_ADDITION_KEYS:
+        if key not in additions:
+            return None
+    for value in additions.values():
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            return None
+        if amount <= 0.0:
+            return None
+        total += amount
+    return total
+
+
+def _sample_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_hour: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        stamp = _extract_timestamp(row)
+        if stamp is None:
+            continue
+        by_hour.setdefault(_local_date_hour(stamp), row)
+    chosen = [by_hour[hour] for hour in (2, 12, 18) if hour in by_hour]
+    if chosen:
+        return chosen
+    return list(by_hour.values())[:8]
+
+
+def _local_date_hour(stamp: datetime) -> int:
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=_COPENHAGEN)
+    return stamp.astimezone(_COPENHAGEN).hour
+
+
+def _spot_matches(rows: list[dict[str, Any]], hourly: dict[int, float], additions: float, scale: float) -> bool:
+    sampled = _sample_rows(rows)
+    if not sampled:
         return False
-    over = sum(1 for drop in drops if drop > drop_fraction)
-    median = float(statistics.median(drops))
-    return median > drop_fraction and over / len(drops) >= PRICE_TARIFF_MOST_FRACTION
+    for row in sampled:
+        stamp = _extract_timestamp(row)
+        price = _extract_price_value(row)
+        if stamp is None or price is None:
+            return False
+        spot = float(price) / scale - hourly[_local_date_hour(stamp)] - additions
+        if spot < _SPOT_MIN or spot > _SPOT_MAX:
+            return False
+    return True
 
 
-def _explicit_tariff_strip(good: Mapping[str, Any], incoming: Mapping[str, Any]) -> bool:
-    previous = tariff_hour_map(good)
-    current = tariff_hour_map(incoming)
-    if previous is None or current is None:
-        return False
-    return len(previous) > 0 and len(current) == 0
+def validate_price_update(attrs: Mapping[str, Any]) -> tuple[bool, str]:
+    """Return whether an Energi Data Service payload includes its tariffs.
+
+    The published price is ``(spot + hourly tariff + fixed additions) * (1 + VAT)``.
+    ``show_with_vat`` puts that same VAT on ``tariffs`` and ``additional_tariffs``,
+    so the check is ``price - hourly[hour] - sum(additional_tariffs)`` on the
+    attributes the App receives. The default cost template adds nothing.
+    """
+
+    hourly = _hourly_tariffs(attrs)
+    if hourly is None:
+        hours = tariff_hour_map(attrs)
+        if hours is not None and len(hours) == 0:
+            return False, "empty tariffs"
+        return False, "tariffs"
+    additions = _fixed_additions(attrs)
+    if additions is None:
+        return False, "additions"
+    scale = 100.0 if attrs.get("use_cent") else 1.0
+    blocks: list[list[dict[str, Any]]] = []
+    for key in ("raw_today", "raw_tomorrow"):
+        grouped = _dated_rows(attrs.get(key))
+        for rows in grouped.values():
+            blocks.append(rows)
+    if not blocks:
+        forecast_rows = [
+            dict(row)
+            for row in attrs.get("forecast") or []
+            if isinstance(row, Mapping)
+        ]
+        if forecast_rows:
+            blocks.append(forecast_rows)
+    if not blocks:
+        return False, "series"
+    for rows in blocks:
+        if not _spot_matches(rows, hourly, additions, scale):
+            return False, "spot"
+    today_rows = [
+        row
+        for rows in _dated_rows(attrs.get("raw_today")).values()
+        for row in rows
+    ]
+    if today_rows and isinstance(attrs.get("today_mean"), (int, float)):
+        prices = [price for row in today_rows if (price := _extract_price_value(row)) is not None]
+        if prices and abs(sum(prices) / len(prices) - float(attrs["today_mean"])) > 0.05:
+            return False, "today_mean"
+    return True, ""
 
 
-class PriceTariffGuard:
-    """Hold the last good price series across a tariff-less republish."""
+class LatchDecision:
+    """What to store after one price update."""
 
-    def __init__(self, *, drop_fraction: float, hold_s: float) -> None:
-        self.drop_fraction = float(drop_fraction)
-        self.hold_s = float(hold_s)
-        self.good_attrs: Optional[dict[str, Any]] = None
-        self.holding = False
-        self.hold_started: Optional[float] = None
-        self.engagements = 0
+    def __init__(self, attrs: Optional[dict[str, Any]], event: str, *, warn: bool, reason: str) -> None:
+        self.attrs = attrs
+        self.event = event
+        self.warn = warn
+        self.reason = reason
 
-    def consider(
-        self,
-        attrs: Mapping[str, Any],
-        now_ts: float,
-        now: datetime,
-    ) -> tuple[dict[str, Any], str]:
-        """Return the attributes to store and one of the PRICE_GUARD_* events."""
 
-        incoming = dict(attrs)
-        if self.good_attrs is None:
-            self.good_attrs = dict(incoming)
-            self.holding = False
-            self.hold_started = None
-            return incoming, PRICE_GUARD_ACCEPT
+class PriceDayLatch:
+    """Keep one validated price series per local day. Never overwrite it."""
 
-        suspect = _explicit_tariff_strip(self.good_attrs, incoming) or _median_drop_is_tariff_strip(
-            self.good_attrs,
-            incoming,
-            now,
-            self.drop_fraction,
-        )
-        if not suspect:
-            was_holding = self.holding
-            self.holding = False
-            self.hold_started = None
-            self.good_attrs = dict(incoming)
-            return incoming, PRICE_GUARD_CLEAR if was_holding else PRICE_GUARD_ACCEPT
+    def __init__(self) -> None:
+        self.days: dict[str, list[dict[str, Any]]] = {}
+        self.forecast: list[dict[str, Any]] = []
+        self.tariffs: Optional[dict[str, Any]] = None
+        self.ignored = 0
+        self.eds = False
+        self.invalid_streak = False
+        self.awaiting_valid = False
+        self.live_fallback = False
 
-        if not series_covers_now(self.good_attrs, now):
-            self.holding = False
-            self.hold_started = None
-            self.good_attrs = dict(incoming)
-            return incoming, PRICE_GUARD_EXPIRE
+    @classmethod
+    def from_dict(cls, raw: Any) -> "PriceDayLatch":
+        latch = cls()
+        if not isinstance(raw, Mapping):
+            return latch
+        days = raw.get("days")
+        if isinstance(days, Mapping):
+            for key, rows in days.items():
+                if isinstance(key, str) and isinstance(rows, list):
+                    latch.days[key] = [dict(row) for row in rows if isinstance(row, Mapping)]
+        forecast = raw.get("forecast")
+        if isinstance(forecast, list):
+            latch.forecast = [dict(row) for row in forecast if isinstance(row, Mapping)]
+        tariffs = raw.get("tariffs")
+        if isinstance(tariffs, Mapping):
+            latch.tariffs = dict(tariffs)
+        try:
+            latch.ignored = int(raw.get("ignored") or 0)
+        except (TypeError, ValueError):
+            latch.ignored = 0
+        latch.eds = bool(raw.get("eds")) or bool(latch.days) or bool(latch.forecast)
+        latch.awaiting_valid = bool(latch.eds and not latch.days and not latch.forecast)
+        return latch
 
-        if (
-            self.holding
-            and self.hold_started is not None
-            and float(now_ts) - float(self.hold_started) >= self.hold_s
-        ):
-            self.holding = False
-            self.hold_started = None
-            self.good_attrs = dict(incoming)
-            return incoming, PRICE_GUARD_EXPIRE
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "days": {key: [dict(row) for row in rows] for key, rows in self.days.items()},
+            "forecast": [dict(row) for row in self.forecast],
+            "tariffs": dict(self.tariffs) if isinstance(self.tariffs, dict) else None,
+            "ignored": int(self.ignored),
+            "eds": bool(self.eds),
+        }
 
-        if not self.holding:
-            self.holding = True
-            self.hold_started = float(now_ts)
-            self.engagements += 1
-            return dict(self.good_attrs), PRICE_GUARD_ENGAGE
-        return dict(self.good_attrs), PRICE_GUARD_HOLD
+    def _prune(self, now: datetime) -> None:
+        cutoff = (_copenhagen_date(now) - timedelta(days=1)).isoformat()
+        self.days = {key: rows for key, rows in self.days.items() if key >= cutoff}
+        kept: list[dict[str, Any]] = []
+        for row in self.forecast:
+            day = _row_date(row)
+            if day is not None and day.isoformat() < cutoff:
+                continue
+            kept.append(row)
+        self.forecast = kept
+
+    def compose(self, now: datetime) -> dict[str, Any]:
+        """Attributes the planner should read. Latched days replace forecast days."""
+
+        today = _copenhagen_date(now)
+        tomorrow = today + timedelta(days=1)
+        attrs: dict[str, Any] = {}
+        today_rows = self.days.get(today.isoformat())
+        tomorrow_rows = self.days.get(tomorrow.isoformat())
+        if today_rows:
+            attrs["raw_today"] = [dict(row) for row in today_rows]
+        if tomorrow_rows:
+            attrs["raw_tomorrow"] = [dict(row) for row in tomorrow_rows]
+            attrs["tomorrow_valid"] = True
+        if self.forecast:
+            attrs["forecast"] = [dict(row) for row in self.forecast]
+        if isinstance(self.tariffs, dict):
+            attrs["tariffs"] = dict(self.tariffs)
+        return attrs
+
+    def covers(self, now: datetime) -> bool:
+        return series_covers_now(self.compose(now), now)
+
+    def consider(self, attrs: Mapping[str, Any], now: datetime) -> LatchDecision:
+        """Accept a new day only when the payload validates. Latched days stay."""
+
+        self._prune(now)
+        if "tariffs" not in attrs and not self.eds:
+            self.awaiting_valid = False
+            self.live_fallback = False
+            return LatchDecision(dict(attrs), PRICE_LATCH_PASSTHROUGH, warn=False, reason="")
+
+        self.eds = True
+        valid, reason = validate_price_update(attrs)
+        if not valid:
+            self.ignored += 1
+            warn = not self.invalid_streak
+            self.invalid_streak = True
+            if self.days or self.forecast:
+                self.awaiting_valid = False
+                self.live_fallback = not self.covers(now)
+                return LatchDecision(
+                    self.compose(now),
+                    PRICE_LATCH_IGNORED,
+                    warn=warn,
+                    reason=reason,
+                )
+            self.awaiting_valid = True
+            self.live_fallback = False
+            return LatchDecision(None, PRICE_LATCH_AWAITING, warn=warn, reason=reason)
+
+        self.invalid_streak = False
+        self.awaiting_valid = False
+        if attrs.get("tomorrow_valid") is False:
+            sources = ("raw_today",)
+        else:
+            sources = ("raw_today", "raw_tomorrow")
+        for source in sources:
+            for day, rows in _dated_rows(attrs.get(source)).items():
+                if day not in self.days and rows:
+                    self.days[day] = rows
+        if isinstance(attrs.get("forecast"), list):
+            self.forecast = []
+            for row in attrs["forecast"]:
+                if not isinstance(row, Mapping):
+                    continue
+                day = _row_date(row)
+                if day is not None and day.isoformat() in self.days:
+                    continue
+                self.forecast.append(dict(row))
+        if isinstance(attrs.get("tariffs"), Mapping):
+            self.tariffs = dict(attrs["tariffs"])
+        self._prune(now)
+        self.live_fallback = not self.covers(now)
+        return LatchDecision(self.compose(now), PRICE_LATCH_LATCHED, warn=False, reason="")

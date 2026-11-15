@@ -113,36 +113,6 @@ def _weather() -> list[dict]:
     ]
 
 
-_GOOD_STATE = 1.406
-_STRIPPED_STATE = 0.854
-_RESTORED_STATE = 1.42
-_STRIP_FACTOR = 1.269 / 1.887
-_TARIFFS = {
-    "tariffs": {str(hour): 0.55 for hour in range(24)},
-    "additional_tariffs": {"elafgift": 0.09},
-}
-_TARIFFS_EMPTY = {"tariffs": {}, "additional_tariffs": {}}
-
-
-def _good_raw() -> list[dict]:
-    rows = _raw_today()
-    for row in rows:
-        stamp = datetime.fromisoformat(row["hour"])
-        if stamp.hour == 12 and stamp.minute == 15:
-            row["price"] = _GOOD_STATE
-    return rows
-
-
-def _stripped(rows: list[dict]) -> list[dict]:
-    scaled = []
-    for row in rows:
-        price = round(float(row["price"]) * _STRIP_FACTOR, 5)
-        stamp = datetime.fromisoformat(str(row["hour"]))
-        if stamp.hour == 12 and stamp.minute == 15 and stamp.day == 15:
-            price = _STRIPPED_STATE
-        scaled.append({**row, "price": price})
-    return scaled
-
 
 def _options(*, horizon_h: float, **extra: object) -> dict:
     return {
@@ -400,233 +370,303 @@ def test_startup_writes_one_tick_row(tmp_path: Path) -> None:
     assert len(rows) == 1
 
 
-def _restored_raw() -> list[dict]:
-    rows = _good_raw()
-    for row in rows:
-        stamp = datetime.fromisoformat(row["hour"])
-        if stamp.hour == 12 and stamp.minute == 15:
-            row["price"] = _RESTORED_STATE
+_ADDITIONS = {
+    "transmissions_nettarif": 0.054,
+    "systemtarif": 0.09,
+    "elafgift": 0.01,
+}
+_ADDITION_SUM = 0.154
+
+
+def _hourly(hour: int) -> float:
+    if hour <= 5:
+        return 0.133
+    if 17 <= hour <= 21:
+        return 1.194
+    return 0.398
+
+
+def _spot_value(index: int) -> float:
+    return round(0.40 + (index % 8) * 0.02, 5)
+
+
+def _quarters(day: datetime) -> list[dict]:
+    rows = []
+    for index in range(96):
+        stamp = day + timedelta(minutes=15 * index)
+        price = round(_spot_value(index) + _hourly(stamp.hour) + _ADDITION_SUM, 5)
+        rows.append({"hour": stamp.isoformat(), "price": price})
     return rows
 
 
-def test_tariff_less_update_keeps_the_good_series_until_it_returns(tmp_path: Path, caplog) -> None:
+def _tariff_block() -> dict:
+    return {
+        "tariffs": {str(hour): _hourly(hour) for hour in range(24)},
+        "additional_tariffs": dict(_ADDITIONS),
+    }
+
+
+def _eds(rows: list[dict], **extra: object) -> dict:
+    attrs = {
+        "raw_today": rows,
+        "today_mean": round(sum(row["price"] for row in rows) / len(rows), 3),
+        "tariffs": _tariff_block(),
+    }
+    attrs.update(extra)
+    return attrs
+
+
+def _quarter_price(rows: list[dict], hour: int, minute: int) -> float:
+    for row in rows:
+        stamp = datetime.fromisoformat(row["hour"])
+        if stamp.hour == hour and stamp.minute == minute:
+            return float(row["price"])
+    raise AssertionError(f"missing {hour:02d}:{minute:02d}")
+
+
+def _stripped_rows(rows: list[dict]) -> list[dict]:
+    stripped = []
+    for row in rows:
+        stamp = datetime.fromisoformat(row["hour"])
+        price = round(float(row["price"]) - _hourly(stamp.hour) - _ADDITION_SUM, 5)
+        stripped.append({**row, "price": price})
+    return stripped
+
+
+class _MoveableDateTime(datetime):
+    current = _NOW
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return cls.current.replace(tzinfo=None)
+        return cls.current.astimezone(tz)
+
+
+def _freeze(runtime: HeatingRuntime, moment: datetime) -> None:
+    _MoveableDateTime.current = moment
+    runtime_mod.datetime = _MoveableDateTime
+    local = moment.astimezone(_ZONE)
+    runtime._schedule_now_local = lambda: local  # type: ignore[method-assign]
+
+
+def test_valid_day_latches_and_a_tariff_less_update_is_ignored(tmp_path: Path, caplog) -> None:
     previous_tz = _use_copenhagen()
     previous_datetime = runtime_mod.datetime
-    runtime_mod.datetime = _FrozenDateTime
     runtime = _runtime(tmp_path, horizon_h=2)
     seen: list[dict] = []
     real = _watch(seen)
-    good_raw = _good_raw()
-    bad_raw = _stripped(good_raw)
-    restored = _restored_raw()
+    today = _quarters(datetime(2026, 11, 15, 0, 0, tzinfo=_ZONE))
+    expected = _quarter_price(today, 12, 15)
+    stripped = _stripped_rows(today)
     try:
-        with caplog.at_level(logging.INFO, logger="heatingassistant.app.runtime"):
-            asyncio.run(
-                _seed(
-                    runtime,
-                    {
-                        "raw_today": good_raw,
-                        "today": [row["price"] for row in good_raw],
-                        "forecast": _forecast(_FORECAST_BEFORE),
-                        "tariffs": _TARIFFS,
-                    },
-                )
-            )
+        _freeze(runtime, _NOW)
+        with caplog.at_level(logging.WARNING, logger="heatingassistant.app.runtime"):
+            asyncio.run(_seed(runtime, _eds(today)))
             asyncio.run(_tick(runtime))
-            asyncio.run(
-                _publish(
-                    runtime,
-                    "energy_price",
-                    MqttTagPayload(
-                        _STRIPPED_STATE,
-                        ts=_STAMP + 1,
-                        attributes={
-                            "raw_today": bad_raw,
-                            "today": [row["price"] for row in bad_raw],
-                            "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
-                            "tariffs": _TARIFFS_EMPTY,
-                        },
-                    ),
+            for _ in range(2):
+                asyncio.run(
+                    _publish(
+                        runtime,
+                        "energy_price",
+                        MqttTagPayload(
+                            _quarter_price(stripped, 12, 15),
+                            ts=_STAMP + 1,
+                            attributes={
+                                "raw_today": stripped,
+                                "today_mean": round(sum(row["price"] for row in stripped) / len(stripped), 3),
+                                "tariffs": {"tariffs": {}, "additional_tariffs": {}},
+                            },
+                        ),
+                    )
                 )
-            )
             asyncio.run(_tick(runtime, _STAMP + 1))
-            held = runtime.status()["control"]["price_tariff_guard_engagements"]
-            asyncio.run(
-                _publish(
-                    runtime,
-                    "energy_price",
-                    MqttTagPayload(
-                        _RESTORED_STATE,
-                        ts=_STAMP + 2,
-                        attributes={
-                            "raw_today": restored,
-                            "today": [row["price"] for row in restored],
-                            "forecast": _forecast(_FORECAST_AFTER),
-                            "tariffs": _TARIFFS,
-                        },
-                    ),
-                )
-            )
-            asyncio.run(_tick(runtime, _STAMP + 2))
     finally:
         _restore_solve(real)
         runtime_mod.datetime = previous_datetime
         _restore_tz(previous_tz)
 
-    assert [list(item["price_forecast"])[0] for item in seen[-3:]] == pytest.approx(
-        [_GOOD_STATE, _GOOD_STATE, _RESTORED_STATE]
+    assert [list(item["price_forecast"])[0] for item in seen[-2:]] == pytest.approx(
+        [expected, expected]
     )
-    prices = [row["price"] for row in _rows(runtime)[-3:]]
-    assert prices == pytest.approx([_GOOD_STATE, _GOOD_STATE, _RESTORED_STATE])
-    assert held == 1
-    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 1
-    assert "tariff-less" in caplog.text
-    assert "tariff guard cleared" in caplog.text
+    assert [row["price"] for row in _rows(runtime)[-2:]] == pytest.approx([expected, expected])
+    assert runtime.status()["control"]["price_latch_ignored"] == 2
+    assert caplog.text.count("failed validation") == 1
+    assert "2026-11-15" in runtime._price_latch.days
 
 
-def test_tariff_guard_uses_the_price_drop_when_tariffs_are_absent(tmp_path: Path) -> None:
+def test_next_valid_day_is_latched_and_an_invalid_one_is_not(tmp_path: Path) -> None:
     previous_tz = _use_copenhagen()
     previous_datetime = runtime_mod.datetime
-    runtime_mod.datetime = _FrozenDateTime
     runtime = _runtime(tmp_path, horizon_h=2)
     seen: list[dict] = []
     real = _watch(seen)
-    good_raw = _good_raw()
+    today = _quarters(datetime(2026, 11, 15, 0, 0, tzinfo=_ZONE))
+    tomorrow = _quarters(datetime(2026, 11, 16, 0, 0, tzinfo=_ZONE))
+    bad_tomorrow = _stripped_rows(tomorrow)
+    later = datetime(2026, 11, 16, 0, 15, tzinfo=_ZONE)
     try:
-        asyncio.run(
-            _seed(
-                runtime,
-                {
-                    "raw_today": good_raw,
-                    "today": [row["price"] for row in good_raw],
-                    "forecast": _forecast(_FORECAST_BEFORE),
-                },
-            )
-        )
+        _freeze(runtime, _NOW)
+        asyncio.run(_seed(runtime, _eds(today)))
         asyncio.run(
             _publish(
                 runtime,
                 "energy_price",
                 MqttTagPayload(
-                    _STRIPPED_STATE,
+                    0.2,
                     ts=_STAMP + 1,
-                    attributes={
-                        "raw_today": _stripped(good_raw),
-                        "today": [row["price"] for row in _stripped(good_raw)],
-                        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
-                    },
+                    attributes=_eds(today, raw_tomorrow=bad_tomorrow, tomorrow_valid=True),
                 ),
             )
         )
-        asyncio.run(_tick(runtime))
+        ignored = runtime.status()["control"]["price_latch_ignored"]
+        asyncio.run(
+            _publish(
+                runtime,
+                "energy_price",
+                MqttTagPayload(
+                    0.2,
+                    ts=_STAMP + 2,
+                    attributes=_eds(
+                        today,
+                        raw_tomorrow=tomorrow,
+                        tomorrow_valid=True,
+                        forecast=[
+                            {
+                                "hour": datetime(2026, 11, 17, 0, 0, tzinfo=_ZONE).isoformat(),
+                                "price": 1.25,
+                            }
+                        ],
+                    ),
+                ),
+            )
+        )
+        _freeze(runtime, later.astimezone(timezone.utc))
+        asyncio.run(_tick(runtime, later.timestamp()))
     finally:
         _restore_solve(real)
         runtime_mod.datetime = previous_datetime
         _restore_tz(previous_tz)
 
-    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_GOOD_STATE)
-    assert _rows(runtime)[-1]["price"] == pytest.approx(_GOOD_STATE)
-    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 1
+    assert ignored == 1
+    assert "2026-11-16" in runtime._price_latch.days
+    assert "2026-11-17" not in runtime._price_latch.days
+    assert runtime._price_latch.forecast[0]["price"] == pytest.approx(1.25)
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_quarter_price(tomorrow, 0, 15))
+    assert _rows(runtime)[-1]["price"] == pytest.approx(_quarter_price(tomorrow, 0, 15))
 
 
-def test_tariff_guard_accepts_after_the_hold_limit(tmp_path: Path, caplog) -> None:
+def test_cold_start_accepts_only_a_valid_load(tmp_path: Path, caplog) -> None:
     previous_tz = _use_copenhagen()
     previous_datetime = runtime_mod.datetime
-    runtime_mod.datetime = _FrozenDateTime
-    runtime = _runtime(tmp_path, horizon_h=2, price_tariff_hold_s=60)
+    runtime = _runtime(tmp_path, horizon_h=2)
     seen: list[dict] = []
     real = _watch(seen)
-    good_raw = _good_raw()
-    bad_raw = _stripped(good_raw)
-    bad_attrs = {
-        "raw_today": bad_raw,
-        "today": [row["price"] for row in bad_raw],
-        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
-        "tariffs": _TARIFFS_EMPTY,
-    }
+    today = _quarters(datetime(2026, 11, 15, 0, 0, tzinfo=_ZONE))
+    stripped = _stripped_rows(today)
     try:
+        _freeze(runtime, _NOW)
         with caplog.at_level(logging.WARNING, logger="heatingassistant.app.runtime"):
             asyncio.run(
                 _seed(
                     runtime,
                     {
-                        "raw_today": good_raw,
-                        "today": [row["price"] for row in good_raw],
-                        "forecast": _forecast(_FORECAST_BEFORE),
-                        "tariffs": _TARIFFS,
+                        "raw_today": stripped,
+                        "tariffs": {"tariffs": {}, "additional_tariffs": {}},
                     },
                 )
             )
+            asyncio.run(_tick(runtime))
+            awaiting = runtime.status()["control"]["price_latch_awaiting_valid"]
             asyncio.run(
                 _publish(
                     runtime,
                     "energy_price",
-                    MqttTagPayload(_STRIPPED_STATE, ts=_STAMP + 1, attributes=bad_attrs),
+                    MqttTagPayload(0.01, ts=_STAMP + 1, attributes=_eds(today)),
                 )
             )
+            # The first solve installed a heating plan, so the next tick is not
+            # due until that plan is cleared. Drop it so the valid load is solved.
+            runtime.control_engine._controller._nmpc_U = None
             asyncio.run(_tick(runtime, _STAMP + 1))
-            asyncio.run(
-                _publish(
-                    runtime,
-                    "energy_price",
-                    MqttTagPayload(_STRIPPED_STATE, ts=_STAMP + 120, attributes=bad_attrs),
-                )
-            )
-            asyncio.run(_tick(runtime, _STAMP + 120))
     finally:
         _restore_solve(real)
         runtime_mod.datetime = previous_datetime
         _restore_tz(previous_tz)
 
-    assert list(seen[-2]["price_forecast"])[0] == pytest.approx(_GOOD_STATE)
-    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_STRIPPED_STATE)
-    assert _rows(runtime)[-1]["price"] == pytest.approx(_STRIPPED_STATE)
-    assert "Accepting a suspect price series" in caplog.text
+    assert seen[-2]["price_forecast"] is None
+    assert _rows(runtime)[-2]["price"] is None
+    assert awaiting is True
+    assert "without an electricity price" in caplog.text
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_quarter_price(today, 12, 15))
+    assert _rows(runtime)[-1]["price"] == pytest.approx(_quarter_price(today, 12, 15))
+    assert runtime.status()["control"]["price_latch_awaiting_valid"] is False
 
 
-def test_tariff_guard_accepts_a_tariff_less_cold_start(tmp_path: Path) -> None:
+def test_latched_prices_survive_an_app_restart(tmp_path: Path) -> None:
     previous_tz = _use_copenhagen()
     previous_datetime = runtime_mod.datetime
-    runtime_mod.datetime = _FrozenDateTime
+    runtime = _runtime(tmp_path, horizon_h=2)
+    real = _watch([])
+    today = _quarters(datetime(2026, 11, 15, 0, 0, tzinfo=_ZONE))
+    expected = _quarter_price(today, 12, 15)
+    try:
+        _freeze(runtime, _NOW)
+        asyncio.run(_seed(runtime, _eds(today)))
+        restarted = _runtime(tmp_path, horizon_h=2)
+        seen: list[dict] = []
+        HeatingMPCController.solve_nmpc = real  # type: ignore[method-assign]
+        real = _watch(seen)
+        _freeze(restarted, _NOW)
+
+        async def _measurements() -> None:
+            await _publish(restarted, "living_temp", MqttTagPayload(20.0, ts=_STAMP))
+            await _publish(restarted, "outdoor_temp", MqttTagPayload(4.4, ts=_STAMP))
+            await _publish(
+                restarted,
+                "weather_forecast",
+                MqttTagPayload(4.4, ts=_STAMP, attributes={"temperature": 4.4, "forecast": _weather()}),
+            )
+            restarted.actuator_outputs["hp_heat"] = 1.0
+
+        asyncio.run(_measurements())
+        asyncio.run(_tick(restarted))
+    finally:
+        _restore_solve(real)
+        runtime_mod.datetime = previous_datetime
+        _restore_tz(previous_tz)
+
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(expected)
+    assert _rows(restarted)[-1]["price"] == pytest.approx(expected)
+
+
+def test_live_price_is_used_when_the_latched_series_does_not_cover_now(tmp_path: Path, caplog) -> None:
+    previous_tz = _use_copenhagen()
+    previous_datetime = runtime_mod.datetime
     runtime = _runtime(tmp_path, horizon_h=2)
     seen: list[dict] = []
     real = _watch(seen)
-    bad_raw = _stripped(_good_raw())
+    yesterday = _quarters(datetime(2026, 11, 14, 0, 0, tzinfo=_ZONE))
     try:
-        asyncio.run(
-            _seed(
-                runtime,
-                {
-                    "raw_today": bad_raw,
-                    "today": [row["price"] for row in bad_raw],
-                    "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
-                    "tariffs": _TARIFFS_EMPTY,
-                },
+        _freeze(runtime, _NOW)
+        with caplog.at_level(logging.WARNING, logger="heatingassistant.app.runtime"):
+            asyncio.run(_seed(runtime, _eds(yesterday)))
+            asyncio.run(
+                _publish(
+                    runtime,
+                    "energy_price",
+                    MqttTagPayload(2.5, ts=_STAMP + 1, attributes={}),
+                )
             )
-        )
-        asyncio.run(_tick(runtime))
+            asyncio.run(_tick(runtime))
     finally:
         _restore_solve(real)
         runtime_mod.datetime = previous_datetime
         _restore_tz(previous_tz)
 
-    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_STRIPPED_STATE)
-    assert _rows(runtime)[-1]["price"] == pytest.approx(_STRIPPED_STATE)
-    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 0
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(2.5)
+    assert _rows(runtime)[-1]["price"] == pytest.approx(2.5)
+    assert runtime.status()["control"]["price_latch_live_fallback"] is True
+    assert "does not cover now" in caplog.text
 
 
-def test_tariff_guard_accepts_when_the_good_series_does_not_cover_now() -> None:
-    from heatingassistant.engine.electricity_price import PriceTariffGuard
-
-    guard = PriceTariffGuard(drop_fraction=0.25, hold_s=3600)
-    good = {"forecast": _forecast(_FORECAST_BEFORE), "tariffs": _TARIFFS}
-    stored, event = guard.consider(good, _STAMP, _NOW)
-    assert event == "accept"
-    assert stored is not None
-    bad = {
-        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
-        "tariffs": _TARIFFS_EMPTY,
-    }
-    stored, event = guard.consider(bad, _STAMP + 1, _NOW)
-    assert event == "expire"
-    assert stored["forecast"][0]["price"] == pytest.approx(bad["forecast"][0]["price"])

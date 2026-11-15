@@ -6,8 +6,8 @@ must be the exact calendar version on its own line.
 
 # 2026.11.8
 
-- After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. The current sample is the live quarter-hour price. Starting the App writes one control-log row.
-- A price update that drops the tariffs (an empty Energi Data Service ``tariffs`` map, or a sudden drop of more than 25% on most overlapping slots) stays off the planner. The last good series is held for up to 60 minutes, and the tick price comes from that series.
+- After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. A time before the first stamp keeps the supplied price instead of the last forecast hour. Starting the App writes one control-log row.
+- Energi Data Service prices are stored per Copenhagen day once they check out: 24 hourly tariffs above zero, the fixed additions above zero, and a price that matches spot plus those tariffs. A stored day is never replaced, so a tariff-less load after a restart is ignored. A forecast past tomorrow is not stored as an actual price. The tick price comes from the stored series. Until the first valid load, the planner omits the electricity price. The stored days survive an App restart.
 
 # 2026.11.6
 
