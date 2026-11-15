@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | In Review | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | In Review — open PR, do not merge |
+| SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | In Review | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/710 do not merge |
 | SWD-597 | Task | HeatingAssistant T3: display series | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/709 (`195175d5`) |
 | SWD-596 | Task | HeatingAssistant T1: control log and export | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/708 (`67ddbb4f`) |
 | SWD-595 | Story | HeatingAssistant: reliable data export, then comfort-band control fixes | In Progress | — | — | SWD-598 is In Review; later control tasks stay bench-gated |
