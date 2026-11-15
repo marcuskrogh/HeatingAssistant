@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.9
+
+- The price day latch now receives Energi Data Service tariffs from the Home Assistant bridge. A load from that source with missing or empty tariffs is ignored. Until the first valid load, the planner runs without an electricity price. A Nord Pool series still passes through.
+
 # 2026.11.8
 
 - After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. A time before the first stamp keeps the supplied price instead of the last forecast hour. Starting the App writes one control-log row.

@@ -80,7 +80,7 @@ def _raw_today() -> list[dict]:
             price = 2.169
         elif stamp.hour == 17 and stamp.minute == 0:
             price = _AT_1700
-        rows.append({"hour": stamp.isoformat(), "price": price})
+        rows.append({"start": stamp.isoformat(), "value": price})
     return rows
 
 
@@ -96,7 +96,7 @@ def _forecast(midnight: float) -> list[dict]:
         elif hour == 151:
             price = _LAST_FORECAST
         rows.append(
-            {"hour": (start + timedelta(hours=hour)).isoformat(), "price": round(price, 3)}
+            {"start": (start + timedelta(hours=hour)).isoformat(), "value": round(price, 3)}
         )
     return rows
 
@@ -235,7 +235,7 @@ def test_refresh_keeps_todays_quarters_then_tomorrows_forecast(tmp_path: Path) -
     raw = _raw_today()
     before = {
         "raw_today": raw,
-        "today": [row["price"] for row in raw],
+        "today": [row["value"] for row in raw],
         "forecast": _forecast(_FORECAST_BEFORE),
     }
     try:
@@ -251,7 +251,7 @@ def test_refresh_keeps_todays_quarters_then_tomorrows_forecast(tmp_path: Path) -
                     ts=_STAMP + 900,
                     attributes={
                         "raw_today": raw,
-                        "today": [row["price"] for row in raw],
+                        "today": [row["value"] for row in raw],
                         "forecast": _forecast(_FORECAST_AFTER),
                     },
                 ),
@@ -318,7 +318,7 @@ def test_refresh_that_omits_raw_today_keeps_the_cached_quarters(tmp_path: Path) 
                 runtime,
                 {
                     "raw_today": raw,
-                    "today": [row["price"] for row in raw],
+                    "today": [row["value"] for row in raw],
                     "forecast": _forecast(_FORECAST_BEFORE),
                 },
             )

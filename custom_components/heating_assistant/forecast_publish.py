@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 import logging
 from typing import Any
@@ -23,6 +24,25 @@ FORECAST_ATTR_KEYS = (
     "prices_today",
     "prices_tomorrow",
     "unit_of_measurement",
+    # Energi Data Service. additional_tariffs lives inside tariffs.
+    # tomorrow_valid, today_mean, and use_cent are read by the day latch.
+    "tariffs",
+    "tomorrow_valid",
+    "today_mean",
+    "use_cent",
+    "price_source",
+)
+
+# Price lists the bridge may stamp with price_source. Weather ``forecast``
+# rows carry temperature, not hour/price, so they are left alone.
+_PRICE_LIST_KEYS = (
+    "raw_today",
+    "raw_tomorrow",
+    "today",
+    "tomorrow",
+    "prices_today",
+    "prices_tomorrow",
+    "forecast",
 )
 
 # Last successful weather.get_forecasts payload per entity_id. Survives a
@@ -35,6 +55,38 @@ def clear_weather_forecast_cache() -> None:
     """Clear the in-memory weather forecast cache (tests)."""
 
     _LAST_WEATHER_FORECAST.clear()
+
+
+def classify_price_source(attrs: Any) -> str | None:
+    """Return ``energidataservice`` or ``nordpool`` for a price attribute set.
+
+    Energi Data Service rows use ``hour`` and ``price``. A ``tariffs`` key,
+    including an empty map, is the same source. Nord Pool rows use ``start``
+    and ``value``. Weather forecasts do not match either shape.
+    """
+
+    if not isinstance(attrs, Mapping):
+        return None
+    named = attrs.get("price_source")
+    if named in ("energidataservice", "nordpool"):
+        return str(named)
+    if "tariffs" in attrs:
+        return "energidataservice"
+    saw_nordpool = False
+    for key in _PRICE_LIST_KEYS:
+        raw = attrs.get(key)
+        if not isinstance(raw, list):
+            continue
+        for row in raw:
+            if not isinstance(row, Mapping):
+                continue
+            if row.get("hour") is not None and row.get("price") is not None:
+                return "energidataservice"
+            if row.get("start") is not None and row.get("value") is not None:
+                saw_nordpool = True
+    if saw_nordpool:
+        return "nordpool"
+    return None
 
 
 async def forecast_attributes_for_publish(
@@ -72,6 +124,10 @@ async def forecast_attributes_for_publish(
             cached = _LAST_WEATHER_FORECAST.get(entity_key)
             if cached:
                 selected["forecast"] = list(cached)
+
+    source = classify_price_source(attrs)
+    if source is not None:
+        selected["price_source"] = source
 
     if not selected:
         return None
