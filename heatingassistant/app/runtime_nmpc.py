@@ -41,11 +41,10 @@ class NmpcMixin:
             self._nmpc_loop = asyncio.get_running_loop()
         except RuntimeError:
             self._nmpc_loop = None
+        self._nmpc_tick_now = float(getattr(self, "_active_tick_now", None) or time.time())
         self._mark_nmpc_slot_started()
         self._nmpc_computing = True
         self.control_engine.mark_nmpc_busy()
-        # Publish before start so a fast worker cannot idle-publish first.
-        self._publish_compute_status()
         self._nmpc_thread = threading.Thread(
             target=self._nmpc_worker_thread,
             name="heatingassistant-nmpc",
@@ -54,10 +53,12 @@ class NmpcMixin:
         self._nmpc_thread.start()
 
     def _nmpc_worker_thread(self) -> None:
+        self._publish_compute_status()
         started = time.time()
         applied = False
         result: Any = None
         plan_logged = False
+        watchdog_tripped_now = False
         try:
             result = self.control_engine.solve_nmpc_blocking()
             self._last_nmpc_duration_s = max(0.0, time.time() - started)
@@ -73,6 +74,7 @@ class NmpcMixin:
                 )
             )
             watchdog_after = bool(getattr(controller, "_watchdog_tripped", False))
+            watchdog_tripped_now = watchdog_after and not watchdog_before
             self._record_control_log_plan(
                 result if isinstance(result, dict) else None,
                 applied=applied,
@@ -90,8 +92,10 @@ class NmpcMixin:
             _logger.exception("NMPC worker failed")
             controller = getattr(self.control_engine, "_controller", None)
             if controller is not None:
+                was_tripped = bool(controller._watchdog_tripped)
                 controller._nmpc_busy = False
                 controller._record_nmpc_reject()
+                watchdog_tripped_now = bool(controller._watchdog_tripped) and not was_tripped
                 note = controller.consume_watchdog_notification()
                 if note:
                     self._emit_nmpc_notify(note)
@@ -110,19 +114,22 @@ class NmpcMixin:
             self._publish_compute_status()
         if applied:
             self._install_nmpc_p_command()
+        elif watchdog_tripped_now:
+            self._publish_watchdog_zero()
 
     def _publish_compute_status(self) -> None:
         """Push computing flags and result stamps without waiting for a P tick."""
 
-        loop = getattr(self, "_nmpc_loop", None)
-        coro = self._best_effort_mqtt(self.publish_status(), "compute status")
-        if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(coro, loop)
-            return
         try:
-            asyncio.run(coro)
-        except Exception:
-            _logger.exception("Failed to publish compute status")
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                asyncio.run(self._best_effort_mqtt(self.publish_status(), "compute status"))
+            except Exception:
+                _logger.exception("Failed to publish compute status")
+            return
+        # Caller is already on the app loop; a nested publish is the loop's job.
+        return
 
     def _note_nmpc_cycle_complete(self) -> None:
         """Persist runtime state after a slow solve without moving the epoch.
@@ -173,18 +180,28 @@ class NmpcMixin:
             self._control_lock.release()
         self._emit_nmpc_p_publish()
 
+    def _publish_watchdog_zero(self) -> None:
+        """One actuator write that holds every source at zero after the watchdog."""
+
+        tags = getattr(self.control_engine, "_source_output_tags", {}) or {}
+        for tag in tags.values():
+            self.actuator_outputs[str(tag)] = 0.0
+        self._clamp_window_override_actuators()
+        try:
+            self._save_runtime_state()
+        except Exception:
+            _logger.exception("Failed to persist watchdog zero command")
+        self._emit_nmpc_p_publish()
+
     def _emit_nmpc_p_publish(self) -> None:
-        loop = self._nmpc_loop
+        sample_now = getattr(self, "_nmpc_tick_now", None)
 
         async def _publish() -> None:
-            await self._best_effort_mqtt(
-                self.publish_actuator_outputs(), "NMPC P actuators"
-            )
+            await self._publish_tick_actuators(sample_now)
             await self._best_effort_mqtt(self.publish_status(), "NMPC P status")
 
-        if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(_publish(), loop)
-            return
+        # Publish on this worker thread. The ticker's loop exists only for the
+        # tick call and is gone before a slow solve finishes.
         try:
             asyncio.run(_publish())
         except Exception:

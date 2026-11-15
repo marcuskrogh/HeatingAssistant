@@ -42,6 +42,7 @@ async def test_runtime_averages_room_temperature_and_publishes_control(tmp_path)
     await runtime.start()
     await publish_tag_in(runtime, "living_temp_1", 19.0)
     await publish_tag_in(runtime, "living_temp_2", 21.0)
+    await runtime.run_control_tick()
 
     assert runtime.room_temperature("living") == pytest.approx(20.0)
 

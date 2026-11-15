@@ -243,6 +243,37 @@ class ControlEngine(BuildMixin, PreviewMixin):
         self._clear_controller_forecast()
         return self._fallback_actions(room_temps, setpoints, outdoor)
 
+    def arm_estimate_dt(self, dt: float) -> None:
+        """Make the next estimator predict integrate ``dt`` seconds."""
+
+        controller = self._controller
+        ekf = getattr(controller, "_ekf", None) if controller is not None else None
+        arm = getattr(ekf, "arm_predict_dt", None)
+        if callable(arm):
+            arm(float(dt))
+
+    def estimate_measurements(
+        self,
+        room_temps: Mapping[str, float | None],
+        outdoor_temp: float | None,
+        setpoints: Mapping[str, float] | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Predict and update the estimator. Does not solve or choose an input."""
+
+        setpoints = dict(setpoints or {})
+        self._apply_measurements(room_temps, setpoints)
+        controller = self._controller
+        if controller is None or not self.heat_sources:
+            return
+        controller.compute(
+            _as_float(outdoor_temp, 0.0),
+            solar_gains=None,
+            now=now or datetime.now(timezone.utc),
+            run_optimization=False,
+        )
+
     def forecast_snapshot(self) -> dict[str, Any]:
         """Return the last MPC trajectories for Ingress forecast plots."""
 

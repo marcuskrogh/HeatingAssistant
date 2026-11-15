@@ -39,6 +39,14 @@ class TickerMixin:
         self._last_nmpc_slow_slot = None
         self._last_nmpc_attempt_ts = None
 
+    def _sample_now(self, now: float | None = None) -> float:
+        if now is not None:
+            return float(now)
+        active = getattr(self, "_active_tick_now", None)
+        if active is not None:
+            return float(active)
+        return float(time.time())
+
     def _nmpc_slow_slot_due(self, now: float | None = None) -> bool:
         """True when the next ``t0 + n * period`` slot has been reached."""
 
@@ -46,14 +54,14 @@ class TickerMixin:
         if epoch is None:
             return False
         period = self._nmpc_period_s()
-        current = grid_slot_index(epoch, period, float(now if now is not None else time.time()))
+        current = grid_slot_index(epoch, period, self._sample_now(now))
         last = self._last_nmpc_slow_slot
         if last is None:
             return True
         return current > last
 
     def _mark_nmpc_slot_started(self, now: float | None = None) -> None:
-        stamp = float(now if now is not None else time.time())
+        stamp = self._sample_now(now)
         self._last_nmpc_attempt_ts = stamp
         epoch = self._last_nmpc_ts
         if epoch is None:
@@ -142,31 +150,23 @@ class TickerMixin:
                 next_history = time.time() + history_every
             control_due_now = now >= next_control
             if control_due_now:
-                last = self._last_control_ran_ts
-                if last is not None and (now - last) < (control_every * 0.5):
-                    # MQTT tag path already ran control recently — skip.
-                    next_control = self._next_aligned_ts(control_every, now)
-                else:
-                    try:
-                        asyncio.run(self.run_control_cycle())
-                    except Exception:
-                        _logger.exception("Wall-clock control cycle failed")
-                    control_every = self._control_tick_interval_s()
-                    next_control = self._next_aligned_ts(control_every, time.time())
-            # Start NMPC after P on coincident slots so the first 15-minute
-            # tick still uses the previous plan while the NLP runs.
-            if now >= next_nmpc:
+                try:
+                    asyncio.run(self.run_control_tick())
+                except Exception:
+                    _logger.exception("Wall-clock control tick failed")
+                control_every = self._control_tick_interval_s()
+                nmpc_every = self._nmpc_period_s()
+                stamped = time.time()
+                next_control = self._next_aligned_ts(control_every, stamped)
+                # The tick already requested the one solve for this sample.
+                next_nmpc = self._next_aligned_ts(nmpc_every, stamped)
+            elif now >= next_nmpc:
                 try:
                     self._schedule_nmpc_worker()
                 except Exception:
                     _logger.exception("Wall-clock NMPC schedule failed")
                 nmpc_every = self._nmpc_period_s()
                 next_nmpc = self._next_aligned_ts(nmpc_every, time.time())
-            elif control_due_now:
-                try:
-                    self._schedule_nmpc_worker()
-                except Exception:
-                    _logger.exception("Wall-clock idle NMPC retry failed")
             sleep_for = max(
                 0.2, min(next_history, next_control, next_nmpc) - time.time()
             )
