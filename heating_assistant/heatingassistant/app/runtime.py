@@ -215,6 +215,10 @@ class HeatingRuntime(
         )
         self._ekf_last_t: float | None = self._coerce_number(self.state.get("ekf_last_t"))
         self._clock = time.time
+        # Last forecast attributes, kept when a later scalar tag update clears
+        # the live attribute dict. The 15-minute tick would otherwise repeat
+        # the current outdoor temperature and price across the horizon.
+        self._forecast_attr_cache: dict[str, dict[str, Any]] = {}
         self._last_nmpc_attempt_ts: float | None = self._coerce_number(
             self.state.get("last_nmpc_attempt_ts")
         )
@@ -654,15 +658,22 @@ class HeatingRuntime(
             self.tag_timestamps[tag] = time.time()
         if payload.status == "BAD":
             self.tag_attributes.pop(tag, None)
+            self._forecast_attr_cache.pop(tag, None)
         elif payload.attributes is not None:
             # Explicit empty dict clears prior forecast attrs (SWD-278).
             attrs = dict(payload.attributes)
             attach_condition_from_reason(attrs, payload.reason)
-            self.tag_attributes[tag] = attrs
+            if attrs:
+                self.tag_attributes[tag] = attrs
+                self._forecast_attr_cache[tag] = dict(attrs)
+            else:
+                self.tag_attributes.pop(tag, None)
+                self._forecast_attr_cache.pop(tag, None)
         else:
-            # GOOD scalar-only update: drop stale day-ahead / weather attrs.
-            # Keep a weather condition copied from MQTT reason so solar does
-            # not revert to unattenuated clear-sky when forecast JSON failed.
+            # GOOD scalar-only update: drop the live attribute dict so a failed
+            # forecast publish does not keep stale keys on the tag. The planner
+            # still reads _forecast_attr_cache, so the last real series survives
+            # until the next full payload.
             self.tag_attributes.pop(tag, None)
             cond_attrs: dict[str, Any] = {}
             attach_condition_from_reason(cond_attrs, payload.reason)
@@ -688,8 +699,10 @@ class HeatingRuntime(
         """Fill solver inputs from the current tags and schedule. No solve."""
 
         outdoor = self._outdoor_temperature()
-        disturbances = self._mpc_disturbance_inputs(outdoor)
         schedule_ctx = self._schedule_control_context()
+        disturbances = self._mpc_disturbance_inputs(
+            outdoor, now=schedule_ctx["now_utc"]
+        )
         self._last_control_trajectory = schedule_ctx["trajectory"]
         self._last_effective_params = schedule_ctx["effective"]
         self.control_engine.stage_nmpc_inputs(
@@ -744,6 +757,7 @@ class HeatingRuntime(
             return await self.run_control_cycle(estimate_dt=dt, now=stamp)
         self._stage_planner_inputs()
         self._update_estimate(stamp, use_staged_inputs=True)
+        self._record_control_log_tick(stamp)
         self._schedule_nmpc_worker()
         return dict(self.actuator_outputs)
 
@@ -1409,25 +1423,41 @@ class HeatingRuntime(
         finally:
             self._control_lock.release()
 
+    def _attrs_for_disturbance(self, tag: str) -> dict[str, Any] | None:
+        """Live tag attributes, or the last full forecast payload for that tag."""
+
+        if not isinstance(tag, str) or not tag:
+            return None
+        live = self.tag_attributes.get(tag)
+        if isinstance(live, dict) and live:
+            return live
+        cached = self._forecast_attr_cache.get(tag)
+        if isinstance(cached, dict) and cached:
+            return cached
+        return live if isinstance(live, dict) else None
+
     def _mpc_disturbance_inputs(
         self,
         outdoor_temp: float | None,
         *,
         horizon: int | None = None,
         dt_s: float | None = None,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
         """Build outdoor / solar / price series for the next control compute."""
 
-        use_horizon = int(
-            horizon
-            if horizon is not None
-            else self.options.get("horizon", const.DEFAULT_HORIZON)
-        )
-        use_dt = float(
-            dt_s
-            if dt_s is not None
-            else self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
-        )
+        if horizon is None or dt_s is None:
+            try:
+                timing = self.control_engine._nmpc_timing(self.control_engine.config)
+                default_horizon = int(timing.n_fast)
+                default_dt = float(timing.dt_s)
+            except Exception:
+                default_horizon = int(self.options.get("horizon", const.DEFAULT_HORIZON))
+                default_dt = float(
+                    self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+                )
+        use_horizon = int(horizon if horizon is not None else default_horizon)
+        use_dt = float(dt_s if dt_s is not None else default_dt)
         weather_tag = self.options.get("weather_tag") or "weather_forecast"
         if not isinstance(weather_tag, str) or not weather_tag:
             weather_tag = "weather_forecast"
@@ -1455,13 +1485,16 @@ class HeatingRuntime(
         )
         return build_mpc_disturbance_inputs(
             outdoor_temp=outdoor_temp,
-            weather_attrs=self.tag_attributes.get(weather_tag),
+            weather_attrs=self._attrs_for_disturbance(weather_tag),
             price_value=self._coerce_number(self.tag_values.get(price_tag)),
-            price_attrs=self.tag_attributes.get(price_tag),
+            price_attrs=self._attrs_for_disturbance(price_tag),
             solar_value=solar_value,
-            solar_attrs=solar_attrs,
+            solar_attrs=solar_attrs if solar_attrs else self._attrs_for_disturbance(
+                solar_tag if isinstance(solar_tag, str) else ""
+            ),
             horizon=use_horizon,
             dt_s=use_dt,
+            now=now,
             price_adder=net + surcharge,
         )
 
