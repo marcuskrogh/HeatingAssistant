@@ -20,7 +20,10 @@ each sample (default 900 s), once:
   2. one planner solve (NMPC NLP or Linear QP)
      The solve reads outdoor temperature, forecasts, prices, and the schedule
      from the current sample. Those inputs are filled on the tick, including
-     a config or schedule save, before the solver starts.
+     a config or schedule save, before the solver starts. Outdoor, cloud,
+     solar, and price series are the last full forecast, aligned to the
+     planner horizon. A scalar tag update does not flatten them to the
+     current value. Each sample also appends one control-log tick row.
   3. one actuator write of u = U*[k] for that plan (the new plan's first step)
 ```
 

@@ -918,7 +918,7 @@ class HeatingMPCController:
             if j < 0:
                 j = 0
             schedule.append(
-                self._system.display_heating_powers(U_abs[i], outdoor_seq[j])
+                self._system.heating_powers(U_abs[i], outdoor_seq[j])
             )
         return schedule
 
@@ -1186,10 +1186,10 @@ class HeatingMPCController:
         if now is None:
             now = datetime.now(tz=timezone.utc)
         N = self._horizon
-        if outdoor_forecast is not None and len(outdoor_forecast) >= N:
-            outdoor_seq = list(outdoor_forecast[:N])
-        else:
-            outdoor_seq = self._forecast_outdoor(outdoor_temp)
+        outdoor_seq = self._align_forecast_series(outdoor_forecast, N, outdoor_temp)
+        self._outdoor_forecast = list(outdoor_seq)
+        if price_forecast:
+            self._price_forecast = self._align_forecast_series(price_forecast, N, price_forecast[0])
         solar_seq = self._forecast_solar(
             now,
             cloud_forecast=cloud_forecast,
@@ -1200,6 +1200,7 @@ class HeatingMPCController:
         )
         if solar_gains is not None:
             solar_seq[0] = dict(solar_gains)
+        self._solar_forecast = [dict(step) for step in solar_seq]
         d_fast = [
             self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
             for k in range(N)
@@ -1499,7 +1500,7 @@ class HeatingMPCController:
             X_abs, room_list, n_rooms
         )
         self._heating_schedule = [
-            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
+            self._system.heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
         return actions
@@ -1616,10 +1617,7 @@ class HeatingMPCController:
         p = np.array([], dtype=float)  # no estimated parameters
 
         # ── Disturbance forecast for visualisation ───────────────────────
-        if outdoor_forecast is not None and len(outdoor_forecast) >= N:
-            outdoor_seq = list(outdoor_forecast[:N])
-        else:
-            outdoor_seq = self._forecast_outdoor(outdoor_temp)
+        outdoor_seq = self._align_forecast_series(outdoor_forecast, N, outdoor_temp)
         solar_seq = self._forecast_solar(
             now,
             cloud_forecast=cloud_forecast,
@@ -1637,7 +1635,11 @@ class HeatingMPCController:
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
         self._solar_forecast = [dict(s) for s in solar_seq]
-        self._price_forecast = list(price_forecast) if price_forecast is not None else []
+        self._price_forecast = (
+            self._align_forecast_series(price_forecast, N, price_forecast[0])
+            if price_forecast
+            else []
+        )
         self._wind_forecast = []
 
         # ── Current measurement y = room temperatures ────────────────────
@@ -1854,6 +1856,24 @@ class HeatingMPCController:
                 break
 
     # ── Disturbance forecasts ────────────────────────────────────────────
+
+    def _align_forecast_series(
+        self,
+        series: Optional[List[float]],
+        n: int,
+        fallback: float,
+    ) -> List[float]:
+        """Fit a forecast to ``n`` steps without replacing it by the current value.
+
+        A shorter real series keeps its tail. An empty series is persistence.
+        """
+
+        if not series:
+            return [float(fallback)] * n
+        values = [float(value) for value in series]
+        if len(values) < n:
+            values.extend([values[-1]] * (n - len(values)))
+        return values[:n]
 
     def _forecast_outdoor(self, current: float) -> List[float]:
         """Persistence forecast: outdoor temperature constant over horizon."""

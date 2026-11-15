@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.5
+
+- The planner again follows the weather, solar, and price forecasts across the horizon. A later reading of only the current outdoor temperature no longer flattens that forecast. Each control sample is written to the control log with the estimator values. Planned heating power uses the same scaled heat-pump model as the planner.
+
 # 2026.11.4
 
 - A control sample and a configuration save fill outdoor temperature, forecasts, prices, and the schedule before the planner solves. 2026.11.2 and 2026.11.3 started that solve without those inputs, so every solve failed and the heaters were left for the watchdog.
