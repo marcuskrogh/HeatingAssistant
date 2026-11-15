@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.4
+
+- A control sample and a configuration save fill outdoor temperature, forecasts, prices, and the schedule before the planner solves. 2026.11.2 and 2026.11.3 started that solve without those inputs, so every solve failed and the heaters were left for the watchdog.
+
 # 2026.11.3
 
 - On the next start, if the Living Room is still using the 26 Sep parameter set, the App replaces it with the 8-12 Nov fit. The 26 Sep set stays in parameter history. Restore it by promoting that history entry (history index 0).

@@ -206,11 +206,18 @@ class ControlEngine(BuildMixin, PreviewMixin):
         setpoints = dict(setpoints or {})
         outdoor = _as_float(outdoor_temp, 0.0)
         self._apply_measurements(room_temps, setpoints)
-        if comfort_offsets:
-            for name, offset in comfort_offsets.items():
-                room = self.model.rooms.get(name)
-                if room is not None:
-                    room.comfort_offset = float(offset)
+        self.stage_nmpc_inputs(
+            outdoor,
+            now=now or datetime.now(timezone.utc),
+            outdoor_forecast=outdoor_forecast,
+            cloud_forecast=cloud_forecast,
+            cloud_cover_now=cloud_cover_now,
+            ghi_forecast=ghi_forecast,
+            ghi_now=ghi_now,
+            price_forecast=price_forecast,
+            control_trajectory=control_trajectory,
+            comfort_offsets=comfort_offsets,
+        )
 
         if self._controller is not None and self.heat_sources:
             try:
@@ -229,17 +236,6 @@ class ControlEngine(BuildMixin, PreviewMixin):
                     control_trajectory=control_trajectory,
                     disabled_sources=disabled_sources,
                 )
-                self._nmpc_last_kwargs = {
-                    "outdoor_temp": outdoor,
-                    "now": now or datetime.now(timezone.utc),
-                    "outdoor_forecast": outdoor_forecast,
-                    "cloud_forecast": cloud_forecast,
-                    "cloud_cover_now": cloud_cover_now,
-                    "ghi_forecast": ghi_forecast,
-                    "ghi_now": ghi_now,
-                    "price_forecast": price_forecast,
-                    "control_trajectory": control_trajectory,
-                }
                 self._cache_controller_forecast(self._controller)
                 self.mode = "mpc"
                 self.fallback_reason = None
@@ -262,6 +258,39 @@ class ControlEngine(BuildMixin, PreviewMixin):
         if callable(arm):
             arm(float(dt))
 
+    def stage_nmpc_inputs(
+        self,
+        outdoor_temp: float | None,
+        *,
+        now: datetime | None = None,
+        outdoor_forecast: list[float] | None = None,
+        cloud_forecast: list[float] | None = None,
+        cloud_cover_now: float | None = None,
+        ghi_forecast: list[float | None] | None = None,
+        ghi_now: float | None = None,
+        price_forecast: list[float] | None = None,
+        control_trajectory: Any | None = None,
+        comfort_offsets: Mapping[str, float] | None = None,
+    ) -> None:
+        """Store the inputs the slow solver needs. Does not estimate or solve."""
+
+        if comfort_offsets:
+            for name, offset in comfort_offsets.items():
+                room = self.model.rooms.get(name)
+                if room is not None:
+                    room.comfort_offset = float(offset)
+        self._nmpc_last_kwargs = {
+            "outdoor_temp": _as_float(outdoor_temp, 0.0),
+            "now": now or datetime.now(timezone.utc),
+            "outdoor_forecast": outdoor_forecast,
+            "cloud_forecast": cloud_forecast,
+            "cloud_cover_now": cloud_cover_now,
+            "ghi_forecast": ghi_forecast,
+            "ghi_now": ghi_now,
+            "price_forecast": price_forecast,
+            "control_trajectory": control_trajectory,
+        }
+
     def estimate_measurements(
         self,
         room_temps: Mapping[str, float | None],
@@ -269,6 +298,7 @@ class ControlEngine(BuildMixin, PreviewMixin):
         setpoints: Mapping[str, float] | None = None,
         *,
         now: datetime | None = None,
+        use_staged_inputs: bool = False,
     ) -> None:
         """Predict and update the estimator. Does not solve or choose an input."""
 
@@ -277,10 +307,18 @@ class ControlEngine(BuildMixin, PreviewMixin):
         controller = self._controller
         if controller is None or not self.heat_sources:
             return
+        staged = self._nmpc_last_kwargs if use_staged_inputs else {}
         controller.compute(
             _as_float(outdoor_temp, 0.0),
             solar_gains=None,
-            now=now or datetime.now(timezone.utc),
+            now=staged.get("now") or now or datetime.now(timezone.utc),
+            outdoor_forecast=staged.get("outdoor_forecast"),
+            cloud_forecast=staged.get("cloud_forecast"),
+            cloud_cover_now=staged.get("cloud_cover_now"),
+            ghi_forecast=staged.get("ghi_forecast"),
+            ghi_now=staged.get("ghi_now"),
+            price_forecast=staged.get("price_forecast"),
+            control_trajectory=staged.get("control_trajectory"),
             run_optimization=False,
         )
 

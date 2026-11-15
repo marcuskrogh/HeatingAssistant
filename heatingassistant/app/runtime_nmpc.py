@@ -44,6 +44,8 @@ class NmpcMixin:
         self._nmpc_tick_now = float(getattr(self, "_active_tick_now", None) or time.time())
         self._mark_nmpc_slot_started()
         self._nmpc_computing = True
+        # Ticks no longer call compute_actions, which used to fill these.
+        self._stage_planner_inputs()
         self.control_engine.mark_nmpc_busy()
         self._nmpc_thread = threading.Thread(
             target=self._nmpc_worker_thread,
