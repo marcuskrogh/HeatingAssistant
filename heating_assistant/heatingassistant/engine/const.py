@@ -503,6 +503,8 @@ CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing
 CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term
 CONF_PRICE_NET_TARIFF = "price_net_tariff"        # fixed net/grid tariff added to raw spot price (same unit/kWh)
 CONF_PRICE_SPOT_SURCHARGE = "price_spot_surcharge"  # fixed spot price surcharge/tax added on top (same unit/kWh)
+CONF_PRICE_TARIFF_DROP_FRACTION = "price_tariff_drop_fraction"  # reject a series whose overlapping slots fall by more than this
+CONF_PRICE_TARIFF_HOLD_S = "price_tariff_hold_s"    # keep the last good series at most this long [s]
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -561,6 +563,8 @@ DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price entity is configured
 DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
 DEFAULT_PRICE_SPOT_SURCHARGE = 0.0     # no surcharge adder by default
+DEFAULT_PRICE_TARIFF_DROP_FRACTION = 0.25  # 1.406 -> 0.854 is about 39%; 1.887 -> 1.269 is about 33%
+DEFAULT_PRICE_TARIFF_HOLD_S = 3600.0   # accept a still-suspect series after one hour
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 OFF_PERIOD_TMAX = 40.0                 # °C open upper bound on off-period NMPC steps so preheat is not penalised
 

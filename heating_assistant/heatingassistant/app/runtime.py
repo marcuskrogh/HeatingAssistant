@@ -35,8 +35,13 @@ from heatingassistant.engine.weather import attach_condition_from_reason
 from heatingassistant.engine import const
 from heatingassistant.engine.datasets import DatasetStore
 from heatingassistant.engine.electricity_price import (
+    PRICE_GUARD_CLEAR,
+    PRICE_GUARD_ENGAGE,
+    PRICE_GUARD_EXPIRE,
+    PriceTariffGuard,
     align_prices_to_horizon,
     collect_price_series,
+    live_price_from_series,
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
@@ -219,6 +224,16 @@ class HeatingRuntime(
         # the live attribute dict. The 15-minute tick would otherwise repeat
         # the current outdoor temperature and price across the horizon.
         self._forecast_attr_cache: dict[str, dict[str, Any]] = {}
+        self._price_tariff_guard = PriceTariffGuard(
+            drop_fraction=self._option_float(
+                const.CONF_PRICE_TARIFF_DROP_FRACTION,
+                const.DEFAULT_PRICE_TARIFF_DROP_FRACTION,
+            ),
+            hold_s=self._option_float(
+                const.CONF_PRICE_TARIFF_HOLD_S,
+                const.DEFAULT_PRICE_TARIFF_HOLD_S,
+            ),
+        )
         self._last_nmpc_attempt_ts: float | None = self._coerce_number(
             self.state.get("last_nmpc_attempt_ts")
         )
@@ -693,6 +708,7 @@ class HeatingRuntime(
                         ):
                             if key not in attrs and key in previous:
                                 attrs[key] = previous[key]
+                    attrs = self._guard_price_attrs(attrs)
                 self.tag_attributes[tag] = attrs
                 self._forecast_attr_cache[tag] = dict(attrs)
             else:
@@ -1524,6 +1540,7 @@ class HeatingRuntime(
         price_tag = self.options.get("price_tag") or "energy_price"
         if not isinstance(price_tag, str) or not price_tag:
             price_tag = "energy_price"
+        price_now = now if now is not None else datetime.now(timezone.utc)
         solar_tag = self.options.get("solar_radiation_tag")
         solar_value = None
         solar_attrs = None
@@ -1546,7 +1563,7 @@ class HeatingRuntime(
         return build_mpc_disturbance_inputs(
             outdoor_temp=outdoor_temp,
             weather_attrs=self._attrs_for_disturbance(weather_tag),
-            price_value=self._coerce_number(self.tag_values.get(price_tag)),
+            price_value=self._planner_price_value(price_tag, price_now),
             price_attrs=self._attrs_for_disturbance(price_tag),
             solar_value=solar_value,
             solar_attrs=solar_attrs if solar_attrs else self._attrs_for_disturbance(
@@ -1780,6 +1797,7 @@ class HeatingRuntime(
             "control_computing": bool(self._control_computing),
             "nmpc_result_ts": self._nmpc_result_ts,
             "last_control_ran_ts": self._last_control_ran_ts,
+            "price_tariff_guard_engagements": int(self._price_tariff_guard.engagements),
         }
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))
@@ -1892,6 +1910,50 @@ class HeatingRuntime(
             return None
         return self._coerce_number(attrs.get("temperature"))
 
+    def _option_float(self, key: str, default: float) -> float:
+        raw = self.options.get(key, default)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _guard_price_attrs(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Keep a tariff-less price payload off the series the planner reads."""
+
+        now = datetime.now(timezone.utc)
+        now_ts = float(self.tag_timestamps.get(self._price_tag(), time.time()))
+        stored, event = self._price_tariff_guard.consider(attrs, now_ts, now)
+        if event == PRICE_GUARD_ENGAGE:
+            _logger.warning(
+                "Price update looks tariff-less; holding the last good series "
+                "(engagement %s)",
+                self._price_tariff_guard.engagements,
+            )
+        elif event == PRICE_GUARD_CLEAR:
+            _logger.info(
+                "Price series matches the last good series again; tariff guard cleared"
+            )
+        elif event == PRICE_GUARD_EXPIRE:
+            _logger.warning(
+                "Accepting a suspect price series: the tariff guard hold expired "
+                "or the last good series no longer covers now"
+            )
+        return stored
+
+    def _planner_price_value(self, price_tag: str, now: datetime) -> float | None:
+        """Sensor price, or the held series price while a tariff-less update is suspect."""
+
+        raw = self._coerce_number(self.tag_values.get(price_tag))
+        if raw is None and price_tag != "energy_price":
+            raw = self._coerce_number(self.tag_values.get("energy_price"))
+        if not self._price_tariff_guard.holding:
+            return raw
+        attrs = self._attrs_for_disturbance(price_tag)
+        if not isinstance(attrs, dict):
+            return raw
+        held = live_price_from_series(attrs, now)
+        return raw if held is None else held
+
     def _price_tag(self) -> str:
         """Return the configured electricity price tag (defaults to energy_price)."""
 
@@ -1923,12 +1985,10 @@ class HeatingRuntime(
         """
 
         price_tag = self._price_tag()
-        raw = self._coerce_number(self.tag_values.get(price_tag))
-        if raw is None and price_tag != "energy_price":
-            raw = self._coerce_number(self.tag_values.get("energy_price"))
-        attrs = dict(self.tag_attributes.get(price_tag) or {})
-        adder = self._price_adder()
         now = datetime.now(timezone.utc)
+        raw = self._planner_price_value(price_tag, now)
+        attrs = dict(self._attrs_for_disturbance(price_tag) or {})
+        adder = self._price_adder()
         series = collect_price_series(attrs, now)
         if series:
             aligned = align_prices_to_horizon(

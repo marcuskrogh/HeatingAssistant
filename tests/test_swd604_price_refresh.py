@@ -1,4 +1,4 @@
-"""SWD-604: price series after a forecast refresh, and one startup tick.
+"""SWD-604: price series after a forecast refresh, tariff-less hold, and one startup tick.
 
 A forecast that starts tomorrow has no stamp at the current quarter. The
 lookup used to fill that gap with the last forecast hour, so the tick and the
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -112,7 +113,38 @@ def _weather() -> list[dict]:
     ]
 
 
-def _options(*, horizon_h: float) -> dict:
+_GOOD_STATE = 1.406
+_STRIPPED_STATE = 0.854
+_RESTORED_STATE = 1.42
+_STRIP_FACTOR = 1.269 / 1.887
+_TARIFFS = {
+    "tariffs": {str(hour): 0.55 for hour in range(24)},
+    "additional_tariffs": {"elafgift": 0.09},
+}
+_TARIFFS_EMPTY = {"tariffs": {}, "additional_tariffs": {}}
+
+
+def _good_raw() -> list[dict]:
+    rows = _raw_today()
+    for row in rows:
+        stamp = datetime.fromisoformat(row["hour"])
+        if stamp.hour == 12 and stamp.minute == 15:
+            row["price"] = _GOOD_STATE
+    return rows
+
+
+def _stripped(rows: list[dict]) -> list[dict]:
+    scaled = []
+    for row in rows:
+        price = round(float(row["price"]) * _STRIP_FACTOR, 5)
+        stamp = datetime.fromisoformat(str(row["hour"]))
+        if stamp.hour == 12 and stamp.minute == 15 and stamp.day == 15:
+            price = _STRIPPED_STATE
+        scaled.append({**row, "price": price})
+    return scaled
+
+
+def _options(*, horizon_h: float, **extra: object) -> dict:
     return {
         "instance_id": "haos",
         "system_enabled": True,
@@ -134,11 +166,16 @@ def _options(*, horizon_h: float) -> dict:
                 "output_tag": "hp_heat",
             }
         ],
+        **extra,
     }
 
 
-def _runtime(tmp_path: Path, *, horizon_h: float) -> HeatingRuntime:
-    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options(horizon_h=horizon_h))
+def _runtime(tmp_path: Path, *, horizon_h: float, **extra: object) -> HeatingRuntime:
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=InMemoryMqttBus(),
+        options=_options(horizon_h=horizon_h, **extra),
+    )
     runtime._schedule_now_local = lambda: _NOW_LOCAL  # type: ignore[method-assign]
     return runtime
 
@@ -361,3 +398,235 @@ def test_startup_writes_one_tick_row(tmp_path: Path) -> None:
     finally:
         asyncio.run(runtime.stop())
     assert len(rows) == 1
+
+
+def _restored_raw() -> list[dict]:
+    rows = _good_raw()
+    for row in rows:
+        stamp = datetime.fromisoformat(row["hour"])
+        if stamp.hour == 12 and stamp.minute == 15:
+            row["price"] = _RESTORED_STATE
+    return rows
+
+
+def test_tariff_less_update_keeps_the_good_series_until_it_returns(tmp_path: Path, caplog) -> None:
+    previous_tz = _use_copenhagen()
+    previous_datetime = runtime_mod.datetime
+    runtime_mod.datetime = _FrozenDateTime
+    runtime = _runtime(tmp_path, horizon_h=2)
+    seen: list[dict] = []
+    real = _watch(seen)
+    good_raw = _good_raw()
+    bad_raw = _stripped(good_raw)
+    restored = _restored_raw()
+    try:
+        with caplog.at_level(logging.INFO, logger="heatingassistant.app.runtime"):
+            asyncio.run(
+                _seed(
+                    runtime,
+                    {
+                        "raw_today": good_raw,
+                        "today": [row["price"] for row in good_raw],
+                        "forecast": _forecast(_FORECAST_BEFORE),
+                        "tariffs": _TARIFFS,
+                    },
+                )
+            )
+            asyncio.run(_tick(runtime))
+            asyncio.run(
+                _publish(
+                    runtime,
+                    "energy_price",
+                    MqttTagPayload(
+                        _STRIPPED_STATE,
+                        ts=_STAMP + 1,
+                        attributes={
+                            "raw_today": bad_raw,
+                            "today": [row["price"] for row in bad_raw],
+                            "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
+                            "tariffs": _TARIFFS_EMPTY,
+                        },
+                    ),
+                )
+            )
+            asyncio.run(_tick(runtime, _STAMP + 1))
+            held = runtime.status()["control"]["price_tariff_guard_engagements"]
+            asyncio.run(
+                _publish(
+                    runtime,
+                    "energy_price",
+                    MqttTagPayload(
+                        _RESTORED_STATE,
+                        ts=_STAMP + 2,
+                        attributes={
+                            "raw_today": restored,
+                            "today": [row["price"] for row in restored],
+                            "forecast": _forecast(_FORECAST_AFTER),
+                            "tariffs": _TARIFFS,
+                        },
+                    ),
+                )
+            )
+            asyncio.run(_tick(runtime, _STAMP + 2))
+    finally:
+        _restore_solve(real)
+        runtime_mod.datetime = previous_datetime
+        _restore_tz(previous_tz)
+
+    assert [list(item["price_forecast"])[0] for item in seen[-3:]] == pytest.approx(
+        [_GOOD_STATE, _GOOD_STATE, _RESTORED_STATE]
+    )
+    prices = [row["price"] for row in _rows(runtime)[-3:]]
+    assert prices == pytest.approx([_GOOD_STATE, _GOOD_STATE, _RESTORED_STATE])
+    assert held == 1
+    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 1
+    assert "tariff-less" in caplog.text
+    assert "tariff guard cleared" in caplog.text
+
+
+def test_tariff_guard_uses_the_price_drop_when_tariffs_are_absent(tmp_path: Path) -> None:
+    previous_tz = _use_copenhagen()
+    previous_datetime = runtime_mod.datetime
+    runtime_mod.datetime = _FrozenDateTime
+    runtime = _runtime(tmp_path, horizon_h=2)
+    seen: list[dict] = []
+    real = _watch(seen)
+    good_raw = _good_raw()
+    try:
+        asyncio.run(
+            _seed(
+                runtime,
+                {
+                    "raw_today": good_raw,
+                    "today": [row["price"] for row in good_raw],
+                    "forecast": _forecast(_FORECAST_BEFORE),
+                },
+            )
+        )
+        asyncio.run(
+            _publish(
+                runtime,
+                "energy_price",
+                MqttTagPayload(
+                    _STRIPPED_STATE,
+                    ts=_STAMP + 1,
+                    attributes={
+                        "raw_today": _stripped(good_raw),
+                        "today": [row["price"] for row in _stripped(good_raw)],
+                        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
+                    },
+                ),
+            )
+        )
+        asyncio.run(_tick(runtime))
+    finally:
+        _restore_solve(real)
+        runtime_mod.datetime = previous_datetime
+        _restore_tz(previous_tz)
+
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_GOOD_STATE)
+    assert _rows(runtime)[-1]["price"] == pytest.approx(_GOOD_STATE)
+    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 1
+
+
+def test_tariff_guard_accepts_after_the_hold_limit(tmp_path: Path, caplog) -> None:
+    previous_tz = _use_copenhagen()
+    previous_datetime = runtime_mod.datetime
+    runtime_mod.datetime = _FrozenDateTime
+    runtime = _runtime(tmp_path, horizon_h=2, price_tariff_hold_s=60)
+    seen: list[dict] = []
+    real = _watch(seen)
+    good_raw = _good_raw()
+    bad_raw = _stripped(good_raw)
+    bad_attrs = {
+        "raw_today": bad_raw,
+        "today": [row["price"] for row in bad_raw],
+        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
+        "tariffs": _TARIFFS_EMPTY,
+    }
+    try:
+        with caplog.at_level(logging.WARNING, logger="heatingassistant.app.runtime"):
+            asyncio.run(
+                _seed(
+                    runtime,
+                    {
+                        "raw_today": good_raw,
+                        "today": [row["price"] for row in good_raw],
+                        "forecast": _forecast(_FORECAST_BEFORE),
+                        "tariffs": _TARIFFS,
+                    },
+                )
+            )
+            asyncio.run(
+                _publish(
+                    runtime,
+                    "energy_price",
+                    MqttTagPayload(_STRIPPED_STATE, ts=_STAMP + 1, attributes=bad_attrs),
+                )
+            )
+            asyncio.run(_tick(runtime, _STAMP + 1))
+            asyncio.run(
+                _publish(
+                    runtime,
+                    "energy_price",
+                    MqttTagPayload(_STRIPPED_STATE, ts=_STAMP + 120, attributes=bad_attrs),
+                )
+            )
+            asyncio.run(_tick(runtime, _STAMP + 120))
+    finally:
+        _restore_solve(real)
+        runtime_mod.datetime = previous_datetime
+        _restore_tz(previous_tz)
+
+    assert list(seen[-2]["price_forecast"])[0] == pytest.approx(_GOOD_STATE)
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_STRIPPED_STATE)
+    assert _rows(runtime)[-1]["price"] == pytest.approx(_STRIPPED_STATE)
+    assert "Accepting a suspect price series" in caplog.text
+
+
+def test_tariff_guard_accepts_a_tariff_less_cold_start(tmp_path: Path) -> None:
+    previous_tz = _use_copenhagen()
+    previous_datetime = runtime_mod.datetime
+    runtime_mod.datetime = _FrozenDateTime
+    runtime = _runtime(tmp_path, horizon_h=2)
+    seen: list[dict] = []
+    real = _watch(seen)
+    bad_raw = _stripped(_good_raw())
+    try:
+        asyncio.run(
+            _seed(
+                runtime,
+                {
+                    "raw_today": bad_raw,
+                    "today": [row["price"] for row in bad_raw],
+                    "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
+                    "tariffs": _TARIFFS_EMPTY,
+                },
+            )
+        )
+        asyncio.run(_tick(runtime))
+    finally:
+        _restore_solve(real)
+        runtime_mod.datetime = previous_datetime
+        _restore_tz(previous_tz)
+
+    assert list(seen[-1]["price_forecast"])[0] == pytest.approx(_STRIPPED_STATE)
+    assert _rows(runtime)[-1]["price"] == pytest.approx(_STRIPPED_STATE)
+    assert runtime.status()["control"]["price_tariff_guard_engagements"] == 0
+
+
+def test_tariff_guard_accepts_when_the_good_series_does_not_cover_now() -> None:
+    from heatingassistant.engine.electricity_price import PriceTariffGuard
+
+    guard = PriceTariffGuard(drop_fraction=0.25, hold_s=3600)
+    good = {"forecast": _forecast(_FORECAST_BEFORE), "tariffs": _TARIFFS}
+    stored, event = guard.consider(good, _STAMP, _NOW)
+    assert event == "accept"
+    assert stored is not None
+    bad = {
+        "forecast": _stripped(_forecast(_FORECAST_BEFORE)),
+        "tariffs": _TARIFFS_EMPTY,
+    }
+    stored, event = guard.consider(bad, _STAMP + 1, _NOW)
+    assert event == "expire"
+    assert stored["forecast"][0]["price"] == pytest.approx(bad["forecast"][0]["price"])

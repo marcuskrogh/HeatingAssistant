@@ -7,6 +7,7 @@ must be the exact calendar version on its own line.
 # 2026.11.8
 
 - After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. The current sample is the live quarter-hour price. Starting the App writes one control-log row.
+- A price update that drops the tariffs (an empty Energi Data Service ``tariffs`` map, or a sudden drop of more than 25% on most overlapping slots) stays off the planner. The last good series is held for up to 60 minutes, and the tick price comes from that series.
 
 # 2026.11.6
 

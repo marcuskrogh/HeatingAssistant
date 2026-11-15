@@ -21,6 +21,7 @@ published, tomorrow slots are filled from ``forecast`` until ``tomorrow`` or
 from __future__ import annotations
 
 import logging
+import statistics
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence, Tuple
@@ -275,9 +276,8 @@ def _lookup_price(
             return price
 
     # The step is before every published stamp. The last entry is the furthest
-    # future hour, not the price at this step. A forecast that starts at
-    # tomorrow used to fill today with that furthest hour (the live tick logged
-    # it as the current price). Hold the sensor until the series actually starts.
+    # future hour, so a forecast that starts tomorrow must not fill today.
+    # Hold the caller-supplied price until the series actually starts.
     if current_price is not None:
         return float(current_price)
     return series[0][1]
@@ -375,3 +375,167 @@ def _local_day_start(now: datetime, day_offset: int) -> datetime:
     local = now.astimezone()
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
     return midnight + timedelta(days=day_offset)
+
+
+# A tariff-less republish drops every overlapping slot at once. One changed
+# hour must not trip the guard, so require a handful of shared stamps and a
+# majority of them.
+PRICE_TARIFF_MIN_OVERLAP = 8
+PRICE_TARIFF_MOST_FRACTION = 0.5
+# Hourly slots still cover "now". A stamp older than this does not.
+PRICE_TARIFF_COVER_S = 3600.0
+
+# consider() results
+PRICE_GUARD_ACCEPT = "accept"
+PRICE_GUARD_ENGAGE = "engage"
+PRICE_GUARD_HOLD = "hold"
+PRICE_GUARD_CLEAR = "clear"
+PRICE_GUARD_EXPIRE = "expire"
+
+
+def tariff_hour_map(attrs: Mapping[str, Any]) -> Optional[dict]:
+    """Return Energi Data Service hourly tariffs, or None when not forwarded.
+
+    The integration publishes ``tariffs`` only while ``tariff_data`` is set.
+    The shape is ``{"tariffs": {hour: price}, "additional_tariffs": {...}}``.
+    An empty ``tariffs`` map is the "empty tariff dataset" path: prices are
+    published with no tariff added. A missing attribute is not that signal.
+    """
+
+    raw = attrs.get("tariffs")
+    if not isinstance(raw, Mapping):
+        return None
+    if "tariffs" in raw or "additional_tariffs" in raw:
+        inner = raw.get("tariffs")
+        if isinstance(inner, Mapping):
+            return dict(inner)
+        return {}
+    return dict(raw)
+
+
+def _prices_by_stamp(attrs: Mapping[str, Any], now: datetime) -> dict[datetime, float]:
+    series = collect_price_series(dict(attrs), now)
+    chosen: dict[datetime, tuple[int, float]] = {}
+    for start_dt, price, priority, _source in series:
+        key = _as_utc(start_dt).replace(microsecond=0)
+        previous = chosen.get(key)
+        if previous is None or priority >= previous[0]:
+            chosen[key] = (priority, float(price))
+    return {key: price for key, (_priority, price) in chosen.items()}
+
+
+def series_covers_now(attrs: Mapping[str, Any], now: datetime) -> bool:
+    """True when a published stamp is at or before ``now`` and still current."""
+
+    now_utc = _as_utc(now)
+    latest: Optional[datetime] = None
+    for start_dt in _prices_by_stamp(attrs, now):
+        if start_dt <= now_utc and (latest is None or start_dt > latest):
+            latest = start_dt
+    if latest is None:
+        return False
+    return (now_utc - latest).total_seconds() <= PRICE_TARIFF_COVER_S
+
+
+def live_price_from_series(attrs: Mapping[str, Any], now: datetime) -> Optional[float]:
+    """Price at ``now`` from ``attrs``, without using the sensor state."""
+
+    series = collect_price_series(dict(attrs), now)
+    if not series:
+        return None
+    if series_covers_now(attrs, now):
+        aligned = align_prices_to_horizon(series, now, 1, 900.0, 0.0, current_price=None)
+        return float(aligned[0]) if aligned else None
+    sorted_series = sorted(series, key=lambda tp: _as_utc(tp[0]))
+    return float(sorted_series[0][1])
+
+
+def _median_drop_is_tariff_strip(
+    good: Mapping[str, Any],
+    incoming: Mapping[str, Any],
+    now: datetime,
+    drop_fraction: float,
+) -> bool:
+    previous = _prices_by_stamp(good, now)
+    current = _prices_by_stamp(incoming, now)
+    drops: list[float] = []
+    for stamp, old in previous.items():
+        if stamp not in current or old <= 1e-9:
+            continue
+        drops.append((old - current[stamp]) / old)
+    if len(drops) < PRICE_TARIFF_MIN_OVERLAP:
+        return False
+    over = sum(1 for drop in drops if drop > drop_fraction)
+    median = float(statistics.median(drops))
+    return median > drop_fraction and over / len(drops) >= PRICE_TARIFF_MOST_FRACTION
+
+
+def _explicit_tariff_strip(good: Mapping[str, Any], incoming: Mapping[str, Any]) -> bool:
+    previous = tariff_hour_map(good)
+    current = tariff_hour_map(incoming)
+    if previous is None or current is None:
+        return False
+    return len(previous) > 0 and len(current) == 0
+
+
+class PriceTariffGuard:
+    """Hold the last good price series across a tariff-less republish."""
+
+    def __init__(self, *, drop_fraction: float, hold_s: float) -> None:
+        self.drop_fraction = float(drop_fraction)
+        self.hold_s = float(hold_s)
+        self.good_attrs: Optional[dict[str, Any]] = None
+        self.holding = False
+        self.hold_started: Optional[float] = None
+        self.engagements = 0
+
+    def consider(
+        self,
+        attrs: Mapping[str, Any],
+        now_ts: float,
+        now: datetime,
+    ) -> tuple[dict[str, Any], str]:
+        """Return the attributes to store and one of the PRICE_GUARD_* events."""
+
+        incoming = dict(attrs)
+        if self.good_attrs is None:
+            self.good_attrs = dict(incoming)
+            self.holding = False
+            self.hold_started = None
+            return incoming, PRICE_GUARD_ACCEPT
+
+        suspect = _explicit_tariff_strip(self.good_attrs, incoming) or _median_drop_is_tariff_strip(
+            self.good_attrs,
+            incoming,
+            now,
+            self.drop_fraction,
+        )
+        if not suspect:
+            was_holding = self.holding
+            self.holding = False
+            self.hold_started = None
+            self.good_attrs = dict(incoming)
+            return incoming, PRICE_GUARD_CLEAR if was_holding else PRICE_GUARD_ACCEPT
+
+        if not series_covers_now(self.good_attrs, now):
+            self.holding = False
+            self.hold_started = None
+            self.good_attrs = dict(incoming)
+            return incoming, PRICE_GUARD_EXPIRE
+
+        if (
+            self.holding
+            and self.hold_started is not None
+            and float(now_ts) - float(self.hold_started) >= self.hold_s
+        ):
+            self.holding = False
+            self.hold_started = None
+            self.good_attrs = dict(incoming)
+            return incoming, PRICE_GUARD_EXPIRE
+
+        if not self.holding:
+            self.holding = True
+            self.hold_started = float(now_ts)
+            self.engagements += 1
+            return dict(self.good_attrs), PRICE_GUARD_ENGAGE
+        return dict(self.good_attrs), PRICE_GUARD_HOLD
