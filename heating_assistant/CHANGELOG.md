@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.2
+
+- The controller solves once per 15-minute sample and writes the heater command once. A room-temperature reading between samples updates the estimate by the real time since the last update and does not start another solve. Saving configuration or a schedule does the same: one estimate step for the real elapsed time, one solve, and one write.
+
 # 2026.11.1
 
 - Room temperature filtered is the estimator air temperature. Heat loss is the outdoor model loss, including extra loss while a window override is active. Heating power measured is labelled as commanded model power, and heating power model publishes the same value. Parameter confidence shows the mass, resistance, and time-constant parts.

@@ -4,10 +4,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | In Review | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/710 do not merge |
+| SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | Done | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/710 version 2026.11.2 |
 | SWD-597 | Task | HeatingAssistant T3: display series | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/709 (`195175d5`) |
 | SWD-596 | Task | HeatingAssistant T1: control log and export | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/708 (`67ddbb4f`) |
-| SWD-595 | Story | HeatingAssistant: reliable data export, then comfort-band control fixes | In Progress | — | — | SWD-598 is In Review; later control tasks stay bench-gated |
+| SWD-595 | Story | HeatingAssistant: reliable data export, then comfort-band control fixes | In Progress | — | — | T4 shipped in 2026.11.2; later control tasks stay bench-gated |
 | SWD-585 | Bug | [Bug] Parameter estimation Heating Input exceeds configured heat-pump power | Done | — | docs/agents/PLAN-pe-heating-power-bounds.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/703 |
 | SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | Done | — | docs/agents/PLAN-mpc-load-uncap.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/692 (`39708164`) |
 | SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |

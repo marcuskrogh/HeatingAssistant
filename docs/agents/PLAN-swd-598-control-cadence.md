@@ -28,4 +28,4 @@ Out of scope: model re-identification, an inner PI loop, parameter or tuning cha
 - A rejected solve does not write. The last command stays. The 5-hour watchdog still writes `u = 0` once when it trips.
 - Saving config or a schedule still runs one immediate cycle. That path is not a sensor event.
 - A window or door tag can still force the heater off. That is the existing override, not a planner sample.
-- Version stays 2026.11.1. This pull request is not a release.
+- Released as 2026.11.2. A config or schedule save uses the same real elapsed estimator step as a sample.
