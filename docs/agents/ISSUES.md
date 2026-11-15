@@ -4,7 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-604 | Bug | HeatingAssistant 2026.11.6: planner price series wrong after a price refresh; startup writes two tick rows | In Progress | SWD-595 | docs/agents/ITERATE.md | In Progress — version 2026.11.8, review only, do not merge |
+| SWD-605 | Bug | HeatingAssistant 2026.11.8: price day latch stays inert because the bridge drops tariffs | In Review | — | docs/agents/ITERATE.md | In Review — version 2026.11.9, review only, do not merge. Relates to SWD-604 and SWD-595 |
+| SWD-604 | Bug | HeatingAssistant 2026.11.6: planner price series wrong after a price refresh; startup writes two tick rows | In Progress | SWD-595 | docs/agents/ITERATE.md | Released as 2026.11.8 (`db82aad`). Follow-up is SWD-605 |
 | SWD-603 | Task | HeatingAssistant: hold the climate offset between samples | In Review | SWD-595 | — | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/715 version 2026.11.7, rebased onto 2026.11.6, do not merge |
 | SWD-602 | Bug | HeatingAssistant 2026.11.5: live tick still gets a flat outdoor and price series, and planned power stays unscaled | Done | SWD-595 | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/714 (`9281ac6`, 2026.11.6) |
 | SWD-601 | Bug | HeatingAssistant 2026.11.4: constant outdoor forecast in planner, missing tick log rows, unscaled planned-power display | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/713 (`4844e11`, 2026.11.5) |
@@ -12,7 +13,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | Done | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/710 version 2026.11.2 |
 | SWD-597 | Task | HeatingAssistant T3: display series | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/709 (`195175d5`) |
 | SWD-596 | Task | HeatingAssistant T1: control log and export | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/708 (`67ddbb4f`) |
-| SWD-595 | Story | HeatingAssistant: reliable data export, then comfort-band control fixes | In Progress | — | — | SWD-604 is In Progress (2026.11.8, review only). SWD-603 is In Review (https://github.com/marcuskrogh/HeatingAssistant/pull/715, 2026.11.7, do not merge) |
+| SWD-595 | Story | HeatingAssistant: reliable data export, then comfort-band control fixes | In Progress | — | — | SWD-604 shipped as 2026.11.8 (`db82aad`). SWD-605 is In Review (2026.11.9, do not merge). SWD-603 is In Review (https://github.com/marcuskrogh/HeatingAssistant/pull/715, 2026.11.7, do not merge) |
 | SWD-585 | Bug | [Bug] Parameter estimation Heating Input exceeds configured heat-pump power | Done | — | docs/agents/PLAN-pe-heating-power-bounds.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/703 |
 | SWD-571 | Task | [Tweak] Show MPC Load above 100% when the planner overruns its budget | Done | — | docs/agents/PLAN-mpc-load-uncap.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/692 (`39708164`) |
 | SWD-584 | Bug | [Bug] Parameter estimation popup snaps back to the top | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/700 (`31f34fdd`) |

@@ -394,6 +394,51 @@ PRICE_LATCH_IGNORED = "ignored"
 PRICE_LATCH_AWAITING = "awaiting"
 
 
+_EDS_PRICE_SOURCE = "energidataservice"
+_PRICE_ROW_KEYS = (
+    "raw_today",
+    "raw_tomorrow",
+    "today",
+    "tomorrow",
+    "prices_today",
+    "prices_tomorrow",
+    "forecast",
+)
+
+
+def _rows_use_eds_shape(attrs: Mapping[str, Any]) -> bool:
+    """True when a price list uses Energi Data Service ``hour`` + ``price``."""
+
+    for key in _PRICE_ROW_KEYS:
+        raw = attrs.get(key)
+        if not isinstance(raw, list):
+            continue
+        for row in raw:
+            if (
+                isinstance(row, Mapping)
+                and row.get("hour") is not None
+                and row.get("price") is not None
+            ):
+                return True
+    return False
+
+
+def price_update_is_eds(attrs: Mapping[str, Any]) -> bool:
+    """True when this price payload must go through the day latch.
+
+    An Energi Data Service update is one of: a ``tariffs`` key (empty counts),
+    rows shaped ``hour`` + ``price``, or ``price_source`` ``energidataservice``
+    stamped by the bridge. Nord Pool ``start`` + ``value`` rows, and a payload
+    with no price shape, stay on the passthrough path.
+    """
+
+    if "tariffs" in attrs:
+        return True
+    if _rows_use_eds_shape(attrs):
+        return True
+    return attrs.get("price_source") == _EDS_PRICE_SOURCE
+
+
 def tariff_hour_map(attrs: Mapping[str, Any]) -> Optional[dict]:
     """Return Energi Data Service hourly tariffs, or None when not forwarded.
 
@@ -698,7 +743,7 @@ class PriceDayLatch:
         """Accept a new day only when the payload validates. Latched days stay."""
 
         self._prune(now)
-        if "tariffs" not in attrs and not self.eds:
+        if not price_update_is_eds(attrs) and not self.eds:
             self.awaiting_valid = False
             self.live_fallback = False
             return LatchDecision(dict(attrs), PRICE_LATCH_PASSTHROUGH, warn=False, reason="")

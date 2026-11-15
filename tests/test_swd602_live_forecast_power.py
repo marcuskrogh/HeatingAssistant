@@ -72,8 +72,8 @@ def _raw_today() -> list[dict]:
     day = datetime(2026, 11, 15, 0, 0, tzinfo=_ZONE)
     return [
         {
-            "hour": (day + timedelta(minutes=15 * index)).isoformat(),
-            "price": round(1.844 - (index % 13) * 0.03, 3),
+            "start": (day + timedelta(minutes=15 * index)).isoformat(),
+            "value": round(1.844 - (index % 13) * 0.03, 3),
         }
         for index in range(96)
     ]
@@ -85,8 +85,8 @@ def _tomorrow_forecast() -> list[dict]:
     start = datetime(2026, 11, 16, 0, 0, tzinfo=_ZONE)
     return [
         {
-            "hour": (start + timedelta(hours=index)).isoformat(),
-            "price": round(_TOMORROW_PRICE + (index % 11) * 0.05, 3),
+            "start": (start + timedelta(hours=index)).isoformat(),
+            "value": round(_TOMORROW_PRICE + (index % 11) * 0.05, 3),
         }
         for index in range(152)
     ]
@@ -209,7 +209,7 @@ async def _seed_live(runtime: HeatingRuntime) -> None:
             attributes={
                 "forecast": _tomorrow_forecast(),
                 "raw_today": raw_today,
-                "today": [row["price"] for row in raw_today],
+                "today": [row["value"] for row in raw_today],
             },
         ),
     )
@@ -300,7 +300,7 @@ def test_live_shapes_survive_a_room_temperature_update(tmp_path: Path) -> None:
         assert isinstance(stored, list) and len(stored) == 48
         assert stored[0]["datetime"].endswith("+00:00")
         price_attrs = runtime.tag_attributes["energy_price"]
-        assert price_attrs["forecast"][0]["hour"].startswith("2026-11-16T00:00:00")
+        assert price_attrs["forecast"][0]["start"].startswith("2026-11-16T00:00:00")
         assert "raw_tomorrow" not in price_attrs
         assert runtime.control_engine.heat_sources[0].name == "Living Room Heater"
         assert runtime.control_engine.heat_sources[0].power_scale == pytest.approx(0.15)
