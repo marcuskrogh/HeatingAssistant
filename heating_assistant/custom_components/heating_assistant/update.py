@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, NAME, VERSION
-from .version_sync import disk_manifest_version, restart_required
+from .version_sync import disk_manifest_version
 
 
 async def async_setup_entry(
@@ -36,6 +36,12 @@ class HeatingAssistantBridgeUpdateEntity(UpdateEntity):
     def __init__(self, entry: ConfigEntry) -> None:
         self._attr_unique_id = f"{entry.entry_id}_bridge_restart"
         self._entry = entry
+        self._disk_version: str | None = None
+
+    async def async_update(self) -> None:
+        """Read the manifest off the event loop."""
+
+        self._disk_version = await self.hass.async_add_executor_job(disk_manifest_version)
 
     @property
     def device_info(self) -> dict:
@@ -47,10 +53,10 @@ class HeatingAssistantBridgeUpdateEntity(UpdateEntity):
 
     @property
     def latest_version(self) -> str | None:
-        return disk_manifest_version()
+        return self._disk_version
 
     @property
     def release_summary(self) -> str | None:
-        if restart_required():
+        if self._disk_version is not None and self._disk_version != VERSION:
             return "Restart Home Assistant to load the thin bridge version on disk."
         return "Loaded bridge version matches the manifest on disk."

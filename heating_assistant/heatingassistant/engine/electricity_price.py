@@ -21,6 +21,7 @@ published, tomorrow slots are filled from ``forecast`` until ``tomorrow`` or
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -93,11 +94,11 @@ def collect_price_series(
     """Merge today, tomorrow, and forecast attributes into one timed series."""
     series: List[TimedPrice] = []
 
-    raw_today = attrs.get("raw_today") or []
-    raw_tomorrow = attrs.get("raw_tomorrow") or []
-    today_raw = attrs.get("today") or attrs.get("prices_today") or []
-    tomorrow_raw = attrs.get("tomorrow") or attrs.get("prices_tomorrow") or []
-    forecast_raw = attrs.get("forecast") or []
+    raw_today = _as_price_entries(attrs.get("raw_today"))
+    raw_tomorrow = _as_price_entries(attrs.get("raw_tomorrow"))
+    today_raw = _as_price_entries(attrs.get("today") or attrs.get("prices_today"))
+    tomorrow_raw = _as_price_entries(attrs.get("tomorrow") or attrs.get("prices_tomorrow"))
+    forecast_raw = _as_price_entries(attrs.get("forecast"))
 
     if raw_today:
         series.extend(
@@ -224,10 +225,11 @@ def _lookup_price(
     best_priority = -1
     best_start: Optional[datetime] = None
 
+    step_time = _as_utc(step_time)
     for start_dt, price, priority, source in series:
         if source not in allowed:
             continue
-        if start_dt > step_time:
+        if _as_utc(start_dt) > step_time:
             break
         if priority > best_priority or (
             priority == best_priority
@@ -243,12 +245,12 @@ def _lookup_price(
     # No matching entry in the allowed window — hold the last allowed price
     # if one exists before step_time (covers horizon beyond published data).
     for start_dt, price, priority, source in reversed(series):
-        if source in allowed and start_dt <= step_time:
+        if source in allowed and _as_utc(start_dt) <= step_time:
             return price
 
     # Horizon tail beyond all published days: hold the most recent known price.
     for start_dt, price, priority, source in reversed(series):
-        if start_dt <= step_time:
+        if _as_utc(start_dt) <= step_time:
             return price
 
     return series[-1][1]
@@ -278,18 +280,49 @@ def _local_date(dt: datetime) -> date:
     return dt.astimezone().date()
 
 
+def _as_utc(moment: datetime) -> datetime:
+    """Return an aware UTC timestamp. A naive value is UTC, matching weather."""
+
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def _as_price_entries(raw: Any) -> list:
+    """Normalise a price attribute to a list of entries.
+
+    Nord Pool publishes lists. A map of timestamp to price, or timestamp to
+    an entry, is the same series and must not be dropped.
+    """
+
+    if isinstance(raw, Mapping):
+        rows = []
+        for key, value in raw.items():
+            if isinstance(value, Mapping):
+                row = dict(value)
+                if not any(row.get(time_key) is not None for time_key in _TIME_KEYS):
+                    row["start"] = key
+                rows.append(row)
+            else:
+                rows.append({"start": key, "value": value})
+        return rows
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    return []
+
+
 def _extract_timestamp(entry: dict) -> Optional[datetime]:
     for key in _TIME_KEYS:
         raw = entry.get(key)
         if raw is None:
             continue
         if isinstance(raw, datetime):
-            return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+            return _as_utc(raw)
         try:
             text = str(raw)
             if text.endswith("Z"):
                 text = text[:-1] + "+00:00"
-            return datetime.fromisoformat(text)
+            return _as_utc(datetime.fromisoformat(text))
         except (TypeError, ValueError):
             continue
     return None

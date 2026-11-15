@@ -346,6 +346,11 @@ def _bridge_manager(thin_init: Any, *, is_running: bool = False):
     hass.states.get.return_value = sensor_state
     hass.states.async_all.return_value = []
     hass.async_create_task = MagicMock()
+
+    async def _executor(func, *args):
+        return func(*args)
+
+    hass.async_add_executor_job = _executor
     manager = thin_init._BridgeManager(
         hass, MagicMock(data={"instance_id": "default"})
     )

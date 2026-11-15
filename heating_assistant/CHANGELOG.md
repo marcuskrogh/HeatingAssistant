@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.6
+
+- Hourly weather and price forecasts reach the planner when they are stored as a list or as a map, and a price time without a timezone no longer drops the outdoor series. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.
+
 # 2026.11.5
 
 - The planner again follows the weather, solar, and price forecasts across the horizon. A later reading of only the current outdoor temperature no longer flattens that forecast. Each control sample is written to the control log with the estimator values. Planned heating power uses the same scaled heat-pump model as the planner.

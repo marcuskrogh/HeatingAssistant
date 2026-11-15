@@ -23,7 +23,12 @@ from heatingassistant.engine.thermal_model import HouseModel, Room
 from heatingassistant.mqtt.bridge import InMemoryMqttBus
 from heatingassistant.mqtt.topics import MqttTagPayload
 
-_NOW = datetime(2026, 11, 15, 5, 30, tzinfo=timezone.utc)
+# 05:30 in a fixed zone, so the 06:00 comfort window is crossed no matter
+# which timezone the machine uses. ``astimezone()`` followed the host clock
+# and made the enabled-step check pass or fail with the date and the zone.
+_ZONE = timezone(timedelta(hours=1))
+_NOW_LOCAL = datetime(2026, 11, 15, 5, 30, tzinfo=_ZONE)
+_NOW = _NOW_LOCAL.astimezone(timezone.utc)
 
 
 def _forecast() -> list[dict]:
@@ -101,7 +106,7 @@ def _options() -> dict:
 
 def _runtime(tmp_path: Path) -> HeatingRuntime:
     runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
-    runtime._schedule_now_local = lambda: _NOW.astimezone()  # type: ignore[method-assign]
+    runtime._schedule_now_local = lambda: _NOW_LOCAL  # type: ignore[method-assign]
     return runtime
 
 
