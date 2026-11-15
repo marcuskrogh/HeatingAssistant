@@ -684,7 +684,23 @@ class HeatingRuntime(
         self._ekf_last_t = stamp
         return dt
 
-    def _update_estimate(self, now: float) -> None:
+    def _stage_planner_inputs(self) -> None:
+        """Fill solver inputs from the current tags and schedule. No solve."""
+
+        outdoor = self._outdoor_temperature()
+        disturbances = self._mpc_disturbance_inputs(outdoor)
+        schedule_ctx = self._schedule_control_context()
+        self._last_control_trajectory = schedule_ctx["trajectory"]
+        self._last_effective_params = schedule_ctx["effective"]
+        self.control_engine.stage_nmpc_inputs(
+            outdoor,
+            comfort_offsets=schedule_ctx["comfort_offsets"],
+            control_trajectory=schedule_ctx["trajectory"],
+            now=schedule_ctx["now_utc"],
+            **disturbances,
+        )
+
+    def _update_estimate(self, now: float, *, use_staged_inputs: bool = False) -> None:
         """One estimator predict+update. No planner solve and no actuator write."""
 
         dt = self._advance_estimate_clock(now)
@@ -698,6 +714,7 @@ class HeatingRuntime(
             outdoor,
             schedule_ctx["setpoints"],
             now=schedule_ctx["now_utc"],
+            use_staged_inputs=use_staged_inputs,
         )
 
     def _is_room_measurement_tag(self, tag: str) -> bool:
@@ -725,7 +742,8 @@ class HeatingRuntime(
         ):
             dt = self._advance_estimate_clock(stamp)
             return await self.run_control_cycle(estimate_dt=dt, now=stamp)
-        self._update_estimate(stamp)
+        self._stage_planner_inputs()
+        self._update_estimate(stamp, use_staged_inputs=True)
         self._schedule_nmpc_worker()
         return dict(self.actuator_outputs)
 

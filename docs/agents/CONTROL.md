@@ -18,6 +18,9 @@ other exclusive mode. Both use **one sample grid** (period = `dt`,
 each sample (default 900 s), once:
   1. CD-EKF predict over the real elapsed time since the last update, then update
   2. one planner solve (NMPC NLP or Linear QP)
+     The solve reads outdoor temperature, forecasts, prices, and the schedule
+     from the current sample. Those inputs are filled on the tick, including
+     a config or schedule save, before the solver starts.
   3. one actuator write of u = U*[k] for that plan (the new plan's first step)
 ```
 
