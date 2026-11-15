@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.8
+
+- After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. A time before the first stamp keeps the supplied price instead of the last forecast hour. Starting the App writes one control-log row.
+- Energi Data Service prices are stored per Copenhagen day once they check out: 24 hourly tariffs above zero, the fixed additions above zero, and a price that matches spot plus those tariffs. A stored day is never replaced, so a tariff-less load after a restart is ignored. A forecast past tomorrow is not stored as an actual price. The tick price comes from the stored series. Until the first valid load, the planner omits the electricity price. The stored days survive an App restart.
+
 # 2026.11.6
 
 - A room-temperature update between samples no longer replaces the solved outdoor and price series with the current sensor. The hourly weather list and the quarter-hour price list (today's `raw_today`, then tomorrow's `forecast`) stay on the plan. A forecast stored as a map, or a price time without a timezone, still reaches the planner. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.

@@ -35,8 +35,14 @@ from heatingassistant.engine.weather import attach_condition_from_reason
 from heatingassistant.engine import const
 from heatingassistant.engine.datasets import DatasetStore
 from heatingassistant.engine.electricity_price import (
+    PRICE_LATCH_AWAITING,
+    PRICE_LATCH_IGNORED,
+    PRICE_LATCH_PASSTHROUGH,
+    PRICE_LATCH_STATE_KEY,
+    PriceDayLatch,
     align_prices_to_horizon,
     collect_price_series,
+    live_price_from_series,
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
@@ -219,6 +225,8 @@ class HeatingRuntime(
         # the live attribute dict. The 15-minute tick would otherwise repeat
         # the current outdoor temperature and price across the horizon.
         self._forecast_attr_cache: dict[str, dict[str, Any]] = {}
+        self._price_latch = PriceDayLatch.from_dict(self.state.get(PRICE_LATCH_STATE_KEY))
+        self._price_live_fallback_logged = False
         self._last_nmpc_attempt_ts: float | None = self._coerce_number(
             self.state.get("last_nmpc_attempt_ts")
         )
@@ -326,13 +334,20 @@ class HeatingRuntime(
         if bool(self.options.get("system_enabled", False)) and self._last_nmpc_ts is None:
             self._anchor_schedule_epoch(time.time())
         self._start_mqtt_discovery_retry()
-        self._start_background_ticker()
         await self._publish_startup_metadata()
+        # The ticker also samples. Starting it before the startup sample
+        # writes a second tick row with the same timestamp.
+        self._start_background_ticker()
 
     async def _on_mqtt_connected(self) -> None:
-        """Republish retained metadata after (re)connect."""
+        """Republish retained metadata after (re)connect.
 
-        await self._publish_startup_metadata()
+        The connect callback must not sample again. ``start`` already wrote
+        the startup tick, and a broker that is already connected runs this
+        handler in the same second.
+        """
+
+        await self._publish_retained_metadata()
 
     @staticmethod
     def _blank_mqtt_value(value: Any) -> bool:
@@ -460,14 +475,19 @@ class HeatingRuntime(
     async def _publish_startup_metadata(self) -> None:
         """Best-effort bindings / control / status publish for Ingress readiness."""
 
-        try:
-            await self.publish_bindings()
-        except Exception:
-            _logger.exception("Failed to publish MQTT bindings; will retry on connect")
+        await self._publish_retained_metadata()
         try:
             await self.run_control_tick()
         except Exception:
             _logger.exception("Control tick failed during runtime start")
+
+    async def _publish_retained_metadata(self) -> None:
+        """Republish retained discovery without taking another control sample."""
+
+        try:
+            await self.publish_bindings()
+        except Exception:
+            _logger.exception("Failed to publish MQTT bindings; will retry on connect")
         try:
             await self.publish_status()
         except Exception:
@@ -664,8 +684,36 @@ class HeatingRuntime(
             attrs = dict(payload.attributes)
             attach_condition_from_reason(attrs, payload.reason)
             if attrs:
-                self.tag_attributes[tag] = attrs
-                self._forecast_attr_cache[tag] = dict(attrs)
+                # A price refresh often republishes the forecast list and omits
+                # raw_today. Replacing the whole dict dropped today's quarters,
+                # and the lookup then filled "now" with the last forecast hour.
+                if tag == self._price_tag():
+                    decision = self._price_latch.consider(dict(attrs), datetime.now(timezone.utc))
+                    self._note_price_latch(decision)
+                    if decision.event == PRICE_LATCH_PASSTHROUGH:
+                        previous = self._forecast_attr_cache.get(tag)
+                        if isinstance(previous, dict):
+                            for key in (
+                                "forecast",
+                                "raw_today",
+                                "raw_tomorrow",
+                                "today",
+                                "tomorrow",
+                                "prices_today",
+                                "prices_tomorrow",
+                            ):
+                                if key not in attrs and key in previous:
+                                    attrs[key] = previous[key]
+                    elif not decision.attrs:
+                        attrs = {}
+                    else:
+                        attrs = decision.attrs
+                if attrs:
+                    self.tag_attributes[tag] = attrs
+                    self._forecast_attr_cache[tag] = dict(attrs)
+                else:
+                    self.tag_attributes.pop(tag, None)
+                    self._forecast_attr_cache.pop(tag, None)
             else:
                 self.tag_attributes.pop(tag, None)
                 self._forecast_attr_cache.pop(tag, None)
@@ -1495,6 +1543,7 @@ class HeatingRuntime(
         price_tag = self.options.get("price_tag") or "energy_price"
         if not isinstance(price_tag, str) or not price_tag:
             price_tag = "energy_price"
+        price_now = now if now is not None else datetime.now(timezone.utc)
         solar_tag = self.options.get("solar_radiation_tag")
         solar_value = None
         solar_attrs = None
@@ -1517,8 +1566,8 @@ class HeatingRuntime(
         return build_mpc_disturbance_inputs(
             outdoor_temp=outdoor_temp,
             weather_attrs=self._attrs_for_disturbance(weather_tag),
-            price_value=self._coerce_number(self.tag_values.get(price_tag)),
-            price_attrs=self._attrs_for_disturbance(price_tag),
+            price_value=self._planner_price_value(price_tag, price_now),
+            price_attrs=self._planner_price_attrs(price_tag, price_now),
             solar_value=solar_value,
             solar_attrs=solar_attrs if solar_attrs else self._attrs_for_disturbance(
                 solar_tag if isinstance(solar_tag, str) else ""
@@ -1751,6 +1800,9 @@ class HeatingRuntime(
             "control_computing": bool(self._control_computing),
             "nmpc_result_ts": self._nmpc_result_ts,
             "last_control_ran_ts": self._last_control_ran_ts,
+            "price_latch_ignored": int(self._price_latch.ignored),
+            "price_latch_awaiting_valid": bool(self._price_latch.awaiting_valid),
+            "price_latch_live_fallback": bool(self._price_latch.live_fallback),
         }
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))
@@ -1863,6 +1915,54 @@ class HeatingRuntime(
             return None
         return self._coerce_number(attrs.get("temperature"))
 
+    def _note_price_latch(self, decision: Any) -> None:
+        if decision.event == PRICE_LATCH_AWAITING and decision.warn:
+            _logger.warning(
+                "Price update failed validation (%s). No day is latched, so the "
+                "solver runs without an electricity price until a valid load arrives.",
+                decision.reason,
+            )
+        elif decision.event == PRICE_LATCH_IGNORED and decision.warn:
+            _logger.warning(
+                "Price update failed validation (%s). Keeping the latched series "
+                "(ignored %s).",
+                decision.reason,
+                self._price_latch.ignored,
+            )
+
+    def _sensor_price(self, price_tag: str) -> float | None:
+        raw = self._coerce_number(self.tag_values.get(price_tag))
+        if raw is None and price_tag != "energy_price":
+            raw = self._coerce_number(self.tag_values.get("energy_price"))
+        return raw
+
+    def _planner_price_value(self, price_tag: str, now: datetime) -> float | None:
+        """Latched quarter, live price only when that series does not cover now."""
+
+        if not self._price_latch.eds:
+            return self._sensor_price(price_tag)
+        if self._price_latch.awaiting_valid:
+            return None
+        attrs = self._price_latch.compose(now)
+        held = live_price_from_series(attrs, now)
+        if held is not None:
+            self._price_latch.live_fallback = False
+            self._price_live_fallback_logged = False
+            return held
+        self._price_latch.live_fallback = True
+        if not self._price_live_fallback_logged:
+            _logger.warning(
+                "Latched price series does not cover now; using the live price"
+            )
+            self._price_live_fallback_logged = True
+        return self._sensor_price(price_tag)
+
+    def _planner_price_attrs(self, price_tag: str, now: datetime) -> dict[str, Any] | None:
+        if self._price_latch.eds and not self._price_latch.awaiting_valid:
+            composed = self._price_latch.compose(now)
+            return composed or None
+        return self._attrs_for_disturbance(price_tag)
+
     def _price_tag(self) -> str:
         """Return the configured electricity price tag (defaults to energy_price)."""
 
@@ -1894,15 +1994,15 @@ class HeatingRuntime(
         """
 
         price_tag = self._price_tag()
-        raw = self._coerce_number(self.tag_values.get(price_tag))
-        if raw is None and price_tag != "energy_price":
-            raw = self._coerce_number(self.tag_values.get("energy_price"))
-        attrs = dict(self.tag_attributes.get(price_tag) or {})
-        adder = self._price_adder()
         now = datetime.now(timezone.utc)
+        raw = self._planner_price_value(price_tag, now)
+        attrs = dict(self._planner_price_attrs(price_tag, now) or {})
+        adder = self._price_adder()
         series = collect_price_series(attrs, now)
         if series:
-            aligned = align_prices_to_horizon(series, now, 1, 900.0, adder)
+            aligned = align_prices_to_horizon(
+                series, now, 1, 900.0, adder, current_price=raw
+            )
             if aligned:
                 return float(aligned[0])
         if raw is None:
@@ -2938,6 +3038,7 @@ class HeatingRuntime(
         self.state[const.STATE_SOLAR_FORECAST] = (
             self.control_engine.solar_forecast_cache()
         )
+        self.state[PRICE_LATCH_STATE_KEY] = self._price_latch.to_dict()
         save_state(self.data_dir, self.state)
 
     def _accumulate_energy(self, now: float) -> None:
