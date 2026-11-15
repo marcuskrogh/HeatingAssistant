@@ -58,6 +58,6 @@
 - Task: SWD-599
 - Sub-tasks: —
 - Branch: cursor/swd-599-restore-params-9bcd
-- PR: open, not merged
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/711
 - Classification: bug
 - Workflow: fix-fast
