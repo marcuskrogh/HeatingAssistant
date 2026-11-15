@@ -75,16 +75,31 @@ def build_price_forecast(
 
     attrs = getattr(state, "attributes", None) or {}
     series = collect_price_series(attrs, now)
+    current_price = _sensor_price(getattr(state, "state", None))
     if series:
-        return align_prices_to_horizon(series, now, horizon, dt_s, adder)
+        return align_prices_to_horizon(
+            series,
+            now,
+            horizon,
+            dt_s,
+            adder,
+            current_price=current_price,
+        )
 
     # Fallback: repeat the current sensor state over the full horizon.
-    try:
-        current_price = float(state.state)
-    except (TypeError, ValueError):
+    if current_price is None:
         return None
     clamped = max(0.0, current_price + adder)
     return [clamped] * horizon
+
+
+def _sensor_price(state: Any) -> Optional[float]:
+    """Return the sensor's numeric state, or None when it is not a price."""
+
+    try:
+        return float(state)
+    except (TypeError, ValueError):
+        return None
 
 
 def collect_price_series(
@@ -198,17 +213,24 @@ def align_prices_to_horizon(
     horizon: int,
     dt_s: float,
     adder: float,
+    current_price: Optional[float] = None,
 ) -> List[float]:
     """Map a merged timed series onto ``horizon`` MPC steps via zero-order hold."""
     if not series:
         return []
 
-    sorted_series = sorted(series, key=lambda tp: tp[0])
+    sorted_series = sorted(series, key=lambda tp: _as_utc(tp[0]))
     has_known_tomorrow = any(tp[3] == _SOURCE_TOMORROW for tp in sorted_series)
     aligned: List[float] = []
     for k in range(horizon):
         step_time = now + timedelta(seconds=dt_s * k)
-        price = _lookup_price(sorted_series, step_time, now, has_known_tomorrow)
+        price = _lookup_price(
+            sorted_series,
+            step_time,
+            now,
+            has_known_tomorrow,
+            current_price=current_price,
+        )
         aligned.append(max(0.0, price + adder))
     return aligned
 
@@ -218,6 +240,7 @@ def _lookup_price(
     step_time: datetime,
     now: datetime,
     has_known_tomorrow: bool,
+    current_price: Optional[float] = None,
 ) -> float:
     """Return the best price at ``step_time`` respecting day-scoped sources."""
     allowed = _allowed_sources(now, step_time, has_known_tomorrow)
@@ -231,10 +254,8 @@ def _lookup_price(
             continue
         if _as_utc(start_dt) > step_time:
             break
-        if priority > best_priority or (
-            priority == best_priority
-            and (best_start is None or start_dt > best_start)
-        ):
+        later = best_start is not None and _as_utc(start_dt) > _as_utc(best_start)
+        if priority > best_priority or (priority == best_priority and (best_start is None or later)):
             best_price = price
             best_priority = priority
             best_start = start_dt
@@ -253,7 +274,13 @@ def _lookup_price(
         if _as_utc(start_dt) <= step_time:
             return price
 
-    return series[-1][1]
+    # The step is before every published stamp. The last entry is the furthest
+    # future hour, not the price at this step. A forecast that starts at
+    # tomorrow used to fill today with that furthest hour (the live tick logged
+    # it as the current price). Hold the sensor until the series actually starts.
+    if current_price is not None:
+        return float(current_price)
+    return series[0][1]
 
 
 def _allowed_sources(

@@ -326,13 +326,20 @@ class HeatingRuntime(
         if bool(self.options.get("system_enabled", False)) and self._last_nmpc_ts is None:
             self._anchor_schedule_epoch(time.time())
         self._start_mqtt_discovery_retry()
-        self._start_background_ticker()
         await self._publish_startup_metadata()
+        # The ticker also samples. Starting it before the startup sample
+        # writes a second tick row with the same timestamp.
+        self._start_background_ticker()
 
     async def _on_mqtt_connected(self) -> None:
-        """Republish retained metadata after (re)connect."""
+        """Republish retained metadata after (re)connect.
 
-        await self._publish_startup_metadata()
+        The connect callback must not sample again. ``start`` already wrote
+        the startup tick, and a broker that is already connected runs this
+        handler in the same second.
+        """
+
+        await self._publish_retained_metadata()
 
     @staticmethod
     def _blank_mqtt_value(value: Any) -> bool:
@@ -460,14 +467,19 @@ class HeatingRuntime(
     async def _publish_startup_metadata(self) -> None:
         """Best-effort bindings / control / status publish for Ingress readiness."""
 
-        try:
-            await self.publish_bindings()
-        except Exception:
-            _logger.exception("Failed to publish MQTT bindings; will retry on connect")
+        await self._publish_retained_metadata()
         try:
             await self.run_control_tick()
         except Exception:
             _logger.exception("Control tick failed during runtime start")
+
+    async def _publish_retained_metadata(self) -> None:
+        """Republish retained discovery without taking another control sample."""
+
+        try:
+            await self.publish_bindings()
+        except Exception:
+            _logger.exception("Failed to publish MQTT bindings; will retry on connect")
         try:
             await self.publish_status()
         except Exception:
@@ -664,6 +676,23 @@ class HeatingRuntime(
             attrs = dict(payload.attributes)
             attach_condition_from_reason(attrs, payload.reason)
             if attrs:
+                # A price refresh often republishes the forecast list and omits
+                # raw_today. Replacing the whole dict dropped today's quarters,
+                # and the lookup then filled "now" with the last forecast hour.
+                if tag == self._price_tag():
+                    previous = self._forecast_attr_cache.get(tag)
+                    if isinstance(previous, dict):
+                        for key in (
+                            "forecast",
+                            "raw_today",
+                            "raw_tomorrow",
+                            "today",
+                            "tomorrow",
+                            "prices_today",
+                            "prices_tomorrow",
+                        ):
+                            if key not in attrs and key in previous:
+                                attrs[key] = previous[key]
                 self.tag_attributes[tag] = attrs
                 self._forecast_attr_cache[tag] = dict(attrs)
             else:
@@ -1902,7 +1931,9 @@ class HeatingRuntime(
         now = datetime.now(timezone.utc)
         series = collect_price_series(attrs, now)
         if series:
-            aligned = align_prices_to_horizon(series, now, 1, 900.0, adder)
+            aligned = align_prices_to_horizon(
+                series, now, 1, 900.0, adder, current_price=raw
+            )
             if aligned:
                 return float(aligned[0])
         if raw is None:

@@ -1,32 +1,24 @@
-# Iterate: live planner still gets a flat forecast and unscaled power
+# ITERATE — SWD-604
 
-## Prior work
-- Task: [SWD-601](https://marcusknielsen.atlassian.net/browse/SWD-601)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/713 (`4844e11`, 2026.11.5)
-- Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
+Outcome: ready
 
-## Problem
-- On 2026.11.5 the live tick's snapshot is a flat outdoor series (the current sensor) and a flat price (the current sensor). Solar still varies. The confirmed `/api/state` attributes are lists, and the builders already turn those lists into a varying series.
-- A room-temperature update during the solve calls the estimator without the staged forecast. That replaced the stored outdoor series with the current sensor and cleared the price series before the snapshot was copied.
-- Planned watts in the tick row and in `/api/forecasts` are the rated heat-pump power when the fitted scale is stored under a different source name. At startup the same row is 0 W while the restored command is 1.
-- A map-shaped forecast and a price timestamp without a timezone are still accepted. They were not the live payload.
-- The bridge opens `manifest.json` on the event loop. One schedule test follows the host timezone.
+## Wrong now
 
-## Pass criteria
-- A time-varying outdoor and price series reaches the real solver kwargs and `/api/forecasts`.
-- Tick `q_model_W` and `/api/forecasts` `heating_power` use `power_scale` at startup and after a parameter restore.
-- The manifest read is off the event loop. The schedule test uses a fixed timezone.
+On 2026.11.6, after the price entity refreshes tomorrow's forecast, the planner price series starts at an unrelated value (live sample: 0.854) and no longer follows today's quarter-hour prices into 16 Nov. The same value is written as `price_per_kWh` on that tick. Startup writes two tick rows with one timestamp.
+
+## Pass
+
+- A refresh that changes the forecast list and keeps `raw_today` still feeds the solver today's quarter-hour price, then the 16 Nov forecast.
+- The tick row `price_per_kWh` is the live quarter-hour price.
+- When the forecast starts tomorrow and today's quarters are absent, the current step holds the sensor price, not the last forecast hour.
+- A forecast-only republish does not drop a cached `raw_today`.
+- Startup writes one tick row.
 - Plan acceptance and the 60 s solver limit stay as they are.
 
-## Out of scope
-- Merging, releasing, or tagging. Contacting the live house.
-- Changing whether a 200-iteration plan is accepted.
+## Cause
 
-## Tracker
-- Task: [SWD-602](https://marcusknielsen.atlassian.net/browse/SWD-602)
-- Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
-- Branch: `cursor/swd-602-forecast-power-9bcd`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/714
+`_lookup_price` returned `series[-1]` when the step was before every published stamp. A forecast that starts at tomorrow therefore filled today with the furthest forecast hour. `update_tag` replaced the price attributes wholesale, so a refresh payload that omitted `raw_today` dropped today's quarters and took that path. Startup called `run_control_tick` from `start` and again from the MQTT connect handler, and the ticker was already running.
 
 ## Next
-In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/714. Do not merge or release.
+
+/implement built — review-only pull request, version 2026.11.8, do not merge.

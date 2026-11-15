@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.8
+
+- After the price forecast refreshes, the planner still follows today's quarter-hour prices and then tomorrow's forecast. The current sample is the live quarter-hour price. Starting the App writes one control-log row.
+
 # 2026.11.6
 
 - A room-temperature update between samples no longer replaces the solved outdoor and price series with the current sensor. The hourly weather list and the quarter-hour price list (today's `raw_today`, then tomorrow's `forecast`) stay on the plan. A forecast stored as a map, or a price time without a timezone, still reaches the planner. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.
