@@ -161,6 +161,16 @@ class ControlEngine(BuildMixin, PreviewMixin):
         )
         self._source_output_tags = _source_output_tags(self.config, self.heat_sources)
         self._room_output_tags = _room_output_tags(self.config)
+        from .parameter_lifecycle import (  # noqa: PLC0415
+            estimated_params_snapshot,
+            restore_estimated_parameters,
+        )
+
+        saved_parameters = estimated_params_snapshot(self.config)
+        if saved_parameters:
+            restore_estimated_parameters(
+                self.model, self.heat_sources, saved_parameters
+            )
         prev_filt = self.solar_gain_filter_state()
         prev_forecast = self.solar_forecast_cache()
         self._controller = self._try_build_controller()

@@ -112,28 +112,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         # 1R1C state layout: ``x_phys = T_a (n)`` with ``nx_phys = n``.
         # Capacitance, drift, and disturbance matrices come from HouseModel.
-        self._C_cap = np.array(model._C, dtype=float)                # (n,)
-        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (n,)
-        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (n, n)
+        self._copy_model_matrices()
 
-        # Continuous disturbance matrix G_d shape (n, 1 + 2n):
-        # column 0:        outdoor temperature coupling via B_ext;
-        # columns 1..n:    per-room solar gain (all on air), scaled by
-        #                  identified ``solar_scale`` plus sol-air facade;
-        # columns 1+n..2n: per-room direct air-node heat [W] (q_int).
-        self._G_d: np.ndarray = np.zeros((n, 1 + 2 * n))
-        self._G_d[:, 0] = model._B_ext * self._inv_C_cap
-        for i in range(n):
-            room = model.rooms[self._room_list[i]]
-            s_i = float(room.solar_scale)
-            facade = float(room.facade_solar_share) * float(room.facade_absorptance)
-            self._G_d[i, 1 + i] = (1.0 + facade) * s_i * self._inv_C_cap[i]
-            self._G_d[i, 1 + n + i] = self._inv_C_cap[i]
-
-        # Sky cooling-drift bias (air rows).  Mirrors HouseModel
-        # (−sky_ua · ΔT_sky / C per room), attenuated at runtime
-        # by the cloud clear-sky fraction.  Added in ``f``; not in ``dfdx``.
-        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)  # (n,)
+        # Sky attenuation is runtime weather, not a stored room parameter.
         self._sky_clear_fraction: float = 1.0
 
         # Sherman–Grimsrud per-room effective leakage area [m²] for the
@@ -261,6 +242,43 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         # Precomputed diffusion matrix σ (rebuilt when Q scales change)
         self._sigma_matrix: np.ndarray = self._build_sigma_matrix()
+        listen = getattr(self._model, "add_parameter_listener", None)
+        if callable(listen):
+            listen(self._copy_model_matrices)
+
+    def _copy_model_matrices(self) -> None:
+        """Copy capacitance, drift, and disturbance gains from the house model.
+
+        Identified parameters are written onto the house model after this
+        object may already exist. The estimator state stays on this object;
+        only the matrices that were copied at construction are replaced.
+        """
+
+        model = self._model
+        n = self._n_rooms
+        self._C_cap = np.array(model._C, dtype=float)
+        self._inv_C_cap = 1.0 / self._C_cap
+        self._F = model._A / self._C_cap[:, np.newaxis]
+        # G_d columns: outdoor, per-room solar, per-room direct air heat.
+        self._G_d = np.zeros((n, 1 + 2 * n))
+        self._G_d[:, 0] = model._B_ext * self._inv_C_cap
+        for i in range(n):
+            room = model.rooms[self._room_list[i]]
+            solar_scale = float(room.solar_scale)
+            facade = float(room.facade_solar_share) * float(room.facade_absorptance)
+            self._G_d[i, 1 + i] = (1.0 + facade) * solar_scale * self._inv_C_cap[i]
+            self._G_d[i, 1 + n + i] = self._inv_C_cap[i]
+        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)
+        self._leakage_area = np.array(model._leakage_area, dtype=float)
+        if hasattr(self, "_src_room_idx"):
+            self._src_C_cap = self._C_cap[self._src_room_idx]
+            self._AIR_RHO_CP_leakage = AIR_RHO_CP * self._leakage_area
+            self._ua_inf_typ = self._AIR_RHO_CP_leakage * _SG_FACTOR_TYPICAL
+            for index, source in enumerate(self._sources):
+                if self._src_use_linear_gain[index]:
+                    self._src_linear_gain_per_C[index] = (
+                        source._gain / self._src_C_cap[index]
+                    )
 
     # ── ContinuousDiscreteSDE abstract dimensions ─────────────────────────
 

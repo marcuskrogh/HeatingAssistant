@@ -65,6 +65,9 @@ def _rebuild_model(model: Any) -> None:
             model._C, model._A, model._B_ext = build_matrices()
         except ValueError:
             pass
+    notify = getattr(model, "notify_parameter_listeners", None)
+    if callable(notify):
+        notify()
 
 
 def _source_snapshot(heat_sources: Sequence[Any]) -> Dict[str, Dict[str, float]]:

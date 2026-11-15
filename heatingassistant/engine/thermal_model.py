@@ -25,7 +25,7 @@ not part of the live plant (legacy kwargs still load and are ignored).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from .const import (
@@ -249,6 +249,7 @@ class HouseModel:
         self._rooms: Dict[str, Room] = {r.name: r for r in rooms}
         self._room_list: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
+        self._parameter_listeners: List[Callable[[], None]] = []
 
         # Per-room envelope-correction terms (attach to the air node).
         self._sky_ua = np.array(
@@ -288,6 +289,15 @@ class HouseModel:
         # wind-driven UA reduces to the infiltration share of 1/r_external
         # at typical conditions.
         self._leakage_area = self._build_leakage_area()
+
+    def add_parameter_listener(self, callback: Callable[[], None]) -> None:
+        """Refresh a dependent model when identified parameters change."""
+
+        self._parameter_listeners.append(callback)
+
+    def notify_parameter_listeners(self) -> None:
+        for callback in list(self._parameter_listeners):
+            callback()
 
     def _build_leakage_area(self) -> np.ndarray:
         return np.array(
