@@ -1,0 +1,67 @@
+{
+  "nmpc_period": 900,
+  "nmpc_fast_substeps": 1,
+  "nmpc_horizon_h": 0.25,
+  "rooms": [
+    {
+      "name": "Living Room",
+      "thermal_mass": 9000000.0,
+      "r_external": 0.05,
+      "setpoint": 21.0
+    }
+  ],
+  "heat_sources": [
+    {
+      "name": "Heat pump",
+      "type": "heat_pump",
+      "room": "Living Room",
+      "max_power": 9000.0,
+      "power_scale": 1.5,
+      "hvac_mode": "heat"
+    }
+  ],
+  "estimated_params": {
+    "active": {
+      "rooms": {
+        "Living Room": {
+          "thermal_mass": 13293529.957768452,
+          "r_external": 0.009081036045610804,
+          "internal_gain": 1550.0,
+          "solar_scale": 0.17921358484884725,
+          "is_estimated": true,
+          "estimated_at": "2026-11-15T00:00:00+00:00",
+          "estimation_source": "holdout-2026-11-08-12"
+        }
+      },
+      "sources": {
+        "Heat pump": {
+          "power_scale": 0.15
+        }
+      },
+      "estimated_at": "2026-11-15T00:00:00+00:00",
+      "source": "holdout-2026-11-08-12"
+    },
+    "history": [
+      {
+        "rooms": {
+          "Living Room": {
+            "thermal_mass": 276700000.0,
+            "r_external": 0.0035211267605633804,
+            "internal_gain": 0.0,
+            "solar_scale": 0.25,
+            "is_estimated": true,
+            "estimated_at": "2026-09-26T00:00:00+00:00",
+            "estimation_source": "ml"
+          }
+        },
+        "sources": {
+          "Heat pump": {
+            "power_scale": 1.5
+          }
+        },
+        "estimated_at": "2026-09-26T00:00:00+00:00",
+        "source": "ml"
+      }
+    ]
+  }
+}

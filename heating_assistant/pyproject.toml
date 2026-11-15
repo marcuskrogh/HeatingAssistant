@@ -26,3 +26,4 @@ include = ["heatingassistant*"]
 # omits heatingassistant/app/static and HA side-panel Ingress returns 404.
 [tool.setuptools.package-data]
 "heatingassistant.app" = ["static/**/*"]
+"heatingassistant.engine.data" = ["*.json"]
