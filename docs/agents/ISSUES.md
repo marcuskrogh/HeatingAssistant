@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-601 | Bug | HeatingAssistant 2026.11.4: constant outdoor forecast in planner, missing tick log rows, unscaled planned-power display | In Review | SWD-595 | — | In Review — version 2026.11.5, do not merge |
+| SWD-601 | Bug | HeatingAssistant 2026.11.4: constant outdoor forecast in planner, missing tick log rows, unscaled planned-power display | In Review | SWD-595 | — | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/713 version 2026.11.5, do not merge |
 | SWD-599 | Task | HeatingAssistant: restored parameters reach the planner | Done | SWD-595 | docs/agents/PLAN-swd-599-parameter-restore.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/711 version 2026.11.3 |
 | SWD-598 | Task | HeatingAssistant T4: one control step per 15-minute sample | Done | SWD-595 | docs/agents/PLAN-swd-598-control-cadence.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/710 version 2026.11.2 |
 | SWD-597 | Task | HeatingAssistant T3: display series | Done | SWD-595 | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/709 (`195175d5`) |
