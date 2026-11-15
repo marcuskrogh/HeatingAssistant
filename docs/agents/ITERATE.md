@@ -1,32 +1,28 @@
-# Iterate: live planner still gets a flat forecast and unscaled power
+# Iterate: restore the constant climate offset hold
 
 ## Prior work
-- Task: [SWD-601](https://marcusknielsen.atlassian.net/browse/SWD-601)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/713 (`4844e11`, 2026.11.5)
+- Removed in [SWD-262](https://marcusknielsen.atlassian.net/browse/SWD-262) (`ef816f82`), added in `8bd3435b`
+- Sample contract: [SWD-598](https://marcusknielsen.atlassian.net/browse/SWD-598) / PR #710
 - Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
 
 ## Problem
-- On 2026.11.5 the live tick's snapshot is a flat outdoor series (the current sensor) and a flat price (the current sensor). Solar still varies. The confirmed `/api/state` attributes are lists, and the builders already turn those lists into a varying series.
-- A room-temperature update during the solve calls the estimator without the staged forecast. That replaced the stored outdoor series with the current sensor and cleared the price series before the snapshot was copied.
-- Planned watts in the tick row and in `/api/forecasts` are the rated heat-pump power when the fitted scale is stored under a different source name. At startup the same row is 0 W while the restored command is 1.
-- A map-shaped forecast and a price timestamp without a timezone are still accepted. They were not the live payload.
-- The bridge opens `manifest.json` on the event loop. One schedule test follows the host timezone.
+- A climate unit written once per sample lets delivered power fall as its internal temperature rises toward a fixed target.
+- Marcus chose the constant offset regulator until there is a power measurement.
 
 ## Pass criteria
-- A time-varying outdoor and price series reaches the real solver kwargs and `/api/forecasts`.
-- Tick `q_model_W` and `/api/forecasts` `heating_power` use `power_scale` at startup and after a parameter restore.
-- The manifest read is off the event loop. The schedule test uses a fixed timezone.
-- Plan acceptance and the 60 s solver limit stay as they are.
+- Between samples, rewrite the climate target as internal temperature plus the planner's commanded offset, only when the internal temperature changes.
+- Stay on the 0.5 °C step and inside the sigmoid / `delta_sat` bound. Never exceed the commanded offset.
+- At most one hold write per 60 s per zone, and none when the rounded target is unchanged.
+- `climate_offset_hold` defaults on. Off leaves the sample-only write.
+- No write when the command is stale, the entity is unavailable or unknown, HVAC is off or cool, or the controller is disabled or in fallback.
+- A sample is still one estimator step, one solve, and one actuator write. The hold is a separate counted path.
 
 ## Out of scope
-- Merging, releasing, or tagging. Contacting the live house.
-- Changing whether a 200-iteration plan is accepted.
+- Plan acceptance and the 60 s solver limit.
+- Merging, releasing, or tagging.
 
 ## Tracker
-- Task: [SWD-602](https://marcusknielsen.atlassian.net/browse/SWD-602)
+- Task: [SWD-603](https://marcusknielsen.atlassian.net/browse/SWD-603)
 - Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
-- Branch: `cursor/swd-602-forecast-power-9bcd`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/714
-
-## Next
-In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/714. Do not merge or release.
+- Branch: `cursor/swd-603-offset-hold-9bcd`
+- Rebased onto main `9281ac6` (2026.11.6). Version stays 2026.11.7.

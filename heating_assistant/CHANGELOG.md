@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.7
+
+- Between planner samples, a climate heat pump's target is rewritten as its internal temperature plus the offset the last sample commanded, when that internal temperature changes. The rewrite stays on the 0.5 °C step, does not exceed the commanded offset, and is limited to one write per minute per zone. Set `climate_offset_hold` to false to keep a single write per sample. The planner still solves once per sample.
+
 # 2026.11.6
 
 - A room-temperature update between samples no longer replaces the solved outdoor and price series with the current sensor. The hourly weather list and the quarter-hour price list (today's `raw_today`, then tomorrow's `forecast`) stay on the plan. A forecast stored as a map, or a price time without a timezone, still reaches the planner. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.

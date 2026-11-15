@@ -1,4 +1,9 @@
-"""SWD-598: one planner solve and one actuator write per 15-minute sample."""
+"""SWD-598: one planner solve and one actuator write per 15-minute sample.
+
+A climate offset hold between samples is a separate write. It is not one of
+these sample writes, and these tests still expect one solve and one
+``publish_actuator_outputs`` call per tick.
+"""
 
 from __future__ import annotations
 

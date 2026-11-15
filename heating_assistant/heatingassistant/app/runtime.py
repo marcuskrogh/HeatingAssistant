@@ -20,7 +20,9 @@ from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inp
 from heatingassistant.app.system_health import evaluate_system_health
 from heatingassistant.app.id_history_health import evaluate_id_history_health
 from heatingassistant.app.actuation import (
+    climate_offset_hold_decision,
     climate_write_payload,
+    commanded_climate_offset,
     coerce_climate_attrs,
     number_write_payload,
     switch_write_payload,
@@ -175,6 +177,9 @@ class HeatingRuntime(
             self.state.get("room_temperatures") or {}
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
+        self._climate_offset_holds: dict[str, dict[str, Any]] = {}
+        self._climate_offset_hold_writes = 0
+        self._climate_command_now: float | None = None
         if apply_living_room_fit(self.options):
             save_config(self.data_dir, self.options)
         self.control_engine = ControlEngine(self.options)
@@ -549,8 +554,12 @@ class HeatingRuntime(
         switch bool) are derived at publish time (SWD-280).
         """
 
+        command_now = self._climate_command_now
+        if command_now is None:
+            command_now = time.time()
         for tag, value in sorted(self.actuator_outputs.items()):
             command = self._actuator_write_value(tag, float(value))
+            self._remember_climate_command(tag, command, float(command_now))
             await self.bus.publish(
                 tag_out(self.instance_id, tag),
                 MqttTagPayload(value=command, status="GOOD").encode(),
@@ -586,6 +595,9 @@ class HeatingRuntime(
         # MPC here would thrash: write setpoint → HA state change → tag/in →
         # compute → write again (SWD-280 review-fix).
         if self._is_heater_state_feedback_tag(parsed.tag):
+            # Offset hold only. This is not a sample: no estimator step, no solve.
+            stamp = float(now) if now is not None else float(self._clock())
+            await self.reapply_climate_setpoints(now=stamp, tag=parsed.tag)
             return
         # Window/door contacts drive the override state machine + debounce timers
         # without a full MPC cycle (SWD-298).
@@ -767,14 +779,27 @@ class HeatingRuntime(
         return False
 
     async def _publish_tick_actuators(self, now: float | None = None) -> bool:
-        """Publish the command chosen for this sample."""
+        """Publish the command chosen for this sample.
 
-        del now
-        await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+        This is the sample's one actuator write. Climate offset-hold writes
+        use ``reapply_climate_setpoints`` and are not counted here.
+        """
+
+        self._climate_command_now = None if now is None else float(now)
+        try:
+            await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+        finally:
+            self._climate_command_now = None
         return True
 
     async def run_control_tick(self, now: float | None = None) -> dict[str, float]:
-        """One sample: one estimator step, one planner solve, one actuator write."""
+        """One sample: one estimator step, one planner solve, one actuator write.
+
+        Between samples, ``reapply_climate_setpoints`` may write the climate
+        target again when the pump's internal temperature changes. That path
+        does not step the estimator and does not solve. It is the documented
+        exception to the one-write sample (SWD-598 / PR #710).
+        """
 
         stamp = float(self._clock()) if now is None else float(now)
         self._active_tick_now = stamp
@@ -1751,6 +1776,7 @@ class HeatingRuntime(
             "control_computing": bool(self._control_computing),
             "nmpc_result_ts": self._nmpc_result_ts,
             "last_control_ran_ts": self._last_control_ran_ts,
+            "climate_offset_hold_writes": int(self._climate_offset_hold_writes),
         }
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))
@@ -2555,6 +2581,132 @@ class HeatingRuntime(
             if isinstance(name, str) and name == room_name:
                 return self._room_enabled(room)
         return True
+
+    def _climate_offset_hold_enabled(self) -> bool:
+        raw = self.options.get(
+            const.CONF_CLIMATE_OFFSET_HOLD, const.DEFAULT_CLIMATE_OFFSET_HOLD
+        )
+        if isinstance(raw, str):
+            return raw.strip().lower() not in {"0", "false", "off", "no"}
+        return bool(raw)
+
+    def _sample_period_s(self) -> float:
+        raw = self.options.get(
+            const.CONF_NMPC_PERIOD,
+            self.options.get(const.CONF_UPDATE_INTERVAL, const.DEFAULT_UPDATE_INTERVAL),
+        )
+        try:
+            return max(1.0, float(raw))
+        except (TypeError, ValueError):
+            return float(const.DEFAULT_UPDATE_INTERVAL)
+
+    def _controller_in_fallback(self) -> bool:
+        if self.control_engine.fallback_reason:
+            return True
+        controller = getattr(self.control_engine, "_controller", None)
+        return bool(getattr(controller, "_watchdog_tripped", False))
+
+    def _remember_climate_command(self, tag: str, command: Any, now: float) -> None:
+        """Store the planner offset a later hold is allowed to restore."""
+
+        source_cfg = self._source_cfg_for_output_tag(tag)
+        if source_cfg is None:
+            return
+        state_tag = source_cfg.get("state_tag")
+        if not isinstance(state_tag, str):
+            return
+        if not isinstance(command, Mapping) or command.get("temperature") is None:
+            self._climate_offset_holds.pop(tag, None)
+            return
+        attrs = coerce_climate_attrs(self.tag_attributes.get(state_tag))
+        internal = self._coerce_number(attrs.get("current_temperature"))
+        if internal is None:
+            return
+        source = self._heat_source_object(source_cfg)
+        delta = getattr(source, "delta_sat", const.DEFAULT_DELTA_SAT) if source else const.DEFAULT_DELTA_SAT
+        try:
+            offset = commanded_climate_offset(float(command["temperature"]), float(internal), float(delta))
+            target = float(command["temperature"])
+        except (TypeError, ValueError):
+            return
+        zone = source_cfg.get("room")
+        previous = self._climate_offset_holds.get(tag, {})
+        self._climate_offset_holds[tag] = {
+            "zone": zone if isinstance(zone, str) else tag,
+            "state_tag": state_tag,
+            "commanded_offset": offset,
+            "command_ts": float(now),
+            "last_internal": float(internal),
+            "last_written_target": target,
+            "last_hold_ts": previous.get("last_hold_ts"),
+        }
+
+    async def reapply_climate_setpoints(self, *, now: float, tag: str | None = None) -> int:
+        """Restore climate offsets after an internal-temperature change.
+
+        Returns how many hold writes were published. Does not step the
+        estimator and does not solve. Each write is logged and counted on
+        ``climate_offset_hold_writes``.
+        """
+
+        tags = [tag] if isinstance(tag, str) else [
+            str(source.get("state_tag"))
+            for source in self._heat_sources()
+            if isinstance(source.get("state_tag"), str)
+        ]
+        written = 0
+        for state_tag in tags:
+            written += await self._reapply_one_climate_setpoint(state_tag, now)
+        return written
+
+    async def _reapply_one_climate_setpoint(self, state_tag: str, now: float) -> int:
+        output_tag = None
+        source_cfg = None
+        for source in self._heat_sources():
+            if source.get("state_tag") == state_tag:
+                source_cfg = source
+                output_tag = source.get("output_tag")
+                break
+        if not isinstance(output_tag, str) or source_cfg is None:
+            return 0
+        room_enabled = self._source_actuation_enabled(source_cfg)
+        attrs = coerce_climate_attrs(self.tag_attributes.get(state_tag))
+        internal = self._coerce_number(attrs.get("current_temperature"))
+        decision = climate_offset_hold_decision(
+            enabled_flag=self._climate_offset_hold_enabled(),
+            system_enabled=bool(self.options.get("system_enabled", False)) and room_enabled,
+            in_fallback=self._controller_in_fallback(),
+            now=float(now),
+            period_s=self._sample_period_s(),
+            entity_state=self.tag_values.get(state_tag),
+            entity_status=str(self.tag_statuses.get(state_tag, "GOOD")),
+            internal_temp=internal,
+            hold=self._climate_offset_holds.get(output_tag),
+        )
+        if not decision.write or decision.target is None:
+            return 0
+        await self.bus.publish(
+            tag_out(self.instance_id, output_tag),
+            MqttTagPayload(value={"temperature": decision.target}, status="GOOD").encode(),
+            qos=DEFAULT_QOS,
+            retain=True,
+        )
+        record = dict(self._climate_offset_holds.get(output_tag) or {})
+        record["last_internal"] = decision.internal_temp
+        record["last_written_target"] = decision.target
+        record["last_hold_ts"] = float(now)
+        self._climate_offset_holds[output_tag] = record
+        self._climate_offset_hold_writes += 1
+        _logger.info(
+            "climate offset hold write t=%s zone=%s internal=%s offset=%s target=%s reason=%s",
+            now,
+            decision.zone,
+            decision.internal_temp,
+            decision.offset,
+            decision.target,
+            decision.reason,
+        )
+        return 1
 
     def _climate_write_value(
         self,
