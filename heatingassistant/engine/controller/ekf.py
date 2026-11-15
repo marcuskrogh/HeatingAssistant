@@ -20,6 +20,30 @@ class _InnovationEKF(ContinuousDiscreteEKF):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._last_innovation: Optional[List[float]] = None
+        self._armed_predict_dt: Optional[float] = None
+
+    def arm_predict_dt(self, dt: float) -> None:
+        """Use ``dt`` seconds for the next predict instead of the nominal sample.
+
+        ``0`` skips the time update. The value is consumed by that predict.
+        """
+
+        self._armed_predict_dt = float(dt)
+
+    def predict(
+        self,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        armed = self._armed_predict_dt
+        if armed is None:
+            return super().predict(u, d, p, t)
+        self._armed_predict_dt = None
+        if float(armed) <= 1e-9:
+            return self._x.copy(), self._P.copy()
+        return self.predict_for(float(armed), u, d, p, t)
 
     @property
     def last_innovation(self) -> Optional[List[float]]:

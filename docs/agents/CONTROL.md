@@ -15,15 +15,18 @@ other exclusive mode. Both use **one sample grid** (period = `dt`,
 `nmpc_fast_substeps = 1`). There is no inner P/PID loop.
 
 ```text
-each sample (default 900 s):
-  1. read y = room air temperatures
-  2. CD-EKF predict + update  ->  x_hat
-  3. solve planner on that grid (NMPC NLP or Linear QP)
-  4. apply u = U*[k]          # receding horizon, clip to source bounds
+each sample (default 900 s), once:
+  1. CD-EKF predict over the real elapsed time since the last update, then update
+  2. one planner solve (NMPC NLP or Linear QP)
+  3. one actuator write of u = U*[k] for that plan (the new plan's first step)
 ```
 
-If a solve is still running, the last accepted `U*` is held. Consecutive
-rejects can trip the watchdog to `u = 0`.
+Room-temperature tags between samples update the estimator with the real
+elapsed time. They do not solve and they do not write. Price tags and other
+sensor tags only store the new value. A sample does not write the previous
+plan's next step while the solve is still running: the last accepted command
+stays in place until the one write for that sample. Consecutive rejects can
+trip the watchdog to `u = 0`, and that zeroing is one write.
 
 Leftover names in code (`refresh_p_command`, `_p_command_vector`,
 `u_ref_gate`) are API leftovers. They **hold `U*`**, they do not run

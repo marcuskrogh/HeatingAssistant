@@ -210,6 +210,8 @@ class HeatingRuntime(
         self._last_control_ran_ts: float | None = self._coerce_number(
             self.state.get("last_control_ran_ts")
         )
+        self._ekf_last_t: float | None = self._coerce_number(self.state.get("ekf_last_t"))
+        self._clock = time.time
         self._last_nmpc_attempt_ts: float | None = self._coerce_number(
             self.state.get("last_nmpc_attempt_ts")
         )
@@ -456,13 +458,9 @@ class HeatingRuntime(
         except Exception:
             _logger.exception("Failed to publish MQTT bindings; will retry on connect")
         try:
-            await self.run_control_cycle()
+            await self.run_control_tick()
         except Exception:
-            _logger.exception("Control cycle failed during runtime start")
-        try:
-            self._schedule_nmpc_worker()
-        except Exception:
-            _logger.exception("NMPC schedule failed during runtime start")
+            _logger.exception("Control tick failed during runtime start")
         try:
             await self.publish_status()
         except Exception:
@@ -567,6 +565,7 @@ class HeatingRuntime(
         payload: str | bytes,
         qos: int,
         retain: bool,
+        now: float | None = None,
     ) -> None:
         parsed = parse_tag_topic(topic)
         if parsed is None or parsed.instance_id != self.instance_id or parsed.direction != "in":
@@ -586,7 +585,11 @@ class HeatingRuntime(
         if self._is_window_tag(parsed.tag):
             await self._on_window_tag_changed(parsed.tag, previous_value, tag_payload.value)
             return
-        await self.run_control_cycle()
+        # Room temperatures update the estimator on the real elapsed time.
+        # Price and other tags only store the value. Neither solves nor writes.
+        if self._is_room_measurement_tag(parsed.tag):
+            stamp = float(now) if now is not None else float(self._clock())
+            self._update_estimate(stamp)
 
     async def _handle_entities_catalog_message(
         self,
@@ -669,7 +672,67 @@ class HeatingRuntime(
         self._record_identification_sample()
         self._save_runtime_state()
 
-    async def run_control_cycle(self, *, wait_for_lock: bool = False) -> dict[str, float]:
+    def _advance_estimate_clock(self, now: float) -> float:
+        """Return seconds since the last estimator update and store ``now``."""
+
+        stamp = float(now)
+        last = self._ekf_last_t
+        dt = 0.0 if last is None else max(0.0, stamp - float(last))
+        self._ekf_last_t = stamp
+        return dt
+
+    def _update_estimate(self, now: float) -> None:
+        """One estimator predict+update. No planner solve and no actuator write."""
+
+        dt = self._advance_estimate_clock(now)
+        self.control_engine.arm_estimate_dt(dt)
+        self._recompute_room_temperatures()
+        outdoor = self._outdoor_temperature()
+        schedule_ctx = self._schedule_control_context()
+        self._apply_window_q_inflation()
+        self.control_engine.estimate_measurements(
+            self.room_temperatures,
+            outdoor,
+            schedule_ctx["setpoints"],
+            now=schedule_ctx["now_utc"],
+        )
+
+    def _is_room_measurement_tag(self, tag: str) -> bool:
+        for room in self._rooms():
+            if tag in self._room_temp_tags(room):
+                return True
+        return False
+
+    async def _publish_tick_actuators(self, now: float | None = None) -> bool:
+        """Publish the command chosen for this sample."""
+
+        del now
+        await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+        return True
+
+    async def run_control_tick(self, now: float | None = None) -> dict[str, float]:
+        """One sample: one estimator step, one planner solve, one actuator write."""
+
+        stamp = float(self._clock()) if now is None else float(now)
+        self._active_tick_now = stamp
+        self._last_control_ran_ts = time.time()
+        controller = getattr(self.control_engine, "_controller", None)
+        if controller is None or (
+            const.coerce_mpc_mode(self.options.get(const.CONF_MPC_MODE)) == const.MPC_MODE_LINEAR
+        ):
+            dt = self._advance_estimate_clock(stamp)
+            return await self.run_control_cycle(estimate_dt=dt, now=stamp)
+        self._update_estimate(stamp)
+        self._schedule_nmpc_worker()
+        return dict(self.actuator_outputs)
+
+    async def run_control_cycle(
+        self,
+        *,
+        wait_for_lock: bool = False,
+        estimate_dt: float | None = None,
+        now: float | None = None,
+    ) -> dict[str, float]:
         """Compute and publish actuator outputs for the current runtime state."""
 
         if wait_for_lock:
@@ -682,9 +745,12 @@ class HeatingRuntime(
         try:
             self._control_computing = True
             await self._best_effort_mqtt(self.publish_status(), "control computing")
+            if estimate_dt is not None:
+                self.control_engine.arm_estimate_dt(estimate_dt)
+            sample_stamp = float(now) if now is not None else time.time()
             started = time.time()
             self._refresh_configured_sensor_quality()
-            self._sync_p_fast_index(started)
+            self._sync_p_fast_index(sample_stamp)
             self._recompute_room_temperatures()
             outdoor = self._outdoor_temperature()
             disturbances = self._mpc_disturbance_inputs(outdoor)
@@ -734,7 +800,7 @@ class HeatingRuntime(
                         )
             self._record_control_log_tick(now)
             self._save_runtime_state()
-            await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+            await self._publish_tick_actuators(sample_stamp)
             return dict(self.actuator_outputs)
         finally:
             self._control_computing = False
@@ -2766,6 +2832,7 @@ class HeatingRuntime(
         self.state["last_control_ts"] = self._last_control_ts
         self.state["last_nmpc_ts"] = self._last_nmpc_ts
         self.state["last_control_ran_ts"] = self._last_control_ran_ts
+        self.state["ekf_last_t"] = self._ekf_last_t
         self.state["last_nmpc_attempt_ts"] = self._last_nmpc_attempt_ts
         self.state["last_nmpc_slow_slot"] = self._last_nmpc_slow_slot
         self.state["last_control_duration_s"] = self._last_control_duration_s
