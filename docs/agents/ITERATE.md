@@ -25,3 +25,7 @@
 - Task: [SWD-602](https://marcusknielsen.atlassian.net/browse/SWD-602)
 - Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
 - Branch: `cursor/swd-602-forecast-power-9bcd`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/714
+
+## Next
+In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/714. Do not merge or release.
