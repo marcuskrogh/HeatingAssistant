@@ -6,7 +6,7 @@ must be the exact calendar version on its own line.
 
 # 2026.11.6
 
-- Hourly weather and price forecasts reach the planner when they are stored as a list or as a map, and a price time without a timezone no longer drops the outdoor series. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.
+- A room-temperature update between samples no longer replaces the solved outdoor and price series with the current sensor. The hourly weather list and the quarter-hour price list (today's `raw_today`, then tomorrow's `forecast`) stay on the plan. A forecast stored as a map, or a price time without a timezone, still reaches the planner. The first sample after start, and the sample after a parameter restore, log planned heating power with the fitted power scale. The bridge reads its manifest off the Home Assistant event loop.
 
 # 2026.11.5
 

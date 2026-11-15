@@ -1272,6 +1272,20 @@ class HeatingMPCController:
         cost_zero = evaluate_zero_heat_cost(ocp)
         plan = plan_from_solve(ocp, raw, cost_zero)
         plan["elapsed_s"] = time.perf_counter() - _t0
+        # Rewrite after the NLP. An estimate-only compute on the app thread
+        # used to replace these lists with the current sensor while the solve
+        # was still running, and the accepted snapshot then copied that.
+        solved_price = (
+            self._align_forecast_series(price_forecast, N, price_forecast[0])
+            if price_forecast
+            else []
+        )
+        self._outdoor_forecast = list(outdoor_seq)
+        self._price_forecast = list(solved_price)
+        self._solar_forecast = [dict(step) for step in solar_seq]
+        plan["outdoor_forecast"] = list(outdoor_seq)
+        plan["price_forecast"] = list(solved_price)
+        plan["solar_forecast"] = [dict(step) for step in solar_seq]
         self._total_computes += 1
         return plan
 
@@ -1632,16 +1646,6 @@ class HeatingMPCController:
         else:
             solar_seq[0] = dict(solar_gains)
 
-        # Store forecasts for visualisation
-        self._outdoor_forecast = list(outdoor_seq)
-        self._solar_forecast = [dict(s) for s in solar_seq]
-        self._price_forecast = (
-            self._align_forecast_series(price_forecast, N, price_forecast[0])
-            if price_forecast
-            else []
-        )
-        self._wind_forecast = []
-
         # ── Current measurement y = room temperatures ────────────────────
         room_list = self._system._room_list
         n_rooms = self._system._n_rooms
@@ -1690,6 +1694,19 @@ class HeatingMPCController:
                 else:
                     src.set_power(eff_frac, outdoor_temp)
             return actions
+
+        # A room-temperature update calls this with run_optimization=False and
+        # no staged forecast. That must not replace the series solve_nmpc
+        # stored: the NLP runs for a long time on another thread, and the
+        # snapshot is copied from these fields when the plan is accepted.
+        self._outdoor_forecast = list(outdoor_seq)
+        self._solar_forecast = [dict(step) for step in solar_seq]
+        self._price_forecast = (
+            self._align_forecast_series(price_forecast, N, price_forecast[0])
+            if price_forecast
+            else []
+        )
+        self._wind_forecast = []
 
         # Horizon-mean wind for the infiltration overlay on the forecast rollout.
         wind_seq: Optional[List[float]] = None

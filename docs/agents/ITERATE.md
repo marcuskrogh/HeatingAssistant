@@ -6,9 +6,10 @@
 - Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
 
 ## Problem
-- On 2026.11.5 the live tick hands the solver a flat outdoor series (the current sensor) and a flat price (the current sensor). Solar still varies.
-- Planned watts in the tick row and in `/api/forecasts` are the rated heat-pump power. At startup the same row is 0 W while the restored command is 1.
-- A map-shaped forecast is ignored by the outdoor and price builders. A price timestamp without a timezone aborts the disturbance build.
+- On 2026.11.5 the live tick's snapshot is a flat outdoor series (the current sensor) and a flat price (the current sensor). Solar still varies. The confirmed `/api/state` attributes are lists, and the builders already turn those lists into a varying series.
+- A room-temperature update during the solve calls the estimator without the staged forecast. That replaced the stored outdoor series with the current sensor and cleared the price series before the snapshot was copied.
+- Planned watts in the tick row and in `/api/forecasts` are the rated heat-pump power when the fitted scale is stored under a different source name. At startup the same row is 0 W while the restored command is 1.
+- A map-shaped forecast and a price timestamp without a timezone are still accepted. They were not the live payload.
 - The bridge opens `manifest.json` on the event loop. One schedule test follows the host timezone.
 
 ## Pass criteria
