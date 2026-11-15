@@ -25,4 +25,8 @@
 - Task: [SWD-603](https://marcusknielsen.atlassian.net/browse/SWD-603)
 - Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
 - Branch: `cursor/swd-603-offset-hold-9bcd`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/715
 - Rebased onto main `9281ac6` (2026.11.6). Version stays 2026.11.7.
+
+## Next
+In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/715. Do not merge or release.
