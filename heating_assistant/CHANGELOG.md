@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.3
+
+- On the next start, if the Living Room is still using the 26 Sep parameter set, the App replaces it with the 8-12 Nov fit. The 26 Sep set stays in parameter history. Restore it by promoting that history entry (history index 0).
+
 # 2026.11.2
 
 - The controller solves once per 15-minute sample and writes the heater command once. A room-temperature reading between samples updates the estimate by the real time since the last update and does not start another solve. Saving configuration or a schedule does the same: one estimate step for the real elapsed time, one solve, and one write.

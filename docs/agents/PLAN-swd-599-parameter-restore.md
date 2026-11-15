@@ -9,7 +9,7 @@
 - In: propagation of restored or changed parameters; Living Room fit from 8–12 Nov 2026; keep the 26 Sep set revertable; the two isolated tests.
 - Out: estimator time-advance, a bias state, retuning, Heating Lab, a release, and any contact with the live house.
 - The heat pump `min_power` field does not change thermal output, so the minimum output is `internal_gain`.
-- Version stays 2026.11.2. This pull request is not a release.
+- Released as 2026.11.3. The fit values are unchanged, including internal gain 1550 W.
 
 ## Classification
 - Class: bug
