@@ -135,6 +135,10 @@ CONF_SOURCE_COOLING_EFFICIENCY = "cooling_efficiency"  # fraction of max cooling
 CONF_SOURCE_HEATING_EFFICIENCY = "heating_efficiency"  # fraction of max heating capacity (0–1) used in heat mode
 CONF_SOURCE_EMITTER_TIME_CONSTANT = "emitter_time_constant"  # s, first-order lag between commanded fraction and delivered power (Phase 1 B2)
 CONF_SOURCE_DELTA_SAT = "delta_sat"          # °C saturation offset for sigmoid setpoint mapping (GSHP / HP)
+#: Between samples, rewrite the climate target as internal temp + the planner offset.
+#: Default on: this is the regulator Marcus chose until power is measured.
+CONF_CLIMATE_OFFSET_HOLD = "climate_offset_hold"
+DEFAULT_CLIMATE_OFFSET_HOLD = True
 CONF_SOURCE_MIN_POWER_FRACTION = "min_power_fraction"  # minimum modulation fraction for pellet stoves (below → off)
 CONF_SOURCE_CHARGE_POWER = "charge_power"    # W, electrical draw of storage heater during charging
 CONF_SOURCE_STORAGE_CAPACITY_KWH = "storage_capacity_kwh"  # kWh, brick-core thermal storage capacity

@@ -4,7 +4,11 @@ This test module exercised the removed in-process Home Assistant integration lay
 """
 import pytest
 
-pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
+pytest.skip(
+    "SWD-262: fat HA integration removed. "
+    "The climate offset hold is covered by tests/test_swd603_climate_offset_hold.py.",
+    allow_module_level=True,
+)
 
 import sys
 import os

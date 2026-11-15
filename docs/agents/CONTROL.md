@@ -29,7 +29,13 @@ each sample (default 900 s), once:
 
 Room-temperature tags between samples update the estimator with the real
 elapsed time. They do not solve and they do not write. Price tags and other
-sensor tags only store the new value. Saving configuration or a room schedule
+sensor tags only store the new value. One exception: when
+`climate_offset_hold` is on (the default), a change in a climate unit's
+internal temperature may publish `set_temperature` again so the target stays
+at that internal temperature plus the offset the last sample commanded. That
+hold is a separate write. It does not step the estimator, it does not solve,
+it does not exceed the commanded offset, and it is capped at one write per
+60 s per zone. Turning the flag off leaves the sample as the only write. Saving configuration or a room schedule
 runs one immediate cycle: the estimator steps by the real elapsed time since
 its last update, then there is one planner solve and one actuator write.
 A sample does not write the previous plan's next step while the solve is
