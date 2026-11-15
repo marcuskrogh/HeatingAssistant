@@ -428,6 +428,18 @@ class ControlEngine(BuildMixin, PreviewMixin):
         controller = self._controller
         if controller is None:
             return False
+        # The solve result owns the series. Copy it back immediately before
+        # the snapshot so a room-temperature estimate that landed after the
+        # NLP cannot publish the current sensor across the horizon.
+        solved_outdoor = result.get("outdoor_forecast")
+        if isinstance(solved_outdoor, list) and solved_outdoor:
+            controller._outdoor_forecast = [float(value) for value in solved_outdoor]
+            solved_price = result.get("price_forecast")
+            if isinstance(solved_price, list):
+                controller._price_forecast = [float(value) for value in solved_price]
+            solved_solar = result.get("solar_forecast")
+            if isinstance(solved_solar, list):
+                controller._solar_forecast = [dict(step) for step in solved_solar]
         applied = bool(
             controller.apply_nmpc_result(
                 dict(result), plan_epoch=plan_epoch, now=now

@@ -261,6 +261,8 @@ def parse_forecast_field(
     for entry in forecast_data:
         dt_str = entry.get("datetime")
         if dt_str is None:
+            dt_str = entry.get("time")
+        if dt_str is None:
             continue
         raw = entry.get(field)
         value = coerce(raw)

@@ -38,7 +38,7 @@ from .mqtt_topics import (
     tag_in,
     tag_out,
 )
-from .restart_issue import RESTART_POLL_SECONDS, sync_restart_issue
+from .restart_issue import RESTART_POLL_SECONDS, async_sync_restart_issue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class _BridgeManager:
             self._async_poll_restart_issue,
             timedelta(seconds=RESTART_POLL_SECONDS),
         )
-        sync_restart_issue(self.hass)
+        await async_sync_restart_issue(self.hass)
         if self.hass.is_running:
             await self._async_publish_live_inbound_snapshot()
 
@@ -198,7 +198,7 @@ class _BridgeManager:
         self._clear_binding_subscriptions()
 
     async def _async_homeassistant_started(self, _event: Event) -> None:
-        sync_restart_issue(self.hass)
+        await async_sync_restart_issue(self.hass)
         await self._async_publish_live_inbound_snapshot()
 
     async def _async_publish_live_inbound_snapshot(self) -> None:
@@ -221,7 +221,7 @@ class _BridgeManager:
             )
 
     async def _async_app_status_message(self, _msg: Any) -> None:
-        sync_restart_issue(self.hass)
+        await async_sync_restart_issue(self.hass)
 
     async def _async_notify_message(self, message: Any) -> None:
         try:
@@ -246,7 +246,7 @@ class _BridgeManager:
         )
 
     async def _async_poll_restart_issue(self, _now: Any) -> None:
-        sync_restart_issue(self.hass)
+        await async_sync_restart_issue(self.hass)
 
     @callback
     def _async_schedule_catalog_publish(self, _event: Event) -> None:

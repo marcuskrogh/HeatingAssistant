@@ -1,33 +1,32 @@
-# Iterate: Ingress LOAD ERROR after PE popup close
+# Iterate: live planner still gets a flat forecast and unscaled power
 
 ## Prior work
-- Task: [SWD-504](https://marcusknielsen.atlassian.net/browse/SWD-504)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/666 (`60f325e2`)
-- Spec context: docs/agents/PLAN-pe-popup-close-exit.md
+- Task: [SWD-601](https://marcusknielsen.atlassian.net/browse/SWD-601)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/713 (`4844e11`, 2026.11.5)
+- Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
 
 ## Problem
-- After merge, Ingress shows `LOAD ERROR — Unexpected token '}'. Try statements must have at least a catch or finally block.`
-- `waitForPeJob` in `sysid-detail.js` dropped `finally { hidePeOverlay(); }` so the popup can stay open, but left a `try { ... }` with neither `catch` nor `finally`.
-- Engines that enforce that grammar (WebKit / the HA companion WebView) fail to parse the panel module.
+- On 2026.11.5 the live tick's snapshot is a flat outdoor series (the current sensor) and a flat price (the current sensor). Solar still varies. The confirmed `/api/state` attributes are lists, and the builders already turn those lists into a varying series.
+- A room-temperature update during the solve calls the estimator without the staged forecast. That replaced the stored outdoor series with the current sensor and cleared the price series before the snapshot was copied.
+- Planned watts in the tick row and in `/api/forecasts` are the rated heat-pump power when the fitted scale is stored under a different source name. At startup the same row is 0 W while the restored command is 1.
+- A map-shaped forecast and a price timestamp without a timezone are still accepted. They were not the live payload.
+- The bridge opens `manifest.json` on the event loop. One schedule test follows the host timezone.
 
 ## Pass criteria
-- `waitForPeJob` is valid JavaScript (every `try` has `catch` or `finally`).
-- The overlay still stays open after a fit: `waitForPeJob` does not hide it in `finally`.
-- Close still hides the overlay; while running, close still cancels and does not apply parameters.
+- A time-varying outdoor and price series reaches the real solver kwargs and `/api/forecasts`.
+- Tick `q_model_W` and `/api/forecasts` `heating_power` use `power_scale` at startup and after a parameter restore.
+- The manifest read is off the event loop. The schedule test uses a fixed timezone.
+- Plan acceptance and the 60 s solver limit stay as they are.
 
 ## Out of scope
-- PE algorithm, `exit_label` wording, overlay layout.
-
-## Work packages
-1. Remove the bare `try` in `waitForPeJob` (keep the poll loop and throws).
-2. Regression parse test, cache bust, CalVer, changelog, App package sync.
+- Merging, releasing, or tagging. Contacting the live house.
+- Changing whether a 200-iteration plan is accepted.
 
 ## Tracker
-- Task: [SWD-507](https://marcusknielsen.atlassian.net/browse/SWD-507)
-- Relates: [SWD-504](https://marcusknielsen.atlassian.net/browse/SWD-504)
-- Sub-tasks: [SWD-508](https://marcusknielsen.atlassian.net/browse/SWD-508), [SWD-509](https://marcusknielsen.atlassian.net/browse/SWD-509)
-- Branch: `cursor/swd-507-pe-try-syntax-cfe8`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/667
+- Task: [SWD-602](https://marcusknielsen.atlassian.net/browse/SWD-602)
+- Parent: [SWD-595](https://marcusknielsen.atlassian.net/browse/SWD-595)
+- Branch: `cursor/swd-602-forecast-power-9bcd`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/714
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/667 (`57a81075`)
+In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/714. Do not merge or release.

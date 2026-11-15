@@ -50,8 +50,8 @@ def build_mpc_disturbance_inputs(
 
     cloud_now = resolve_cloud_cover_now(weather_attrs)
 
-    forecast_data = weather_attrs.get("forecast")
-    if isinstance(forecast_data, list) and forecast_data:
+    forecast_data = _as_weather_forecast(weather_attrs.get("forecast"))
+    if forecast_data:
         outdoor_seq = parse_temperature_forecast(
             forecast_data, horizon=horizon, dt=dt_s, now=now
         )
@@ -106,14 +106,47 @@ def build_mpc_disturbance_inputs(
             state="" if price_value is None else str(price_value),
             attributes=price_attrs,
         )
-        price_seq = build_price_forecast(
-            state,
-            now=now,
-            horizon=horizon,
-            dt_s=dt_s,
-            adder=price_adder,
-        )
+        try:
+            price_seq = build_price_forecast(
+                state,
+                now=now,
+                horizon=horizon,
+                dt_s=dt_s,
+                adder=price_adder,
+            )
+        except (TypeError, ValueError):
+            # A bad price stamp must not drop the outdoor series already built.
+            price_seq = None
+            if price_value is not None:
+                try:
+                    price_seq = [max(0.0, float(price_value) + price_adder)] * horizon_n
+                except (TypeError, ValueError):
+                    price_seq = None
         if price_seq:
             result["price_forecast"] = price_seq
 
     return result
+
+
+def _as_weather_forecast(raw: Any) -> list:
+    """Return weather forecast rows.
+
+    Home Assistant's hourly forecast is usually a list of dicts. A map of
+    timestamp to a row is the same series. Solar already accepts that map;
+    outdoor and cloud must too, or the tick repeats the current temperature.
+    """
+
+    if isinstance(raw, list):
+        return [row for row in raw if isinstance(row, Mapping)]
+    if isinstance(raw, Mapping):
+        rows = []
+        for key, value in raw.items():
+            if isinstance(value, Mapping):
+                row = dict(value)
+                if row.get("datetime") is None and row.get("time") is None:
+                    row["datetime"] = key
+                rows.append(row)
+            else:
+                rows.append({"datetime": key, "temperature": value})
+        return rows
+    return []

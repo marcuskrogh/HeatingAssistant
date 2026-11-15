@@ -695,6 +695,36 @@ class HeatingRuntime(
         self._ekf_last_t = stamp
         return dt
 
+    def _seed_uncommanded_from_actuators(self) -> None:
+        """Give a fresh controller the command that is already on the actuator.
+
+        A restart builds ``u_prev`` at zero, then the tick log reads that zero
+        while ``u_applied`` is still the restored command. The row shows 0 W
+        at full command. Seeding once, only while the model command is still
+        zero, makes the logged power the scaled power of that command.
+        """
+
+        controller = getattr(self.control_engine, "_controller", None)
+        if controller is None:
+            return
+        previous = getattr(controller, "_u_prev", None)
+        if previous is None:
+            return
+        try:
+            if any(abs(float(value)) > 1e-9 for value in previous):
+                return
+        except (TypeError, ValueError):
+            return
+        tags = getattr(self.control_engine, "_source_output_tags", {}) or {}
+        for source in self.control_engine.heat_sources:
+            tag = tags.get(source.name)
+            if not isinstance(tag, str):
+                continue
+            fraction = self._coerce_number(self.actuator_outputs.get(tag))
+            if fraction is None:
+                continue
+            controller.notify_applied_u(source.name, float(fraction))
+
     def _stage_planner_inputs(self) -> None:
         """Fill solver inputs from the current tags and schedule. No solve."""
 
@@ -755,6 +785,7 @@ class HeatingRuntime(
         ):
             dt = self._advance_estimate_clock(stamp)
             return await self.run_control_cycle(estimate_dt=dt, now=stamp)
+        self._seed_uncommanded_from_actuators()
         self._stage_planner_inputs()
         self._update_estimate(stamp, use_staged_inputs=True)
         self._record_control_log_tick(stamp)

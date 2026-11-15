@@ -397,10 +397,7 @@ def restore_estimated_parameters(
 
     sources = active.get("sources") or snapshot.get("sources") or {}
     if isinstance(sources, Mapping):
-        apply_heater_scales(heat_sources, None, {
-            name: params.get("power_scale", 1.0) if isinstance(params, Mapping) else params
-            for name, params in sources.items()
-        })
+        apply_heater_scales(heat_sources, None, _scales_from_source_snapshot(sources))
 
     connections = active.get("connections") or snapshot.get("connections") or {}
     if isinstance(connections, Mapping):
@@ -408,6 +405,24 @@ def restore_estimated_parameters(
 
     _rebuild_model(model)
     return active
+
+
+def _scales_from_source_snapshot(sources: Mapping[str, Any]) -> Dict[str, float]:
+    """Read power scales. A source entry with no scale must not become 1."""
+
+    scales: Dict[str, float] = {}
+    for name, params in sources.items():
+        if isinstance(params, Mapping):
+            if "power_scale" not in params:
+                continue
+            raw = params.get("power_scale")
+        else:
+            raw = params
+        try:
+            scales[str(name)] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return scales
 
 
 def apply_heater_scales(
@@ -427,6 +442,13 @@ def apply_heater_scales(
         if name in heater_scales:
             source.power_scale = float(heater_scales[name])
             applied[name] = float(source.power_scale)
+    # One saved scale and one heat source is the same pump when the fitted
+    # name and the configured name differ. Leaving the scale at 1 makes the
+    # plan and the log show rated watts.
+    if not applied and len(list(heat_sources)) == 1 and len(heater_scales) == 1:
+        source = next(iter(heat_sources))
+        source.power_scale = float(next(iter(heater_scales.values())))
+        applied[str(getattr(source, "name", ""))] = float(source.power_scale)
     if not applied or options is None:
         return None
     existing = estimated_params_snapshot(options) or {}
