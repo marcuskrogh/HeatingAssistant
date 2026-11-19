@@ -141,5 +141,5 @@ def test_calver_and_cache_bust_for_ui_tokens() -> None:
     dashboard = (STATIC / "industrial-dashboard.js").read_text(encoding="utf-8")
     assert '__version__ = "2026.11.9"' in init
     assert "# 2026.09.10" in changelog
-    assert "industrial-dashboard.js?v=172" in index
-    assert "return '172'" in dashboard
+    assert "industrial-dashboard.js?v=173" in index
+    assert "return '173'" in dashboard

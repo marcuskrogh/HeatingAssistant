@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from heatingassistant.engine import const
 from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.schedule_control import (
     ControlTrajectory,
@@ -239,6 +240,8 @@ def build_app_forecast_payload(
         ):
             if key in meta:
                 room_block[key] = meta[key]
+        if room.get(const.CONF_ROOM_WATCH_ONLY) is True:
+            room_block["watch_only"] = True
         rooms_payload[slug] = room_block
 
     outdoor_data: list[dict[str, Any]] = [
