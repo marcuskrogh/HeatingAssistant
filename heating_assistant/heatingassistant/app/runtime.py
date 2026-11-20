@@ -181,6 +181,9 @@ class HeatingRuntime(
             self.state.get("room_temperatures") or {}
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
+        # Tags whose retained command has already been cleared while the room
+        # is watch-only. Not persisted: a restart clears once more.
+        self._watch_only_retained_cleared: set[str] = set()
         if apply_living_room_fit(self.options):
             save_config(self.data_dir, self.options)
         self.control_engine = ControlEngine(self.options)
@@ -567,9 +570,29 @@ class HeatingRuntime(
         Internal ``actuator_outputs`` stay as MPC fractions in ``[-1, 1]``.
         Domain-specific HA write payloads (climate mode/setpoint, number %,
         switch bool) are derived at publish time (SWD-280).
+
+        A room with ``watch_only`` true publishes nothing for its heat-source
+        tags: no heat, no temperature, and no off. That includes a room that
+        is also disabled, and the window-override path, which calls this
+        method. The first publish while the flag is true clears the retained
+        command with an empty payload. The bridge treats that payload as
+        invalid JSON and does not call a climate service, so a later
+        subscribe cannot re-apply the last command. Later publishes skip the
+        tag. The planner, model, and estimator are not consulted here.
         """
 
         for tag, value in sorted(self.actuator_outputs.items()):
+            if self._output_tag_is_watch_only(tag):
+                if tag not in self._watch_only_retained_cleared:
+                    await self.bus.publish(
+                        tag_out(self.instance_id, tag),
+                        "",
+                        qos=DEFAULT_QOS,
+                        retain=True,
+                    )
+                    self._watch_only_retained_cleared.add(tag)
+                continue
+            self._watch_only_retained_cleared.discard(tag)
             command = self._actuator_write_value(tag, float(value))
             await self.bus.publish(
                 tag_out(self.instance_id, tag),
@@ -2388,6 +2411,23 @@ class HeatingRuntime(
             if source.get("output_tag") == tag:
                 return source
         return None
+
+    def _output_tag_is_watch_only(self, tag: str) -> bool:
+        """True when this heat-source tag belongs to a watch-only room.
+
+        Only a real boolean ``True`` counts. A missing flag publishes as today.
+        """
+
+        source = self._source_cfg_for_output_tag(tag)
+        if source is None:
+            return False
+        room_name = source.get("room")
+        if not isinstance(room_name, str) or not room_name:
+            return False
+        for room in self._rooms():
+            if room.get("name") == room_name:
+                return room.get(const.CONF_ROOM_WATCH_ONLY) is True
+        return False
 
     def _is_heater_state_feedback_tag(self, tag: str) -> bool:
         for source in self._heat_sources():

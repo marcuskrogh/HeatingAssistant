@@ -90,6 +90,14 @@ function renderRoomEditor(container, connection, hass, idxParam) {
       + 'not here. New rooms start at a sensible default.');
     idCard.appendChild(paramGrid(
       textField(room, 'name', 'Room name', { placeholder: 'living_room', hint: 'Unique identifier. Changing it on an existing room re-creates its entities.' }),
+      selectField(room, 'watch_only', 'Watch only', [
+        { value: 'false', label: 'No — send commands' },
+        { value: 'true', label: 'Yes — plan only, send nothing' },
+      ], {
+        def: 'false',
+        hint: 'The room stays in the model, plan, log, and export. No heat, off, or temperature command is published, including when a window opens or closes. A disabled watch-only room is not sent off.',
+        onChange: (v) => { room.watch_only = v === 'true'; },
+      }),
     ));
     body.appendChild(idCard);
 
@@ -330,6 +338,8 @@ function cleanRoom(room) {
     out.window_sensors = out.window_sensors.map((s) => String(s).trim()).filter(Boolean);
     if (out.window_sensors.length === 0) delete out.window_sensors;
   }
+  if (out.watch_only === true || out.watch_only === 'true') out.watch_only = true;
+  else if ('watch_only' in out) out.watch_only = false;
   return out;
 }
 

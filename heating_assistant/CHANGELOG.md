@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.10
+
+- A room can be set to watch-only. It stays in the plan, log, and export, and no heat, off, or temperature command is published for it (SWD-622).
+
 # 2026.11.9
 
 - The price day latch now receives Energi Data Service tariffs from the Home Assistant bridge. A load from that source with missing or empty tariffs is ignored. Until the first valid load, the planner runs without an electricity price. A Nord Pool series still passes through.

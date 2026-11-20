@@ -36,6 +36,7 @@ CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
 CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
 CONF_WINDOW_SENSORS = "window_sensors"  # list of HA binary_sensor entity_ids for open-window override (Phase 3 W1)
+CONF_ROOM_WATCH_ONLY = "watch_only"  # plan, log, and export the room, but publish no heat-source commands
 
 # Comfort schedule (time-of-day setpoint / setback) keys
 CONF_SCHEDULE = "schedule"                       # list of schedule periods on a room
