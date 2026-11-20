@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.13
+
+- A near-zero climate-heater fraction now uses the same idle command as no heat, so the panel is not told to hold its own reading (SWD-628).
+
 # 2026.11.12
 
 - A non-heat-pump climate heater is commanded as a pure offset from its own sensor. A positive fraction is no longer floored at the room setpoint (SWD-627).
