@@ -1,8 +1,9 @@
 """Pure-offset climate commands for non-heat-pump heaters.
 
-Marcus, 20 Nov 2026: the electric-heater climate command is always a pure
-offset from the panel sensor. There is no setpoint floor. A zero fraction
-stays on the idle branch (sensor − 1°C − overshoot).
+Marcus, 20 Nov 2026: a fraction at or above 0.1 is a pure offset from the
+panel sensor, with no setpoint floor. A smaller fraction, including zero,
+uses the idle branch (sensor − 1°C − overshoot) because a sub-degree offset
+rounds to the panel reading and that equality heated the Office panel (SWD-628).
 
 These calls go through ``climate_write_payload``, the function
 ``_climate_write_value`` uses, with the real heater classes.
@@ -66,10 +67,11 @@ def test_electric_positive_fraction_is_a_pure_offset() -> None:
     heater = _electric()
     # room 22, setpoint 23, internal 22. The old floor published 23°C for
     # every fraction up to 0.2.
+    # Fractions below 0.1 idle (SWD-628). At and above 0.1 the offset is unchanged.
     expected = {
         0.0: 21.0,
-        3e-6: 22.0 + 3e-6 * heater.max_temp_offset,
-        5.4e-4: 22.0 + 5.4e-4 * heater.max_temp_offset,
+        3e-6: 21.0,
+        5.4e-4: 21.0,
         0.1: 22.5,
         0.2: 23.0,
         0.5: 24.5,
@@ -81,28 +83,22 @@ def test_electric_positive_fraction_is_a_pure_offset() -> None:
         )
         assert command["hvac_mode"] == "heat"
         assert command["temperature"] == pytest.approx(temperature)
-        assert command["temperature"] == pytest.approx(
-            heater.target_temperature(fraction, 22.0)
-            if fraction > 0.0
-            else 21.0
-        )
+        if fraction >= 0.1:
+            assert command["temperature"] == pytest.approx(
+                heater.target_temperature(fraction, 22.0)
+            )
 
 
-def test_near_zero_offset_rounds_to_the_panel_reading() -> None:
-    """3e-6 publishes internal + 1.5e-5°C, which is the internal reading.
+def test_near_zero_fraction_idles_instead_of_rounding_to_the_reading() -> None:
+    """3e-6 used to publish internal + 1.5e-5°C, which rounds to the reading.
 
-    The Office panel's step is 1°C. Tuya ``IntegerTypeInformation.scale_value_back``
-    is ``round(value * 10**scale)`` and does not apply a separate step snap.
-    Scale 0 (whole degrees) and scale 1 (tenths, step 10 → 1°C) both land on
-    22, the same integer as the sensor. The panel does not heat. No epsilon.
+    The Office panel heated at that equality (SWD-628), so the command is
+    now the idle target, one degree below the sensor.
     """
 
     heater = _electric()
     command = _payload(heater, 3e-6, room=22.0, setpoint=23.0, internal=22.0)
-    target = command["temperature"]
-    assert target == pytest.approx(22.0 + 1.5e-5)
-    assert round(target) == 22
-    assert round(target * 10) == 220
+    assert command == {"hvac_mode": "heat", "temperature": 21.0}
 
 
 def test_zero_fraction_stays_idle_above_and_below_setpoint() -> None:
@@ -170,7 +166,8 @@ def test_shared_climate_sources_follow_their_own_target_map() -> None:
     gshp = GroundSourceHeatPump("gshp", "Office", max_power=8000)
     tiny = _payload(gshp, 3e-6, room=22.0, setpoint=23.0, internal=internal)
     partial = _payload(gshp, 0.1, room=22.0, setpoint=23.0, internal=internal)
-    assert tiny["temperature"] == pytest.approx(22.0)
+    # Below the shared u threshold this is the idle command, not the sensor.
+    assert tiny["temperature"] == pytest.approx(21.0)
     assert partial["temperature"] == pytest.approx(
         gshp.target_temperature(0.1, internal)
     )
@@ -202,7 +199,7 @@ def test_app_package_copy_uses_the_pure_offset() -> None:
         room_temp=22.0,
         room_setpoint=23.0,
     )
-    assert command["temperature"] == pytest.approx(22.0 + 1.5e-5)
+    assert command["temperature"] == pytest.approx(21.0)
     hp = _heat_pump()
     hp_command = app.climate_write_payload(
         hp,
