@@ -52,6 +52,16 @@ def climate_hp_command(
     return {"hvac_mode": hvac_mode, "temperature": float(target)}
 
 
+# Default ``max_temp_offset`` is 5 °C, so this fraction is a 0.5 °C offset
+# (0.5 / 5). A whole-degree panel rounds anything under half a degree to its
+# own reading (Tuya ``scale_value_back`` is ``round(value * 10**scale)``).
+# The Office panel heated while the target equalled that reading, so a
+# smaller fraction uses the u = 0 idle command. u at or above this stays a
+# pure offset. The entity step is not consulted: this function does not
+# receive it, and the Office panel's step is 1 °C.
+CLIMATE_THERMOSTAT_IDLE_BELOW_U = 0.1
+
+
 def climate_thermostat_command(
     source: HeatSource,
     fraction: float,
@@ -61,17 +71,14 @@ def climate_thermostat_command(
 ) -> dict[str, Any]:
     """Return ``{hvac_mode, temperature}`` for a non-HP climate heater.
 
-    A positive fraction is a pure offset from the heater's own sensor:
-    ``source.target_temperature(fraction, internal_temp)``. There is no
-    setpoint floor and no room-versus-setpoint gate. If that target is
-    below the sensor, the panel's own thermostat does not heat.
-
-    A fraction of zero stays on the idle branch. The target is the sensor
-    minus ``DEFAULT_IDLE_OFFSET``, and a room above its setpoint adds that
-    overshoot, so the command remains below the sensor.
+    A fraction at or above ``CLIMATE_THERMOSTAT_IDLE_BELOW_U`` is a pure
+    offset from the heater's own sensor, with no setpoint floor. A smaller
+    positive fraction returns exactly the u = 0 idle command: the sensor
+    minus ``DEFAULT_IDLE_OFFSET``, plus overshoot when the room is above
+    its setpoint. That target is below the sensor, so the panel does not heat.
     """
 
-    if fraction > 0.0:
+    if fraction >= CLIMATE_THERMOSTAT_IDLE_BELOW_U:
         target = source.target_temperature(fraction, internal_temp)
         return {"hvac_mode": "heat", "temperature": float(target)}
     idle_offset = float(const.DEFAULT_IDLE_OFFSET)
