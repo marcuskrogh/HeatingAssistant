@@ -5,7 +5,8 @@ SWD-598's stand-in solver never reached ``solve_nmpc`` and missed a tick that
 stopped passing outdoor temperature and forecasts, so these tests call the
 real method and check those inputs on every solve.
 
-No production behaviour changes.
+The electric climate target is a pure sensor offset when the fraction is
+positive (Marcus, 20 Nov 2026). A zero fraction stays on the idle branch.
 """
 
 from __future__ import annotations
@@ -172,8 +173,9 @@ async def _prime(
 ) -> None:
     """Living Room is cold so a plan beats zero heat.
 
-    Office defaults to above its setpoint, so the electric climate path idles:
-    target = internal − 1°C − overshoot, with no step and no clamp.
+    Office defaults to above its setpoint. A zero fraction still idles
+    (internal − 1°C − overshoot). A positive fraction is a pure offset
+    from the panel sensor, with no setpoint floor (Marcus, 20 Nov 2026).
     """
 
     await _tag(runtime, "living_temp", 16.0, now)
@@ -280,8 +282,11 @@ def test_tick_sends_unrounded_climate_targets_on_every_accepted_plan(
     assert office_source is not None and not isinstance(office_source, HeatPump)
     assert isinstance(living_source, HeatPump)
 
-    # Office air is above the room setpoint, so the electric climate path
-    # idles: target = internal − 1°C − overshoot, with no step and no clamp.
+    # Marcus, 20 Nov 2026: a positive fraction is a pure offset from the
+    # panel sensor, with no setpoint floor. This Office starts above its
+    # setpoint, so a zero fraction is still the idle target
+    # internal − 1°C − overshoot = 3.2°C. A positive fraction is
+    # 6.2 + fraction × max_temp_offset, not max(setpoint, that offset).
     expected_office = climate_thermostat_command(
         office_source,
         office_fraction,
@@ -297,7 +302,12 @@ def test_tick_sends_unrounded_climate_targets_on_every_accepted_plan(
         supported_modes=["off", "heat", "cool", "heat_cool"],
     )
     assert expected_office["hvac_mode"] == "heat"
-    assert expected_office["temperature"] == pytest.approx(3.2)
+    if office_fraction > 0.0:
+        assert expected_office["temperature"] == pytest.approx(
+            6.2 + office_fraction * float(office_source.max_temp_offset)
+        )
+    else:
+        assert expected_office["temperature"] == pytest.approx(3.2)
     assert expected_living["hvac_mode"] == "heat_cool"
 
     office_cmds = _payloads(published, "office_heat")
@@ -309,11 +319,12 @@ def test_tick_sends_unrounded_climate_targets_on_every_accepted_plan(
     assert living_cmds[1] == expected_living
     assert living_cmds[0]["hvac_mode"] == "heat_cool"
     assert "temperature" in living_cmds[0]
-    assert abs(office_cmds[0]["temperature"] - round(office_cmds[0]["temperature"])) > 0.05
-    assert office_cmds[0]["temperature"] < 5
     token = _temperature_token(published, "office_heat")
     assert "." in token
-    assert float(token) == pytest.approx(3.2)
+    assert float(token) == pytest.approx(expected_office["temperature"])
+    if office_fraction <= 0.0:
+        assert abs(office_cmds[0]["temperature"] - round(office_cmds[0]["temperature"])) > 0.05
+        assert office_cmds[0]["temperature"] < 5
 
     # Step, min, and max are present on the tag the App stored, and unused.
     office_attrs = runtime.tag_attributes["office_heat_state"]

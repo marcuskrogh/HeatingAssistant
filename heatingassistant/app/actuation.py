@@ -59,15 +59,22 @@ def climate_thermostat_command(
     room_temp: float,
     room_setpoint: float,
 ) -> dict[str, Any]:
-    """Return ``{hvac_mode, temperature}`` for a non-HP climate heater."""
+    """Return ``{hvac_mode, temperature}`` for a non-HP climate heater.
 
-    idle_offset = float(const.DEFAULT_IDLE_OFFSET)
-    if fraction > 0.0 and room_temp <= room_setpoint:
-        target = max(
-            room_setpoint,
-            source.target_temperature(fraction, internal_temp),
-        )
+    A positive fraction is a pure offset from the heater's own sensor:
+    ``source.target_temperature(fraction, internal_temp)``. There is no
+    setpoint floor and no room-versus-setpoint gate. If that target is
+    below the sensor, the panel's own thermostat does not heat.
+
+    A fraction of zero stays on the idle branch. The target is the sensor
+    minus ``DEFAULT_IDLE_OFFSET``, and a room above its setpoint adds that
+    overshoot, so the command remains below the sensor.
+    """
+
+    if fraction > 0.0:
+        target = source.target_temperature(fraction, internal_temp)
         return {"hvac_mode": "heat", "temperature": float(target)}
+    idle_offset = float(const.DEFAULT_IDLE_OFFSET)
     overshoot = max(0.0, room_temp - room_setpoint)
     target = internal_temp - (idle_offset + overshoot)
     return {"hvac_mode": "heat", "temperature": float(target)}
