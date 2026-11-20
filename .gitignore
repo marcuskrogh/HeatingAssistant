@@ -33,6 +33,8 @@ env/
 docs/*
 !docs/agents/
 !docs/agents/**
+!docs/perf/
+!docs/perf/**
 
 # Claude Code internal
 .claude/
