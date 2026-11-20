@@ -268,6 +268,12 @@ class MeanOcp:
         self.best_u: np.ndarray | None = None
         self.best_j = float("inf")
         self._M = np.eye(sde.nx)
+        # Last forward roll. SLSQP evaluates J(u) and then ∇J(u) at the same
+        # decision. The gradient reuses those states, so the plant is not
+        # integrated twice. A miss falls back to a full roll.
+        self._forward_key: bytes | None = None
+        self._forward_states: list[np.ndarray] | None = None
+        self._forward_cost: float = float("nan")
 
     def _refresh_M(self, x: np.ndarray, u: np.ndarray, d: np.ndarray) -> None:
         a0 = self.sde.dfdx(x, u, d, self.p, 0.0)
@@ -284,12 +290,24 @@ class MeanOcp:
             self.best_j = float(cost)
             self.best_u = np.asarray(U, dtype=float).reshape(self.n, self.nu).copy()
 
+    @staticmethod
+    def _decision_key(U: np.ndarray) -> bytes:
+        return np.ascontiguousarray(U, dtype=float).tobytes()
+
     def _roll_maybe_jac(
         self, U: np.ndarray, *, with_jac: bool
     ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray | None]:
         self._maybe_timeout()
         self.nfev += 1
         U = np.asarray(U, dtype=float).reshape(self.n, self.nu)
+        key = self._decision_key(U)
+        replay = None
+        if (
+            with_jac
+            and self._forward_states is not None
+            and self._forward_key == key
+        ):
+            replay = iter(self._forward_states)
         x = self.x0.copy()
         air_path = []
         cost = 0.0
@@ -297,13 +315,20 @@ class MeanOcp:
         n_dec = self.n * self.nu
         sx = np.zeros((self.sde.nx, n_dec)) if with_jac else None
         g = np.zeros(n_dec) if with_jac else None
+        recorded: list[np.ndarray] = []
         for n in range(self.n):
             u_n = U[n]
             col = n * self.nu
             for m in range(self.m):
                 k = n * self.m + m
                 d_k = self._d_fast[k]
-                x = step_hold(self.sde, x, u_n, d_k, self.p, self.dt_s, self.n_int)
+                if replay is not None:
+                    x = next(replay)
+                else:
+                    x = step_hold(
+                        self.sde, x, u_n, d_k, self.p, self.dt_s, self.n_int
+                    )
+                    recorded.append(np.array(x, dtype=float, copy=True))
                 ta = x[: self.n_rooms]
                 air_path.append(ta.copy())
                 lo = self.t_min[k]
@@ -349,9 +374,18 @@ class MeanOcp:
                     )
             u_prev = u_n
         self._record_best(U, cost)
+        if replay is None:
+            self._forward_key = key
+            self._forward_states = recorded
+            self._forward_cost = float(cost)
         return cost, U, np.asarray(air_path), g
 
     def cost(self, u_flat: np.ndarray) -> float:
+        U = np.asarray(u_flat, dtype=float).reshape(self.n, self.nu)
+        if self._forward_states is not None and self._forward_key == self._decision_key(U):
+            self._maybe_timeout()
+            self.nfev += 1
+            return float(self._forward_cost)
         j, _, _air = self._roll_maybe_jac(u_flat, with_jac=False)[:3]
         return j
 
