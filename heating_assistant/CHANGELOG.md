@@ -4,6 +4,11 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.11
+
+- The NMPC solver reuses the forward plant roll between the cost and the gradient (SWD-624). Finished plans are unchanged, and solves are about 1.5–2× faster.
+- The two-room solve profile is in docs/perf/2room-solve-profile.md.
+
 # 2026.11.10
 
 - A room can be set to watch-only. It stays in the plan, log, and export, and no heat, off, or temperature command is published for it (SWD-622).
