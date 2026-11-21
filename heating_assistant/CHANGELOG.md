@@ -4,6 +4,10 @@ User-facing notes for the HeatingAssistant Home Assistant App. Supervisor
 shows the section whose heading matches the version being installed. Headings
 must be the exact calendar version on its own line.
 
+# 2026.11.14
+
+- Reconstruction on the Parameter Estimation page now replays a loaded dataset over its saved window instead of only the last 6 hours (PR #725).
+
 # 2026.11.13
 
 - A near-zero climate-heater fraction now uses the same idle command as no heat, so the panel is not told to hold its own reading (SWD-628).
