@@ -688,6 +688,15 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
     dataset_id = values.get("dataset_id")
     if dataset_id:
         history = await resolve_history(runtime, dataset_id=str(dataset_id))
+        # The loaded dataset is the window. Leaving window_spec unset makes
+        # run_sysid_ekf keep only the trailing default horizon (6 h).
+        if window_start is not None and window_end is not None:
+            window_spec = (float(window_start), float(window_end))
+        elif history:
+            window_spec = (
+                float(history[0]["timestamp"]),
+                float(history[-1]["timestamp"]),
+            )
     elif window_start is not None and window_end is not None:
         window_spec = (float(window_start), float(window_end))
         history = await resolve_history(

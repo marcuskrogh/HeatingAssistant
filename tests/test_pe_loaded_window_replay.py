@@ -130,6 +130,31 @@ async def test_loaded_dataset_reconstruction_covers_saved_window(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_loaded_dataset_without_bounds_uses_record_span(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    records = _seed(runtime)
+    created = await sysid_services.handle_create_dataset(
+        runtime,
+        {
+            "name": "4 days",
+            "room_name": "Office",
+            "window_start": records[0]["timestamp"],
+            "window_end": records[-1]["timestamp"],
+        },
+    )
+    payload = _loaded_payload(created["dataset_id"], records)
+    payload.pop("window_start")
+    payload.pop("window_end")
+
+    result = await sysid_services.handle_run_sysid_simulation(runtime, payload)
+    assert "error" not in result
+    simulation = result["per_room"]["Office"]["simulation"]
+    assert simulation[0]["time"] == pytest.approx(records[0]["timestamp"])
+    assert simulation[-1]["time"] == pytest.approx(records[-1]["timestamp"])
+    assert len(simulation) == len(records)
+
+
+@pytest.mark.asyncio
 async def test_open_loop_six_hour_horizon_is_last_24_records(tmp_path: Path) -> None:
     """The only writer of open_loop_results is the open-loop service.
 
